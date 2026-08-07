@@ -122,50 +122,13 @@ export default function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateUser = useCallback((user: User) => {
-    setState(s => {
-      const oldUser = s.users.find(u => u.id === user.id);
-      const newState = { ...s, users: s.users.map(u => u.id === user.id ? user : u) };
-      if (oldUser) {
-        const added = user.assignedShops.filter(id => !oldUser.assignedShops.includes(id));
-        const removed = oldUser.assignedShops.filter(id => !user.assignedShops.includes(id));
-        if (added.length > 0 || removed.length > 0) {
-          newState.shops = newState.shops.map(shop => {
-            if (added.includes(shop.id) && !shop.assignedTo.includes(user.id)) {
-              return { ...shop, assignedTo: [...shop.assignedTo, user.id] };
-            }
-            if (removed.includes(shop.id)) {
-              return { ...shop, assignedTo: shop.assignedTo.filter(uid => uid !== user.id) };
-            }
-            return shop;
-          });
-        }
-      }
-      return newState;
-    });
+    setState(s => ({ ...s, users: s.users.map(u => u.id === user.id ? user : u) }));
     if (IS_SUPABASE) {
       dbUpdateUser(user)
-        .then(() => {
-          const oldUser = state.users.find(u => u.id === user.id);
-          if (!oldUser) return;
-          const added = user.assignedShops.filter(id => !oldUser.assignedShops.includes(id));
-          const removed = oldUser.assignedShops.filter(id => !user.assignedShops.includes(id));
-          const updates = [
-            ...added.map(shopId => {
-              const shop = state.shops.find(s => s.id === shopId);
-              if (!shop) return null;
-              return dbUpdateShop({ ...shop, assignedTo: [...shop.assignedTo, user.id] });
-            }),
-            ...removed.map(shopId => {
-              const shop = state.shops.find(s => s.id === shopId);
-              if (!shop) return null;
-              return dbUpdateShop({ ...shop, assignedTo: shop.assignedTo.filter(uid => uid !== user.id) });
-            }),
-          ].filter(Boolean);
-          return Promise.all(updates);
-        })
+        .then(() => { alert('Đã lưu thành công! Shops: ' + user.assignedShops.join(', ')); })
         .catch(err => { console.error(err); alert('Lỗi cập nhật user: ' + err.message); });
     }
-  }, [state.users, state.shops]);
+  }, []);
 
   const getUserShops = useCallback((userId: string): Shop[] => {
     const user = state.users.find(u => u.id === userId);
