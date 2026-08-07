@@ -473,20 +473,8 @@ function FileUploadForm() {
         setMktDataMap(dailyCosts);
         if (rawData && detectedPlatform && selectedShopId) {
           const aggs = detectedPlatform === 'shopee' ? aggregateShopee(rawData) : aggregateTikTok(rawData);
-          const shop = shops.find(function(s) { return s.id === selectedShopId; });
-          if (shop) {
-            const rows = aggs.map(function(agg) {
-              const target = calcDailyTarget(agg.date, selectedShopId, shop);
-              const adCost = dailyCosts[agg.date] || 0;
-              return {
-                shopName: shop.name, shopId: selectedShopId, date: agg.date,
-                targetRevenue: target, actualRevenue: agg.completedRevenue, adSpend: adCost,
-                totalOrders: agg.totalOrders, cancelledOrders: agg.cancelledOrders, returnedOrders: agg.returnedOrders,
-                note: '', error: agg.completedRevenue <= 0 ? 'Không có doanh thu' : undefined,
-              };
-            });
-            setParsedRows(rows);
-          }
+          const rows = buildParsedRows(aggs, selectedShopId, dailyCosts);
+          setParsedRows(rows);
         }
       } catch (err) {
         setMktParseError('Lỗi đọc file: ' + String(err));
@@ -516,20 +504,8 @@ function FileUploadForm() {
     if (mktFileInputRef.current) mktFileInputRef.current.value = '';
     if (rawData && detectedPlatform && selectedShopId) {
       const aggs = detectedPlatform === 'shopee' ? aggregateShopee(rawData) : aggregateTikTok(rawData);
-      const shop = shops.find(function(s) { return s.id === selectedShopId; });
-      if (shop) {
-        const rows = aggs.map(function(agg) {
-          const target = calcDailyTarget(agg.date, selectedShopId, shop);
-          const adCost = newMap[agg.date] || 0;
-          return {
-            shopName: shop.name, shopId: selectedShopId, date: agg.date,
-            targetRevenue: target, actualRevenue: agg.completedRevenue, adSpend: adCost,
-            totalOrders: agg.totalOrders, cancelledOrders: agg.cancelledOrders, returnedOrders: agg.returnedOrders,
-            note: '', error: agg.completedRevenue <= 0 ? 'Không có doanh thu' : undefined,
-          };
-        });
-        setParsedRows(rows);
-      }
+      const rows = buildParsedRows(aggs, selectedShopId, newMap);
+      setParsedRows(rows);
     }
   }
 
