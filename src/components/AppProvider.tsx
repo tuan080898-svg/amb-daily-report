@@ -33,9 +33,9 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           ...s,
           users: users.length > 0 ? users : s.users,
           shops: shops.length > 0 ? shops : s.shops,
-          reports: reports.length > 0 ? reports : s.reports,
-          monthlyKPIs: kpis.length > 0 ? kpis : s.monthlyKPIs,
-          monthlyPlans: plans.length > 0 ? plans : s.monthlyPlans,
+          reports,
+          monthlyKPIs: kpis,
+          monthlyPlans: plans,
           config,
         }));
       } catch (err) {
