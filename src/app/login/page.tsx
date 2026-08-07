@@ -66,23 +66,6 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-6 p-3 bg-slate-800 rounded-lg">
-            <p className="text-xs text-gray-500 font-medium mb-2">Tài khoản demo — nhấp để điền:</p>
-            <button
-              type="button"
-              onClick={() => { setEmail('admin@amb.com.vn'); setPassword('admin123'); }}
-              className="w-full text-left text-xs text-gray-400 hover:bg-slate-700 hover:text-blue-400 px-2 py-1.5 rounded transition-colors cursor-pointer"
-            >
-              Admin: admin@amb.com.vn / admin123
-            </button>
-            <button
-              type="button"
-              onClick={() => { setEmail('nv1@amb.com.vn'); setPassword('123456'); }}
-              className="w-full text-left text-xs text-gray-400 hover:bg-slate-700 hover:text-blue-400 px-2 py-1.5 rounded transition-colors cursor-pointer"
-            >
-              NV: nv1@amb.com.vn / 123456
-            </button>
-          </div>
         </div>
       </div>
     </div>
