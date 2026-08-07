@@ -2,7 +2,9 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { useAppState } from '@/lib/store';
+import { toDateString } from '@/lib/utils';
 import { aggregateProducts, getAllSkuCodes } from '@/lib/sku';
+import { Channel } from '@/lib/types';
 
 interface SkuImport {
   shopId: string;
@@ -13,12 +15,25 @@ interface SkuImport {
   importedAt: string;
 }
 
+function getMonthStart(d: Date): string {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01';
+}
+
+function getMonthEnd(d: Date): string {
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  const y = last.getFullYear();
+  const m = String(last.getMonth() + 1).padStart(2, '0');
+  const day = String(last.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + day;
+}
+
 export default function SkuReportPage() {
   const { shops } = useAppState();
   const [imports, setImports] = useState<SkuImport[]>([]);
   const [filterShop, setFilterShop] = useState('all');
-  const [filterDateFrom, setFilterDateFrom] = useState('');
-  const [filterDateTo, setFilterDateTo] = useState('');
+  const [filterChannel, setFilterChannel] = useState<Channel | 'all'>('all');
+  const [dateFrom, setDateFrom] = useState(getMonthStart(new Date()));
+  const [dateTo, setDateTo] = useState(getMonthEnd(new Date()));
 
   useEffect(function() {
     try {
@@ -26,23 +41,36 @@ export default function SkuReportPage() {
       if (raw) {
         const data = JSON.parse(raw) as SkuImport[];
         setImports(data);
-        if (data.length > 0) {
-          const allDates = data.flatMap(function(d) { return [d.dateFrom, d.dateTo]; }).sort();
-          setFilterDateFrom(allDates[0]);
-          setFilterDateTo(allDates[allDates.length - 1]);
-        }
       }
     } catch (_) {}
   }, []);
 
+  const shopOptions = useMemo(function() {
+    const seen = new Set<string>();
+    return imports
+      .filter(function(imp) {
+        if (seen.has(imp.shopId)) return false;
+        seen.add(imp.shopId);
+        return true;
+      })
+      .map(function(imp) {
+        const shop = shops.find(function(s) { return s.id === imp.shopId; });
+        return { id: imp.shopId, name: shop?.name || imp.shopName, channel: shop?.channel || '' };
+      });
+  }, [imports, shops]);
+
   const filteredImports = useMemo(function() {
     return imports.filter(function(imp) {
       if (filterShop !== 'all' && imp.shopId !== filterShop) return false;
-      if (filterDateFrom && imp.dateTo < filterDateFrom) return false;
-      if (filterDateTo && imp.dateFrom > filterDateTo) return false;
+      if (filterChannel !== 'all') {
+        const shop = shops.find(function(s) { return s.id === imp.shopId; });
+        if (shop && shop.channel !== filterChannel) return false;
+      }
+      if (dateFrom && imp.dateTo < dateFrom) return false;
+      if (dateTo && imp.dateFrom > dateTo) return false;
       return true;
     });
-  }, [imports, filterShop, filterDateFrom, filterDateTo]);
+  }, [imports, filterShop, filterChannel, dateFrom, dateTo, shops]);
 
   const allSkuCodes = useMemo(function() {
     return filteredImports.flatMap(function(f) { return f.skuCodes; });
@@ -62,19 +90,25 @@ export default function SkuReportPage() {
     return allSkuCodes.filter(function(c) { return !knownSkus.has(c); }).length;
   }, [allSkuCodes]);
 
-  const shopOptions = useMemo(function() {
-    const seen = new Set<string>();
-    return imports
-      .filter(function(imp) {
-        if (seen.has(imp.shopId)) return false;
-        seen.add(imp.shopId);
-        return true;
-      })
-      .map(function(imp) {
-        const shop = shops.find(function(s) { return s.id === imp.shopId; });
-        return { id: imp.shopId, name: shop?.name || imp.shopName };
-      });
-  }, [imports, shops]);
+  function setQuickRange(type: 'today' | 'thisMonth' | 'lastMonth' | 'last3Months') {
+    const now = new Date();
+    if (type === 'today') {
+      const d = toDateString(now);
+      setDateFrom(d);
+      setDateTo(d);
+    } else if (type === 'thisMonth') {
+      setDateFrom(getMonthStart(now));
+      setDateTo(getMonthEnd(now));
+    } else if (type === 'lastMonth') {
+      const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      setDateFrom(getMonthStart(prev));
+      setDateTo(getMonthEnd(prev));
+    } else if (type === 'last3Months') {
+      const prev3 = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      setDateFrom(getMonthStart(prev3));
+      setDateTo(getMonthEnd(now));
+    }
+  }
 
   function handleDeleteImport(idx: number) {
     const updated = imports.filter(function(_, i) { return i !== idx; });
@@ -82,54 +116,76 @@ export default function SkuReportPage() {
     try { localStorage.setItem('amb_sku_imports', JSON.stringify(updated)); } catch (_) {}
   }
 
+  const dateLabel = dateFrom === dateTo
+    ? 'ngày ' + dateFrom
+    : dateFrom.slice(0, 7) === dateTo.slice(0, 7)
+      ? 'tháng ' + dateFrom.slice(0, 7)
+      : 'từ ' + dateFrom + ' đến ' + dateTo;
+
   return (
     <div className="p-6 max-w-5xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-100">Sản phẩm bán chạy</h1>
-        <p className="text-sm text-gray-500 mt-1">Dữ liệu SKU tổng hợp từ các lần import đơn hàng</p>
-      </div>
-
-      <div className="space-y-6">
-        {/* Filters */}
+      {/* Header + Filters — same style as Dashboard */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-100">Sản phẩm bán chạy</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {productSummary.length > 0
+              ? totalQty.toLocaleString() + ' sản phẩm bán ra ' + dateLabel
+              : 'Dữ liệu SKU tổng hợp từ các lần import đơn hàng'}
+          </p>
+        </div>
         {imports.length > 0 && (
-          <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-5">
-            <h2 className="font-semibold text-gray-200 text-sm mb-4">Bộ lọc</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Shop</label>
-                <select
-                  value={filterShop}
-                  onChange={function(e) { setFilterShop(e.target.value); }}
-                  className="w-full px-3 py-2.5 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="all">Tất cả shop</option>
-                  {shopOptions.map(function(s) {
-                    return <option key={s.id} value={s.id}>{s.name}</option>;
-                  })}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Từ ngày</label>
-                <input
-                  type="date"
-                  value={filterDateFrom}
-                  onChange={function(e) { setFilterDateFrom(e.target.value); }}
-                  className="w-full px-3 py-2.5 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">Đến ngày</label>
-                <input
-                  type="date"
-                  value={filterDateTo}
-                  onChange={function(e) { setFilterDateTo(e.target.value); }}
-                  className="w-full px-3 py-2.5 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <select
+              value={filterShop}
+              onChange={function(e) { setFilterShop(e.target.value); }}
+              className="px-3 py-2 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-200"
+            >
+              <option value="all">Tất cả shop</option>
+              {shopOptions.map(function(s) {
+                return <option key={s.id} value={s.id}>{s.name}</option>;
+              })}
+            </select>
+            <select
+              value={filterChannel}
+              onChange={function(e) { setFilterChannel(e.target.value as Channel | 'all'); }}
+              className="px-3 py-2 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-200"
+            >
+              <option value="all">Tất cả kênh</option>
+              <option value="Shopee">Shopee</option>
+              <option value="TikTok">TikTok</option>
+            </select>
+            <div className="flex items-center gap-1.5 border border-slate-600 rounded-lg px-3 py-2 bg-slate-800">
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={function(e) { setDateFrom(e.target.value); if (e.target.value > dateTo) setDateTo(e.target.value); }}
+                className="text-sm outline-none bg-transparent text-gray-200"
+              />
+              <span className="text-gray-500 text-xs">&rarr;</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={function(e) { setDateTo(e.target.value); if (e.target.value < dateFrom) setDateFrom(e.target.value); }}
+                className="text-sm outline-none bg-transparent text-gray-200"
+              />
             </div>
           </div>
         )}
+      </div>
 
+      {/* Quick date buttons */}
+      {imports.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 mb-6">
+          <span className="text-xs text-gray-500">Nhanh:</span>
+          <button onClick={function() { setQuickRange('today'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Hôm nay</button>
+          <button onClick={function() { setQuickRange('thisMonth'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Tháng này</button>
+          <button onClick={function() { setQuickRange('lastMonth'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Tháng trước</button>
+          <button onClick={function() { setQuickRange('last3Months'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">3 tháng</button>
+        </div>
+      )}
+
+      <div className="space-y-6">
         {/* Summary stats */}
         {filteredImports.length > 0 && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -236,7 +292,7 @@ export default function SkuReportPage() {
                       )}>{shop?.channel || 'Shop'}</span>
                       <div>
                         <p className="text-sm text-gray-200">{shop?.name || imp.shopName}</p>
-                        <p className="text-xs text-gray-500">{imp.dateFrom} → {imp.dateTo} | {imp.skuCodes.length} SKU</p>
+                        <p className="text-xs text-gray-500">{imp.dateFrom} &rarr; {imp.dateTo} | {imp.skuCodes.length} SKU</p>
                       </div>
                     </div>
                     <button
@@ -261,6 +317,14 @@ export default function SkuReportPage() {
             </div>
             <p className="text-gray-400 font-medium">Chưa có dữ liệu SKU</p>
             <p className="text-sm text-gray-500 mt-1">Dữ liệu sẽ tự động xuất hiện khi import đơn hàng ở trang Nhập báo cáo</p>
+          </div>
+        )}
+
+        {/* No results for filter */}
+        {imports.length > 0 && filteredImports.length === 0 && (
+          <div className="text-center py-8">
+            <p className="text-gray-400">Không có dữ liệu SKU trong khoảng thời gian này</p>
+            <p className="text-sm text-gray-500 mt-1">Thử chọn khoảng ngày khác hoặc bỏ lọc shop</p>
           </div>
         )}
       </div>
