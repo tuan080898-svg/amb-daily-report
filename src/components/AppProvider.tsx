@@ -20,7 +20,16 @@ export default function AppProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(IS_SUPABASE);
 
   useEffect(() => {
-    if (!IS_SUPABASE) return;
+    if (!IS_SUPABASE) {
+      try {
+        const savedId = localStorage.getItem('amb_user_id');
+        if (savedId) {
+          const user = state.users.find(u => u.id === savedId);
+          if (user) setState(s => ({ ...s, currentUser: user }));
+        }
+      } catch {}
+      return;
+    }
     let cancelled = false;
 
     async function loadAll() {
@@ -29,6 +38,14 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           dbGetUsers(), dbGetShops(), dbGetReports(), dbGetKPIs(), dbGetPlans(), dbGetConfig(),
         ]);
         if (cancelled) return;
+        let savedUser = null;
+        try {
+          const savedId = localStorage.getItem('amb_user_id');
+          if (savedId) {
+            const allUsers = users.length > 0 ? users : [];
+            savedUser = allUsers.find(u => u.id === savedId) || null;
+          }
+        } catch {}
         setState(s => ({
           ...s,
           users: users.length > 0 ? users : s.users,
@@ -37,6 +54,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           monthlyKPIs: kpis,
           monthlyPlans: plans,
           config,
+          currentUser: savedUser,
         }));
       } catch (err) {
         console.error('Failed to load from Supabase:', err);
@@ -64,16 +82,6 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     try { localStorage.removeItem('amb_user_id'); } catch {}
   }, []);
 
-  useEffect(() => {
-    if (loading) return;
-    try {
-      const savedId = localStorage.getItem('amb_user_id');
-      if (savedId && !state.currentUser) {
-        const user = state.users.find(u => u.id === savedId);
-        if (user) setState(s => ({ ...s, currentUser: user }));
-      }
-    } catch {}
-  }, [loading]);
 
   const addReport = useCallback((report: DailyReport) => {
     setState(s => ({ ...s, reports: [...s.reports, report] }));
