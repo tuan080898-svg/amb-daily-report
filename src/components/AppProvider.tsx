@@ -133,7 +133,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     const user = state.users.find(u => u.id === userId);
     if (!user) return [];
     if (user.role === 'admin') return state.shops;
-    return state.shops.filter(s => user.assignedShops.includes(s.id) || s.assignedTo.includes(userId));
+    return state.shops.filter(s => s.assignedTo.includes(userId));
   }, [state.users, state.shops]);
 
   if (loading) {
