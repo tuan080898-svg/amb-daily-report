@@ -35,13 +35,16 @@ export async function dbAddUser(user: User): Promise<void> {
 }
 
 export async function dbUpdateUser(user: User): Promise<void> {
-  const { error } = await db().from('users').update({
+  const updateData: Record<string, unknown> = {
     email: user.email,
     name: user.name,
     role: user.role,
     assigned_shops: user.assignedShops,
-    password: user.password || undefined,
-  }).eq('id', user.id);
+  };
+  if (user.password) {
+    updateData.password = user.password;
+  }
+  const { error } = await db().from('users').update(updateData).eq('id', user.id);
   if (error) throw new Error('Cập nhật user thất bại: ' + error.message);
 }
 
