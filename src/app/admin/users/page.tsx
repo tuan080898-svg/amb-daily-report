@@ -159,19 +159,28 @@ function UserForm({ user, shops, onSave, onCancel, isNew }: {
         </div>
         {form.role === 'employee' && (
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">Shop phụ trách</label>
-            <select
-              multiple
-              value={form.assignedShops}
-              onChange={e => setForm(f => ({ ...f, assignedShops: Array.from(e.target.selectedOptions, o => o.value) }))}
-              className="w-full px-3 py-2.5 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              size={5}
-            >
+            <label className="block text-sm font-medium text-gray-300 mb-2">Shop phụ trách</label>
+            <div className="grid grid-cols-2 gap-2 p-3 bg-slate-800 border border-slate-600 rounded-lg max-h-[200px] overflow-y-auto">
               {shops.map(s => (
-                <option key={s.id} value={s.id}>{s.name} ({s.channel})</option>
+                <label key={s.id} className="flex items-center gap-2 text-sm text-gray-300 hover:text-gray-100 cursor-pointer py-1">
+                  <input
+                    type="checkbox"
+                    checked={form.assignedShops.includes(s.id)}
+                    onChange={e => {
+                      setForm(f => ({
+                        ...f,
+                        assignedShops: e.target.checked
+                          ? [...f.assignedShops, s.id]
+                          : f.assignedShops.filter(id => id !== s.id),
+                      }));
+                    }}
+                    className="rounded border-slate-500 bg-slate-700 text-blue-500 focus:ring-blue-500"
+                  />
+                  <span>{s.name}</span>
+                  <span className={`text-xs px-1.5 py-0.5 rounded ${s.channel === 'Shopee' ? 'bg-orange-500/15 text-orange-400' : 'bg-pink-500/15 text-pink-400'}`}>{s.channel}</span>
+                </label>
               ))}
-            </select>
-            <p className="text-xs text-gray-500 mt-1">Giữ Ctrl để chọn nhiều shop</p>
+            </div>
           </div>
         )}
         <div className="flex gap-3">
