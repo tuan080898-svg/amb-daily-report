@@ -233,7 +233,7 @@ function FileUploadForm() {
       };
 
       if (!isCancelled) {
-        const skuRevenue = parseNum(row['SKU Subtotal After Discount']);
+        const skuRevenue = parseNum(row['SKU Subtotal After Discount']) + parseNum(row['SKU Platform Discount']);
         agg.completedRevenue += skuRevenue;
       }
 
