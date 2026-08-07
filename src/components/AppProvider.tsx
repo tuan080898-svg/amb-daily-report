@@ -125,7 +125,6 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     setState(s => ({ ...s, users: s.users.map(u => u.id === user.id ? user : u) }));
     if (IS_SUPABASE) {
       dbUpdateUser(user)
-        .then(() => { alert('Đã lưu thành công! Shops: ' + user.assignedShops.join(', ')); })
         .catch(err => { console.error(err); alert('Lỗi cập nhật user: ' + err.message); });
     }
   }, []);
@@ -134,7 +133,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     const user = state.users.find(u => u.id === userId);
     if (!user) return [];
     if (user.role === 'admin') return state.shops;
-    return state.shops.filter(s => user.assignedShops.includes(s.id));
+    return state.shops.filter(s => user.assignedShops.includes(s.id) || s.assignedTo.includes(userId));
   }, [state.users, state.shops]);
 
   if (loading) {
