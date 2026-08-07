@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, Fragment } from 'react';
 import { useAppState } from '@/lib/store';
 import { calculateMetrics, formatCurrency, formatPercent, getAlertBg, getAlertDot, toDateString, exportToCSV } from '@/lib/utils';
 import { Channel, Region, AlertColor } from '@/lib/types';
@@ -89,33 +89,6 @@ export default function DashboardPage() {
       return { emp, shopCount: empShops.length, reportedCount: withData.length, totalTarget, totalRevenue, totalAds, totalOrders, totalCancelled, totalReturned, pctTarget, pctMkt, pctCancelReturn };
     }).filter(e => e.shopCount > 0).sort((a, b) => b.totalRevenue - a.totalRevenue);
   }, [employees, filteredShops, reports, dateFrom, dateTo]);
-
-  const selectedShop = useMemo(() => {
-    if (!selectedShopId) return null;
-    return filteredShops.find(s => s.id === selectedShopId) || null;
-  }, [selectedShopId, filteredShops]);
-
-  const shopDailyDetail = useMemo(() => {
-    if (!selectedShopId) return [];
-    const shopReports = reports
-      .filter(r => r.shopId === selectedShopId && r.date >= dateFrom && r.date <= dateTo)
-      .sort((a, b) => a.date.localeCompare(b.date));
-    return shopReports.map(r => {
-      const metrics = calculateMetrics(r, config);
-      return { report: r, metrics };
-    });
-  }, [selectedShopId, reports, dateFrom, dateTo, config]);
-
-  const shopDailyTotals = useMemo(() => {
-    if (shopDailyDetail.length === 0) return null;
-    const totalTarget = shopDailyDetail.reduce((s, d) => s + d.report.targetRevenue, 0);
-    const totalRevenue = shopDailyDetail.reduce((s, d) => s + d.report.actualRevenue, 0);
-    const totalAds = shopDailyDetail.reduce((s, d) => s + d.report.adSpend, 0);
-    const totalOrders = shopDailyDetail.reduce((s, d) => s + d.report.totalOrders, 0);
-    const totalCancelled = shopDailyDetail.reduce((s, d) => s + d.report.cancelledOrders, 0);
-    const totalReturned = shopDailyDetail.reduce((s, d) => s + d.report.returnedOrders, 0);
-    return { totalTarget, totalRevenue, totalAds, totalOrders, totalCancelled, totalReturned };
-  }, [shopDailyDetail]);
 
   function handleExportCSV() {
     const headers = ['Shop', 'Kênh', 'Target', 'Doanh thu', '%Đạt', 'CP QC', '%MKT', 'Đánh giá MKT', 'Tổng đơn', 'Huỷ', 'Hoàn', '%Hoàn/Huỷ', 'Cảnh báo'];
@@ -347,200 +320,130 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {dailyData.map(({ shop, report, metrics }) => (
-                <tr
-                  key={shop.id}
-                  className={`hover:bg-slate-800 cursor-pointer transition-colors ${selectedShopId === shop.id ? 'bg-blue-500/10 border-l-2 border-l-blue-500' : ''}`}
-                  onClick={() => setSelectedShopId(selectedShopId === shop.id ? null : shop.id)}
-                >
-                  <td className="px-4 py-3 font-medium text-gray-200">
-                    <span className="flex items-center gap-1.5">
-                      <span className={`text-xs transition-transform ${selectedShopId === shop.id ? 'rotate-90' : ''}`}>&#9654;</span>
-                      {shop.name}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-gray-400 text-xs">{users.find(u => shop.assignedTo.includes(u.id))?.name || '—'}</td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
-                      shop.region === 'HCM' ? 'bg-blue-500/15 text-blue-400' : 'bg-violet-500/15 text-violet-400'
-                    }`}>{shop.region}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
-                      shop.channel === 'Shopee' ? 'bg-orange-500/15 text-orange-400' : 'bg-pink-500/15 text-pink-400'
-                    }`}>
-                      {shop.channel}
-                    </span>
-                  </td>
-                  {report && metrics ? (
-                    <>
-                      <td className="px-4 py-3 text-right text-gray-400">{formatCurrency(report.targetRevenue)}</td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-200">{formatCurrency(report.actualRevenue)}</td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(metrics.revenueAlert)}`}>
-                          {formatPercent(metrics.targetAchievement)}
+              {dailyData.map(({ shop, report, metrics }) => {
+                const isSelected = selectedShopId === shop.id;
+                const detail = isSelected ? reports
+                  .filter(r => r.shopId === shop.id && r.date >= dateFrom && r.date <= dateTo)
+                  .sort((a, b) => a.date.localeCompare(b.date)) : [];
+                return (
+                  <Fragment key={shop.id}>
+                    <tr
+                      className={`hover:bg-slate-800 cursor-pointer transition-colors ${isSelected ? 'bg-blue-500/10' : ''}`}
+                      onClick={() => setSelectedShopId(isSelected ? null : shop.id)}
+                    >
+                      <td className="px-4 py-3 font-medium text-gray-200">
+                        <span className="flex items-center gap-1.5">
+                          <span className={`text-xs transition-transform ${isSelected ? 'rotate-90' : ''}`}>&#9654;</span>
+                          {shop.name}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-400">{formatCurrency(report.adSpend)}</td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(metrics.adsAlert)}`}>
-                          {formatPercent(metrics.adsToRevenueRatio)}
-                        </span>
+                      <td className="px-4 py-3 text-gray-400 text-xs">{users.find(u => shop.assignedTo.includes(u.id))?.name || '—'}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                          shop.region === 'HCM' ? 'bg-blue-500/15 text-blue-400' : 'bg-violet-500/15 text-violet-400'
+                        }`}>{shop.region}</span>
                       </td>
-                      <td className="px-4 py-3 text-left">
-                        <span className={`text-xs font-medium ${
-                          metrics.adsToRevenueRatio >= config.adsThresholdYellow ? 'text-red-400'
-                          : metrics.adsToRevenueRatio >= config.adsThresholdGreen ? 'text-amber-400'
-                          : 'text-emerald-400'
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
+                          shop.channel === 'Shopee' ? 'bg-orange-500/15 text-orange-400' : 'bg-pink-500/15 text-pink-400'
                         }`}>
-                          {metrics.adsToRevenueRatio >= config.adsThresholdYellow ? 'Cảnh báo chi phí cao'
-                          : metrics.adsToRevenueRatio >= config.adsThresholdGreen ? 'Trong ngưỡng cho phép'
-                          : 'Hiệu quả'}
+                          {shop.channel}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right text-gray-400">{report.totalOrders}</td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(metrics.cancelReturnAlert)}`}>
-                          {formatPercent(metrics.cancelReturnRate)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`w-3 h-3 rounded-full inline-block ${getAlertDot(metrics.revenueAlert)}`}></span>
-                      </td>
-                    </>
-                  ) : (
-                    <td colSpan={11} className="px-4 py-3 text-center text-gray-500 italic">Chưa có báo cáo</td>
-                  )}
-                </tr>
-              ))}
+                      {report && metrics ? (
+                        <>
+                          <td className="px-4 py-3 text-right text-gray-400">{formatCurrency(report.targetRevenue)}</td>
+                          <td className="px-4 py-3 text-right font-medium text-gray-200">{formatCurrency(report.actualRevenue)}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(metrics.revenueAlert)}`}>
+                              {formatPercent(metrics.targetAchievement)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right text-gray-400">{formatCurrency(report.adSpend)}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(metrics.adsAlert)}`}>
+                              {formatPercent(metrics.adsToRevenueRatio)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-left">
+                            <span className={`text-xs font-medium ${
+                              metrics.adsToRevenueRatio >= config.adsThresholdYellow ? 'text-red-400'
+                              : metrics.adsToRevenueRatio >= config.adsThresholdGreen ? 'text-amber-400'
+                              : 'text-emerald-400'
+                            }`}>
+                              {metrics.adsToRevenueRatio >= config.adsThresholdYellow ? 'Cảnh báo chi phí cao'
+                              : metrics.adsToRevenueRatio >= config.adsThresholdGreen ? 'Trong ngưỡng cho phép'
+                              : 'Hiệu quả'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right text-gray-400">{report.totalOrders}</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(metrics.cancelReturnAlert)}`}>
+                              {formatPercent(metrics.cancelReturnRate)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span className={`w-3 h-3 rounded-full inline-block ${getAlertDot(metrics.revenueAlert)}`}></span>
+                          </td>
+                        </>
+                      ) : (
+                        <td colSpan={11} className="px-4 py-3 text-center text-gray-500 italic">Chưa có báo cáo</td>
+                      )}
+                    </tr>
+                    {isSelected && detail.length > 0 && detail.map(r => {
+                      const m = calculateMetrics(r, config);
+                      return (
+                        <tr key={`${shop.id}-${r.date}`} className="bg-slate-800/40 border-l-2 border-l-blue-500">
+                          <td colSpan={4} className="px-4 py-2 pl-10 text-sm text-blue-300">{r.date}</td>
+                          <td className="px-4 py-2 text-right text-gray-400 text-sm">{formatCurrency(r.targetRevenue)}</td>
+                          <td className="px-4 py-2 text-right font-medium text-gray-200 text-sm">{formatCurrency(r.actualRevenue)}</td>
+                          <td className="px-4 py-2 text-center">
+                            <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(m.revenueAlert)}`}>
+                              {formatPercent(m.targetAchievement)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-right text-gray-400 text-sm">{formatCurrency(r.adSpend)}</td>
+                          <td className="px-4 py-2 text-center">
+                            <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(m.adsAlert)}`}>
+                              {formatPercent(m.adsToRevenueRatio)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-left">
+                            <span className={`text-xs font-medium ${
+                              m.adsToRevenueRatio >= config.adsThresholdYellow ? 'text-red-400'
+                              : m.adsToRevenueRatio >= config.adsThresholdGreen ? 'text-amber-400'
+                              : 'text-emerald-400'
+                            }`}>
+                              {m.adsToRevenueRatio >= config.adsThresholdYellow ? 'CP cao'
+                              : m.adsToRevenueRatio >= config.adsThresholdGreen ? 'Trong ngưỡng'
+                              : 'Hiệu quả'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-right text-gray-400 text-sm">{r.totalOrders}</td>
+                          <td className="px-4 py-2 text-center">
+                            <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(m.cancelReturnAlert)}`}>
+                              {formatPercent(m.cancelReturnRate)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2 text-center">
+                            <span className={`w-3 h-3 rounded-full inline-block ${getAlertDot(m.revenueAlert)}`}></span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {isSelected && detail.length === 0 && (
+                      <tr className="bg-slate-800/40 border-l-2 border-l-blue-500">
+                        <td colSpan={13} className="px-4 py-3 pl-10 text-center text-gray-500 italic text-sm">Chưa có dữ liệu từng ngày</td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Shop daily detail */}
-      {selectedShop && (
-        <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden mt-6">
-          <div className="px-5 py-4 border-b border-slate-700/50 flex items-center justify-between">
-            <div>
-              <h2 className="font-semibold text-gray-100">
-                Chi tiết từng ngày — {selectedShop.name}
-                <span className={`ml-2 inline-flex px-2 py-0.5 rounded text-xs font-medium ${
-                  selectedShop.channel === 'Shopee' ? 'bg-orange-500/15 text-orange-400' : 'bg-pink-500/15 text-pink-400'
-                }`}>{selectedShop.channel}</span>
-              </h2>
-              <p className="text-xs text-gray-500 mt-1">
-                {dateFrom === dateTo ? `Ngày ${dateFrom}` : `Từ ${dateFrom} đến ${dateTo}`}
-                {shopDailyDetail.length > 0 ? ` — ${shopDailyDetail.length} ngày có dữ liệu` : ''}
-              </p>
-            </div>
-            <button
-              onClick={() => setSelectedShopId(null)}
-              className="text-gray-400 hover:text-gray-200 text-sm px-3 py-1.5 rounded-lg hover:bg-slate-800 transition-colors"
-            >
-              Đóng
-            </button>
-          </div>
-          {shopDailyDetail.length === 0 ? (
-            <div className="px-5 py-8 text-center text-gray-500 italic">
-              Chưa có báo cáo nào trong khoảng thời gian này
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-800 border-b border-slate-700/50">
-                    <th className="text-left px-4 py-3 font-medium text-gray-400">Ngày</th>
-                    <th className="text-right px-4 py-3 font-medium text-gray-400">Target</th>
-                    <th className="text-right px-4 py-3 font-medium text-gray-400">Doanh thu</th>
-                    <th className="text-center px-4 py-3 font-medium text-gray-400">%Đạt</th>
-                    <th className="text-right px-4 py-3 font-medium text-gray-400">CP QC</th>
-                    <th className="text-center px-4 py-3 font-medium text-gray-400">%MKT</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-400">Đánh giá MKT</th>
-                    <th className="text-right px-4 py-3 font-medium text-gray-400">Tổng đơn</th>
-                    <th className="text-right px-4 py-3 font-medium text-gray-400">Huỷ</th>
-                    <th className="text-right px-4 py-3 font-medium text-gray-400">Hoàn</th>
-                    <th className="text-center px-4 py-3 font-medium text-gray-400">%Hoàn/Huỷ</th>
-                    <th className="text-center px-4 py-3 font-medium text-gray-400">Trạng thái</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800">
-                  {shopDailyDetail.map(({ report, metrics }) => (
-                    <tr key={report.date} className="hover:bg-slate-800">
-                      <td className="px-4 py-3 font-medium text-gray-200">{report.date}</td>
-                      <td className="px-4 py-3 text-right text-gray-400">{formatCurrency(report.targetRevenue)}</td>
-                      <td className="px-4 py-3 text-right font-medium text-gray-200">{formatCurrency(report.actualRevenue)}</td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(metrics.revenueAlert)}`}>
-                          {formatPercent(metrics.targetAchievement)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right text-gray-400">{formatCurrency(report.adSpend)}</td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(metrics.adsAlert)}`}>
-                          {formatPercent(metrics.adsToRevenueRatio)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-left">
-                        <span className={`text-xs font-medium ${
-                          metrics.adsToRevenueRatio >= config.adsThresholdYellow ? 'text-red-400'
-                          : metrics.adsToRevenueRatio >= config.adsThresholdGreen ? 'text-amber-400'
-                          : 'text-emerald-400'
-                        }`}>
-                          {metrics.adsToRevenueRatio >= config.adsThresholdYellow ? 'Cảnh báo chi phí cao'
-                          : metrics.adsToRevenueRatio >= config.adsThresholdGreen ? 'Trong ngưỡng cho phép'
-                          : 'Hiệu quả'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right text-gray-400">{report.totalOrders}</td>
-                      <td className="px-4 py-3 text-right text-gray-400">{report.cancelledOrders}</td>
-                      <td className="px-4 py-3 text-right text-gray-400">{report.returnedOrders}</td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(metrics.cancelReturnAlert)}`}>
-                          {formatPercent(metrics.cancelReturnRate)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`w-3 h-3 rounded-full inline-block ${getAlertDot(metrics.revenueAlert)}`}></span>
-                      </td>
-                    </tr>
-                  ))}
-                  {shopDailyTotals && shopDailyDetail.length > 1 && (
-                    <tr className="bg-slate-800/50 font-medium border-t-2 border-slate-600">
-                      <td className="px-4 py-3 text-gray-200">Tổng cộng</td>
-                      <td className="px-4 py-3 text-right text-gray-300">{formatCurrency(shopDailyTotals.totalTarget)}</td>
-                      <td className="px-4 py-3 text-right text-gray-100">{formatCurrency(shopDailyTotals.totalRevenue)}</td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
-                          getAlertBg(shopDailyTotals.totalTarget > 0 && shopDailyTotals.totalRevenue / shopDailyTotals.totalTarget >= 1 ? 'green' : shopDailyTotals.totalTarget > 0 && shopDailyTotals.totalRevenue / shopDailyTotals.totalTarget >= 0.7 ? 'yellow' : 'red')
-                        }`}>
-                          {shopDailyTotals.totalTarget > 0 ? formatPercent(shopDailyTotals.totalRevenue / shopDailyTotals.totalTarget) : '0%'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right text-gray-300">{formatCurrency(shopDailyTotals.totalAds)}</td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-slate-700 text-gray-300">
-                          {shopDailyTotals.totalRevenue > 0 ? formatPercent(shopDailyTotals.totalAds / shopDailyTotals.totalRevenue) : '0%'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3"></td>
-                      <td className="px-4 py-3 text-right text-gray-300">{shopDailyTotals.totalOrders}</td>
-                      <td className="px-4 py-3 text-right text-gray-300">{shopDailyTotals.totalCancelled}</td>
-                      <td className="px-4 py-3 text-right text-gray-300">{shopDailyTotals.totalReturned}</td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-slate-700 text-gray-300">
-                          {shopDailyTotals.totalOrders > 0 ? formatPercent((shopDailyTotals.totalCancelled + shopDailyTotals.totalReturned) / shopDailyTotals.totalOrders) : '0%'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3"></td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
