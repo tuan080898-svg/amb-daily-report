@@ -64,7 +64,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
 
   const addReport = useCallback((report: DailyReport) => {
     setState(s => ({ ...s, reports: [...s.reports, report] }));
-    if (IS_SUPABASE) dbAddReport(report).catch(console.error);
+    if (IS_SUPABASE) dbAddReport(report).catch(err => { console.error(err); alert('Lỗi lưu báo cáo: ' + err.message); });
   }, []);
 
   const updateReport = useCallback((report: DailyReport) => {
@@ -73,22 +73,22 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       ...s,
       reports: s.reports.map(r => r.id === report.id ? updated : r),
     }));
-    if (IS_SUPABASE) dbUpdateReport(updated).catch(console.error);
+    if (IS_SUPABASE) dbUpdateReport(updated).catch(err => { console.error(err); alert('Lỗi cập nhật báo cáo: ' + err.message); });
   }, []);
 
   const addShop = useCallback((shop: Shop) => {
     setState(s => ({ ...s, shops: [...s.shops, shop] }));
-    if (IS_SUPABASE) dbAddShop(shop).catch(console.error);
+    if (IS_SUPABASE) dbAddShop(shop).catch(err => { console.error(err); alert('Lỗi lưu shop: ' + err.message); });
   }, []);
 
   const updateShop = useCallback((shop: Shop) => {
     setState(s => ({ ...s, shops: s.shops.map(sh => sh.id === shop.id ? shop : sh) }));
-    if (IS_SUPABASE) dbUpdateShop(shop).catch(console.error);
+    if (IS_SUPABASE) dbUpdateShop(shop).catch(err => { console.error(err); alert('Lỗi cập nhật shop: ' + err.message); });
   }, []);
 
   const deleteShop = useCallback((shopId: string) => {
     setState(s => ({ ...s, shops: s.shops.filter(sh => sh.id !== shopId) }));
-    if (IS_SUPABASE) dbDeleteShop(shopId).catch(console.error);
+    if (IS_SUPABASE) dbDeleteShop(shopId).catch(err => { console.error(err); alert('Lỗi xóa shop: ' + err.message); });
   }, []);
 
   const updateKPI = useCallback((kpi: MonthlyKPI) => {
@@ -98,7 +98,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
         ? s.monthlyKPIs.map(k => (k.shopId === kpi.shopId && k.month === kpi.month) ? kpi : k)
         : [...s.monthlyKPIs, kpi],
     }));
-    if (IS_SUPABASE) dbUpdateKPI(kpi).catch(console.error);
+    if (IS_SUPABASE) dbUpdateKPI(kpi).catch(err => { console.error(err); alert('Lỗi cập nhật KPI: ' + err.message); });
   }, []);
 
   const updatePlan = useCallback((plan: MonthlyPlan) => {
@@ -108,22 +108,22 @@ export default function AppProvider({ children }: { children: ReactNode }) {
         ? s.monthlyPlans.map(p => (p.shopId === plan.shopId && p.month === plan.month) ? plan : p)
         : [...s.monthlyPlans, plan],
     }));
-    if (IS_SUPABASE) dbUpdatePlan(plan).catch(console.error);
+    if (IS_SUPABASE) dbUpdatePlan(plan).catch(err => { console.error(err); alert('Lỗi cập nhật kế hoạch: ' + err.message); });
   }, []);
 
   const updateConfig = useCallback((config: AppConfig) => {
     setState(s => ({ ...s, config }));
-    if (IS_SUPABASE) dbUpdateConfig(config).catch(console.error);
+    if (IS_SUPABASE) dbUpdateConfig(config).catch(err => { console.error(err); alert('Lỗi cập nhật cấu hình: ' + err.message); });
   }, []);
 
   const addUser = useCallback((user: User) => {
     setState(s => ({ ...s, users: [...s.users, user] }));
-    if (IS_SUPABASE) dbAddUser(user).catch(console.error);
+    if (IS_SUPABASE) dbAddUser(user).catch(err => { console.error(err); alert('Lỗi lưu user: ' + err.message); });
   }, []);
 
   const updateUser = useCallback((user: User) => {
     setState(s => ({ ...s, users: s.users.map(u => u.id === user.id ? user : u) }));
-    if (IS_SUPABASE) dbUpdateUser(user).catch(console.error);
+    if (IS_SUPABASE) dbUpdateUser(user).catch(err => { console.error(err); alert('Lỗi cập nhật user: ' + err.message); });
   }, []);
 
   const getUserShops = useCallback((userId: string): Shop[] => {

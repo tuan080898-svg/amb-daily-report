@@ -23,7 +23,7 @@ export async function dbGetUsers(): Promise<User[]> {
 }
 
 export async function dbAddUser(user: User): Promise<void> {
-  await db().from('users').insert({
+  const { error } = await db().from('users').insert({
     id: user.id,
     email: user.email,
     name: user.name,
@@ -31,16 +31,18 @@ export async function dbAddUser(user: User): Promise<void> {
     assigned_shops: user.assignedShops,
     password: user.password || '123456',
   });
+  if (error) throw new Error('Thêm user thất bại: ' + error.message);
 }
 
 export async function dbUpdateUser(user: User): Promise<void> {
-  await db().from('users').update({
+  const { error } = await db().from('users').update({
     email: user.email,
     name: user.name,
     role: user.role,
     assigned_shops: user.assignedShops,
-    ...(user.password ? { password: user.password } : {}),
+    password: user.password || undefined,
   }).eq('id', user.id);
+  if (error) throw new Error('Cập nhật user thất bại: ' + error.message);
 }
 
 // ==================== Shops ====================
@@ -106,7 +108,7 @@ export async function dbGetReports(): Promise<DailyReport[]> {
 }
 
 export async function dbAddReport(report: DailyReport): Promise<void> {
-  await db().from('daily_reports').insert({
+  const { error } = await db().from('daily_reports').insert({
     id: report.id,
     date: report.date,
     shop_id: report.shopId,
@@ -120,10 +122,11 @@ export async function dbAddReport(report: DailyReport): Promise<void> {
     created_by: report.createdBy,
     created_at: report.createdAt,
   });
+  if (error) throw new Error('Lưu báo cáo thất bại: ' + error.message);
 }
 
 export async function dbUpdateReport(report: DailyReport): Promise<void> {
-  await db().from('daily_reports').update({
+  const { error } = await db().from('daily_reports').update({
     date: report.date,
     shop_id: report.shopId,
     target_revenue: report.targetRevenue,
@@ -135,6 +138,7 @@ export async function dbUpdateReport(report: DailyReport): Promise<void> {
     note: report.note,
     updated_at: new Date().toISOString(),
   }).eq('id', report.id);
+  if (error) throw new Error('Cập nhật báo cáo thất bại: ' + error.message);
 }
 
 // ==================== KPIs ====================
