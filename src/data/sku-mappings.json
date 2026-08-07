@@ -1,0 +1,744 @@
+{
+  "GH040-1": [
+    {
+      "product": "Thuốc diệt gián",
+      "quantity": 1
+    }
+  ],
+  "GH040-2": [
+    {
+      "product": "Thuốc diệt gián",
+      "quantity": 2
+    }
+  ],
+  "GH040-3": [
+    {
+      "product": "Thuốc diệt gián",
+      "quantity": 3
+    }
+  ],
+  "GH040-4": [
+    {
+      "product": "Thuốc diệt gián",
+      "quantity": 4
+    }
+  ],
+  "GH040-5": [
+    {
+      "product": "Thuốc diệt gián",
+      "quantity": 5
+    }
+  ],
+  "GH041": [
+    {
+      "product": "Bột thông cống",
+      "quantity": 1
+    }
+  ],
+  "GH041-2": [
+    {
+      "product": "Bột thông cống",
+      "quantity": 2
+    }
+  ],
+  "GH041-3": [
+    {
+      "product": "Bột thông cống",
+      "quantity": 3
+    }
+  ],
+  "GH041-4": [
+    {
+      "product": "Bột thông cống",
+      "quantity": 4
+    }
+  ],
+  "GH041-5": [
+    {
+      "product": "Bột thông cống",
+      "quantity": 5
+    }
+  ],
+  "GH042-4": [
+    {
+      "product": "Khử mùi tủ lạnh hương cam",
+      "quantity": 1
+    }
+  ],
+  "GH042-5": [
+    {
+      "product": "Khử mùi tủ lạnh hương cam",
+      "quantity": 2
+    }
+  ],
+  "GH042-6": [
+    {
+      "product": "Khử mùi tủ lạnh hương cam",
+      "quantity": 3
+    }
+  ],
+  "GH042-7": [
+    {
+      "product": "Khử mủi tủ lạnh hương chanh",
+      "quantity": 1
+    }
+  ],
+  "GH042-8": [
+    {
+      "product": "Khử mủi tủ lạnh hương chanh",
+      "quantity": 2
+    }
+  ],
+  "GH042-9": [
+    {
+      "product": "Khử mủi tủ lạnh hương chanh",
+      "quantity": 3
+    }
+  ],
+  "GH042-12": [
+    {
+      "product": "Khử mùi tủ lạnh hương cam",
+      "quantity": 1
+    },
+    {
+      "product": "Khử mủi tủ lạnh hương chanh",
+      "quantity": 1
+    }
+  ],
+  "GH042-13": [
+    {
+      "product": "Khử mùi tủ lạnh hương cam",
+      "quantity": 1
+    },
+    {
+      "product": "Khử mủi tủ lạnh hương chanh",
+      "quantity": 2
+    }
+  ],
+  "GH042-14": [
+    {
+      "product": "Khử mùi tủ lạnh hương cam",
+      "quantity": 2
+    },
+    {
+      "product": "Khử mủi tủ lạnh hương chanh",
+      "quantity": 1
+    }
+  ],
+  "AMBB": [
+    {
+      "product": "Bình xịt đuổi chuột",
+      "quantity": 1
+    }
+  ],
+  "AMBT": [
+    {
+      "product": "Túi chống chuột",
+      "quantity": 1
+    }
+  ],
+  "AMBC2": [
+    {
+      "product": "Bình xịt đuổi chuột",
+      "quantity": 1
+    },
+    {
+      "product": "Túi chống chuột",
+      "quantity": 2
+    }
+  ],
+  "AMBC1": [
+    {
+      "product": "Bình xịt đuổi chuột",
+      "quantity": 1
+    },
+    {
+      "product": "Túi chống chuột",
+      "quantity": 1
+    }
+  ],
+  "AMBT2": [
+    {
+      "product": "Túi chống chuột",
+      "quantity": 2
+    }
+  ],
+  "GH048": [
+    {
+      "product": "Bình xịt vệ sinh điều hòa",
+      "quantity": 1
+    }
+  ],
+  "GH048-1": [
+    {
+      "product": "Bộ vệ sinh điều hòa",
+      "quantity": 1
+    }
+  ],
+  "GH048-2": [
+    {
+      "product": "Bộ vệ sinh điều hòa",
+      "quantity": 1
+    },
+    {
+      "product": "Bình xịt vệ sinh điều hòa",
+      "quantity": 1
+    }
+  ],
+  "GH048-3": [
+    {
+      "product": "Bình xịt vệ sinh điều hòa",
+      "quantity": 2
+    },
+    {
+      "product": "Bộ vệ sinh điều hòa",
+      "quantity": 1
+    }
+  ],
+  "GHS3": [
+    {
+      "product": "Mặt heo ghi",
+      "quantity": 1
+    }
+  ],
+  "GHS1": [
+    {
+      "product": "Trơn ghi",
+      "quantity": 1
+    }
+  ],
+  "GHS5": [
+    {
+      "product": "Cừu mặt đen valais",
+      "quantity": 1
+    }
+  ],
+  "GHS2": [
+    {
+      "product": "Mặt heo hồng",
+      "quantity": 1
+    }
+  ],
+  "GHS6": [
+    {
+      "product": "Cừu thiên thần",
+      "quantity": 1
+    }
+  ],
+  "GHS13": [
+    {
+      "product": "Túi sưởi tay Xanh lá",
+      "quantity": 1
+    }
+  ],
+  "GHS15": [
+    {
+      "product": "Túi sưởi tay Hồng",
+      "quantity": 1
+    }
+  ],
+  "GHS16": [
+    {
+      "product": "Túi sưởi tay Xám",
+      "quantity": 1
+    }
+  ],
+  "GHS14": [
+    {
+      "product": "Túi sưởi tay Xanh dương",
+      "quantity": 1
+    }
+  ],
+  "GHS13-2": [
+    {
+      "product": "Túi sưởi tay Xanh lá",
+      "quantity": 2
+    }
+  ],
+  "GHS15-2": [
+    {
+      "product": "Túi sưởi tay Hồng",
+      "quantity": 2
+    }
+  ],
+  "GHS16-2": [
+    {
+      "product": "Túi sưởi tay Xám",
+      "quantity": 2
+    }
+  ],
+  "GHS14-2": [
+    {
+      "product": "Túi sưởi tay Xanh dương",
+      "quantity": 2
+    }
+  ],
+  "GHS17": [
+    {
+      "product": "Túi sưởi tay Xanh lá",
+      "quantity": 1
+    },
+    {
+      "product": "Túi sưởi tay Hồng",
+      "quantity": 1
+    }
+  ],
+  "GHS18": [
+    {
+      "product": "Túi sưởi tay Xanh lá",
+      "quantity": 1
+    },
+    {
+      "product": "Túi sưởi tay Xám",
+      "quantity": 1
+    }
+  ],
+  "GHS19": [
+    {
+      "product": "Túi sưởi tay Xanh lá",
+      "quantity": 1
+    },
+    {
+      "product": "Túi sưởi tay Xanh dương",
+      "quantity": 1
+    }
+  ],
+  "GHS20": [
+    {
+      "product": "Túi sưởi tay Hồng",
+      "quantity": 1
+    },
+    {
+      "product": "Túi sưởi tay Xám",
+      "quantity": 1
+    }
+  ],
+  "GHS21": [
+    {
+      "product": "Túi sưởi tay Xanh dương",
+      "quantity": 1
+    },
+    {
+      "product": "Túi sưởi tay Hồng",
+      "quantity": 1
+    }
+  ],
+  "GHS22": [
+    {
+      "product": "Túi sưởi tay Xám",
+      "quantity": 1
+    },
+    {
+      "product": "Túi sưởi tay Xanh dương",
+      "quantity": 1
+    }
+  ],
+  "GHS10-1": [
+    {
+      "product": "Sưỏi tay cừu kem",
+      "quantity": 1
+    }
+  ],
+  "GHS10-2": [
+    {
+      "product": "Sưởi tay cừu hồng",
+      "quantity": 1
+    }
+  ],
+  "GH043-1": [
+    {
+      "product": "Sofa Da",
+      "quantity": 1
+    }
+  ],
+  "GH043-2": [
+    {
+      "product": "Sofa nỉ",
+      "quantity": 1
+    }
+  ],
+  "GH043": [
+    {
+      "product": "Lẻ chai vệ sinh Sofa",
+      "quantity": 1
+    }
+  ],
+  "GH049": [
+    {
+      "product": "Bột vệ sinh máy giặt",
+      "quantity": 1
+    }
+  ],
+  "GH0490-2": [
+    {
+      "product": "Bột vệ sinh máy giặt",
+      "quantity": 2
+    }
+  ],
+  "GH049-3": [
+    {
+      "product": "Bột vệ sinh máy giặt",
+      "quantity": 3
+    }
+  ],
+  "GH083-1": [
+    {
+      "product": "Nước vệ sinh máy giặt",
+      "quantity": 1
+    }
+  ],
+  "GH083-2": [
+    {
+      "product": "Nước vệ sinh máy giặt",
+      "quantity": 2
+    }
+  ],
+  "GH083-3": [
+    {
+      "product": "Nước vệ sinh máy giặt",
+      "quantity": 3
+    }
+  ],
+  "GH083-4": [
+    {
+      "product": "Nước vệ sinh máy giặt",
+      "quantity": 4
+    }
+  ],
+  "GH083-5": [
+    {
+      "product": "Nước vệ sinh máy giặt",
+      "quantity": 5
+    }
+  ],
+  "GH063": [
+    {
+      "product": "Keo vá tường",
+      "quantity": 1
+    }
+  ],
+  "GH063-1": [
+    {
+      "product": "Keo vá tường",
+      "quantity": 2
+    }
+  ],
+  "GH063-2": [
+    {
+      "product": "Keo vá tường",
+      "quantity": 3
+    }
+  ],
+  "GH063-3": [
+    {
+      "product": "Keo vá tường",
+      "quantity": 4
+    }
+  ],
+  "GH063-4": [
+    {
+      "product": "Keo vá tường",
+      "quantity": 5
+    }
+  ],
+  "GH064": [
+    {
+      "product": "Gel vệ sinh đường ống",
+      "quantity": 1
+    }
+  ],
+  "GH064-1": [
+    {
+      "product": "Gel vệ sinh đường ống",
+      "quantity": 2
+    }
+  ],
+  "GH064-2": [
+    {
+      "product": "Gel vệ sinh đường ống",
+      "quantity": 3
+    }
+  ],
+  "GH067-3": [
+    {
+      "product": "Xịt vệ sinh bếp",
+      "quantity": 1
+    }
+  ],
+  "GH067-4": [
+    {
+      "product": "Xịt vệ sinh bếp",
+      "quantity": 2
+    }
+  ],
+  "GH067-5": [
+    {
+      "product": "Xịt vệ sinh bếp",
+      "quantity": 3
+    }
+  ],
+  "GH069-6": [
+    {
+      "product": "Sơn phủ tường trắng",
+      "quantity": 1
+    }
+  ],
+  "GH069-7": [
+    {
+      "product": "Sơn phủ tường trắng ngà",
+      "quantity": 1
+    }
+  ],
+  "GH069-9": [
+    {
+      "product": "Sơn phủ tường trắng",
+      "quantity": 2
+    }
+  ],
+  "GH069-10": [
+    {
+      "product": "Sơn phủ tường trắng",
+      "quantity": 3
+    }
+  ],
+  "GH069-11": [
+    {
+      "product": "Sơn phủ tường trắng ngà",
+      "quantity": 2
+    }
+  ],
+  "GH069-12": [
+    {
+      "product": "Sơn phủ tường trắng ngà",
+      "quantity": 3
+    }
+  ],
+  "GH070": [
+    {
+      "product": "Xịt vệ sinh tủ lạnh",
+      "quantity": 1
+    }
+  ],
+  "GH070-1": [
+    {
+      "product": "Xịt vệ sinh tủ lạnh",
+      "quantity": 2
+    }
+  ],
+  "GH070-2": [
+    {
+      "product": "Xịt vệ sinh tủ lạnh",
+      "quantity": 3
+    }
+  ],
+  "GH071": [
+    {
+      "product": "Tẩy cặn canxi",
+      "quantity": 1
+    }
+  ],
+  "GH071-1": [
+    {
+      "product": "Tẩy cặn canxi",
+      "quantity": 2
+    }
+  ],
+  "GH071-2": [
+    {
+      "product": "Tẩy cặn canxi",
+      "quantity": 3
+    }
+  ],
+  "GH072-6": [
+    {
+      "product": "Hộp hút ẩm hương cam",
+      "quantity": 1
+    }
+  ],
+  "GH072-7": [
+    {
+      "product": "Hộp hút ẩm hương cam",
+      "quantity": 2
+    }
+  ],
+  "GH072-8": [
+    {
+      "product": "Hộp hút ẩm hương cam",
+      "quantity": 3
+    }
+  ],
+  "GH072-9": [
+    {
+      "product": "Hộp hút ẩm hương cam",
+      "quantity": 4
+    }
+  ],
+  "GH072-10": [
+    {
+      "product": "Hộp hút ẩm hương cam",
+      "quantity": 5
+    }
+  ],
+  "GH072-11": [
+    {
+      "product": "Hộp hút ẩm than hoạt tính",
+      "quantity": 1
+    }
+  ],
+  "GH072-12": [
+    {
+      "product": "Hộp hút ẩm than hoạt tính",
+      "quantity": 2
+    }
+  ],
+  "GH072-13": [
+    {
+      "product": "Hộp hút ẩm than hoạt tính",
+      "quantity": 3
+    }
+  ],
+  "GH072-14": [
+    {
+      "product": "Hộp hút ẩm than hoạt tính",
+      "quantity": 4
+    }
+  ],
+  "GH072-15": [
+    {
+      "product": "Hộp hút ẩm than hoạt tính",
+      "quantity": 5
+    }
+  ],
+  "GH0483": [
+    {
+      "product": "Chất tẩy rửa khô giày kèm bàn chải",
+      "quantity": 1
+    }
+  ],
+  "GH0483-1": [
+    {
+      "product": "Chất tẩy rửa khô giày kèm bàn chải",
+      "quantity": 2
+    }
+  ],
+  "GH0483-2": [
+    {
+      "product": "Chất tẩy rửa khô giày kèm bàn chải",
+      "quantity": 3
+    }
+  ],
+  "GH0483-3": [
+    {
+      "product": "Chất tẩy rửa khô giày kèm bàn chải",
+      "quantity": 4
+    }
+  ],
+  "GH0483-4": [
+    {
+      "product": "Chất tẩy rửa khô giày kèm bàn chải",
+      "quantity": 5
+    }
+  ],
+  "GH080": [
+    {
+      "product": "Xịt vệ sinh lò vi sóng, nồi chiên không dầu",
+      "quantity": 1
+    }
+  ],
+  "GH080-1": [
+    {
+      "product": "Xịt vệ sinh lò vi sóng, nồi chiên không dầu",
+      "quantity": 2
+    }
+  ],
+  "GH080-2": [
+    {
+      "product": "Xịt vệ sinh lò vi sóng, nồi chiên không dầu",
+      "quantity": 3
+    }
+  ],
+  "GH081": [
+    {
+      "product": "Xịt muỗi",
+      "quantity": 1
+    }
+  ],
+  "GH081-1": [
+    {
+      "product": "Xịt muỗi",
+      "quantity": 2
+    }
+  ],
+  "GH081-2": [
+    {
+      "product": "Xịt muỗi",
+      "quantity": 3
+    }
+  ],
+  "GH082": [
+    {
+      "product": "Lọ thơm phòng hương Đào",
+      "quantity": 1
+    }
+  ],
+  "GH082-1": [
+    {
+      "product": "Lọ thơm phòng hương Dâu",
+      "quantity": 1
+    }
+  ],
+  "GH082-2": [
+    {
+      "product": "Lọ thơm phòng hương Đào",
+      "quantity": 1
+    },
+    {
+      "product": "Lọ thơm phòng hương Dâu",
+      "quantity": 1
+    }
+  ],
+  "GH082-3": [
+    {
+      "product": "Lọ thơm phòng hương Đào",
+      "quantity": 2
+    }
+  ],
+  "GH082-4": [
+    {
+      "product": "Lọ thơm phòng hương Đào",
+      "quantity": 3
+    }
+  ],
+  "GH082-5": [
+    {
+      "product": "Lọ thơm phòng hương Dâu",
+      "quantity": 2
+    }
+  ],
+  "GH082-6": [
+    {
+      "product": "Lọ thơm phòng hương Dâu",
+      "quantity": 3
+    }
+  ],
+  "GH082-7": [
+    {
+      "product": "Lọ thơm phòng hương Đào",
+      "quantity": 2
+    },
+    {
+      "product": "Lọ thơm phòng hương Dâu",
+      "quantity": 1
+    }
+  ],
+  "GH082-8": [
+    {
+      "product": "Lọ thơm phòng hương Dâu",
+      "quantity": 2
+    },
+    {
+      "product": "Lọ thơm phòng hương Đào",
+      "quantity": 1
+    }
+  ]
+}

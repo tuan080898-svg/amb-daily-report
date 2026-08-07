@@ -5,6 +5,7 @@ import { useAppState } from '@/lib/store';
 import { toDateString, getDailyTarget, getTargetForDate, getDayType, formatCurrency, formatPercent } from '@/lib/utils';
 import { DailyReport, Shop } from '@/lib/types';
 import * as XLSX from 'xlsx';
+import { aggregateProducts, ProductSummary } from '@/lib/sku';
 
 export default function ReportFormPage() {
   return (
@@ -101,6 +102,7 @@ function FileUploadForm() {
   const [manualMktDateTo, setManualMktDateTo] = useState(toDateString(new Date()));
   const [manualMktAmount, setManualMktAmount] = useState('');
   const [showGuide, setShowGuide] = useState(false);
+  const [collectedSkuCodes, setCollectedSkuCodes] = useState<string[]>([]);
 
   const userShops = useMemo(function() {
     if (!currentUser) return [];
@@ -174,6 +176,7 @@ function FileUploadForm() {
     const data = normalizeKeys(XLSX.utils.sheet_to_json(ws) as Record<string, unknown>[]);
     const orderSeen = new Set<string>();
     const dailyMap = new Map<string, DailyAgg>();
+    const skuCodes: string[] = [];
 
     for (const row of data) {
       const orderId = String(row['Mã đơn hàng'] || '').trim();
@@ -194,6 +197,11 @@ function FileUploadForm() {
 
       if (!isCancelled) {
         agg.completedRevenue += calcLineRevenue(row);
+        const sku = String(row['SKU phân loại hàng'] || '').trim();
+        if (sku) {
+          const qty = parseNum(row['Số lượng']) || 1;
+          for (let i = 0; i < qty; i++) skuCodes.push(sku);
+        }
       }
 
       if (!orderSeen.has(orderId)) {
@@ -207,6 +215,7 @@ function FileUploadForm() {
     }
 
     setTotalRawOrders(orderSeen.size);
+    setCollectedSkuCodes(skuCodes);
     return Array.from(dailyMap.values()).sort(function(a, b) { return a.date.localeCompare(b.date); });
   }
 
@@ -214,6 +223,7 @@ function FileUploadForm() {
     const data = normalizeKeys(XLSX.utils.sheet_to_json(ws) as Record<string, unknown>[]);
     const orderSeen = new Set<string>();
     const dailyMap = new Map<string, DailyAgg>();
+    const skuCodes: string[] = [];
 
     for (const row of data) {
       const orderId = String(row['Order ID'] || '').trim();
@@ -236,6 +246,11 @@ function FileUploadForm() {
       if (!isCancelled) {
         const skuRevenue = parseNum(row['SKU Subtotal After Discount']) + parseNum(row['SKU Platform Discount']);
         agg.completedRevenue += skuRevenue;
+        const sku = String(row['Seller SKU'] || '').trim();
+        if (sku) {
+          const qty = parseNum(row['Quantity']) || 1;
+          for (let i = 0; i < qty; i++) skuCodes.push(sku);
+        }
       }
 
       if (!orderSeen.has(orderId)) {
@@ -249,6 +264,7 @@ function FileUploadForm() {
     }
 
     setTotalRawOrders(orderSeen.size);
+    setCollectedSkuCodes(skuCodes);
     return Array.from(dailyMap.values()).sort(function(a, b) { return a.date.localeCompare(b.date); });
   }
 
@@ -320,6 +336,7 @@ function FileUploadForm() {
     setDetectedPlatform(null);
     setRawData(null);
     setTotalRawOrders(0);
+    setCollectedSkuCodes([]);
 
     const reader = new FileReader();
     reader.onload = function(evt) {
@@ -572,6 +589,7 @@ function FileUploadForm() {
     setDetectedPlatform(null);
     setRawData(null);
     setTotalRawOrders(0);
+    setCollectedSkuCodes([]);
     setMktFileName('');
     setMktDataMap({});
     setManualMktAmount('');
@@ -582,6 +600,10 @@ function FileUploadForm() {
 
   const validCount = parsedRows.filter(function(r) { return !r.error; }).length;
   const errorCount = parsedRows.filter(function(r) { return !!r.error; }).length;
+  const productSummary = useMemo(function() {
+    if (collectedSkuCodes.length === 0) return [];
+    return aggregateProducts(collectedSkuCodes);
+  }, [collectedSkuCodes]);
 
   if (!currentUser) return null;
 
@@ -986,6 +1008,70 @@ function FileUploadForm() {
                             <svg className="w-3 h-3 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
                           </span>
                         )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* SKU Best-seller table */}
+      {productSummary.length > 0 && parsedRows.length > 0 && (
+        <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-700/50 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="w-6 h-6 rounded-full bg-emerald-500/15 text-emerald-400 flex items-center justify-center">
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+              </span>
+              <div>
+                <h2 className="font-semibold text-gray-100">Sản phẩm bán chạy</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {productSummary.length} sản phẩm từ {collectedSkuCodes.length} SKU
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-800/80 border-b border-slate-700/50">
+                  <th className="text-center px-4 py-2.5 font-medium text-gray-400 w-12">#</th>
+                  <th className="text-left px-4 py-2.5 font-medium text-gray-400">Tên sản phẩm</th>
+                  <th className="text-right px-4 py-2.5 font-medium text-gray-400">Số lượng</th>
+                  <th className="text-right px-4 py-2.5 font-medium text-gray-400">Số đơn</th>
+                  <th className="text-center px-4 py-2.5 font-medium text-gray-400 w-32">Tỷ trọng</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {productSummary.map(function(item, i) {
+                  const totalQty = productSummary.reduce(function(sum, p) { return sum + p.totalQuantity; }, 0);
+                  const pct = totalQty > 0 ? item.totalQuantity / totalQty : 0;
+                  return (
+                    <tr key={i} className="hover:bg-slate-800/50">
+                      <td className="px-4 py-2.5 text-center">
+                        {i < 3 ? (
+                          <span className={`inline-flex w-6 h-6 rounded-full items-center justify-center text-xs font-bold ${
+                            i === 0 ? 'bg-yellow-500/15 text-yellow-400' :
+                            i === 1 ? 'bg-gray-400/15 text-gray-300' :
+                            'bg-amber-700/15 text-amber-600'
+                          }`}>{i + 1}</span>
+                        ) : (
+                          <span className="text-gray-500">{i + 1}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 font-medium text-gray-200">{item.product}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-gray-100">{item.totalQuantity.toLocaleString()}</td>
+                      <td className="px-4 py-2.5 text-right text-gray-400">{item.orderCount.toLocaleString()}</td>
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-500 rounded-full" style={{ width: (pct * 100) + '%' }} />
+                          </div>
+                          <span className="text-xs text-gray-400 w-10 text-right">{(pct * 100).toFixed(1)}%</span>
+                        </div>
                       </td>
                     </tr>
                   );
