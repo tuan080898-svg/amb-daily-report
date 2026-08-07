@@ -379,17 +379,26 @@ function FileUploadForm() {
         const text = evt.target?.result as string;
         const lines = text.split(/\r?\n/).filter(function(l) { return l.trim().length > 0; });
 
-        let headerDate = '';
+        let headerDateStart = '';
+        let headerDateEnd = '';
         const dailyCosts: Record<string, number> = {};
         let totalCost = 0;
         let inData = false;
         let dateColIdx = -1;
+        let hasPerRowDate = false;
 
         for (const line of lines) {
           if (!inData) {
-            const dateMatch = line.match(/Khoảng thời gian:\s*,?\s*(\d{2})\/(\d{2})\/(\d{4})/);
-            if (dateMatch) {
-              headerDate = dateMatch[3] + '-' + dateMatch[2] + '-' + dateMatch[1];
+            const rangeMatch = line.match(/Khoảng thời gian:\s*,?\s*(\d{2})\/(\d{2})\/(\d{4})\s*-\s*(\d{2})\/(\d{2})\/(\d{4})/);
+            if (rangeMatch) {
+              headerDateStart = rangeMatch[3] + '-' + rangeMatch[2] + '-' + rangeMatch[1];
+              headerDateEnd = rangeMatch[6] + '-' + rangeMatch[5] + '-' + rangeMatch[4];
+            } else {
+              const singleMatch = line.match(/Khoảng thời gian:\s*,?\s*(\d{2})\/(\d{2})\/(\d{4})/);
+              if (singleMatch) {
+                headerDateStart = singleMatch[3] + '-' + singleMatch[2] + '-' + singleMatch[1];
+                headerDateEnd = headerDateStart;
+              }
             }
             if (line.startsWith('Thứ tự,') || line.startsWith('Thứ tự\t')) {
               inData = true;
@@ -402,13 +411,13 @@ function FileUploadForm() {
           const cols = line.split(',');
           if (cols.length < 4) continue;
 
-          let rowDate = headerDate;
+          let rowDate = '';
           if (dateColIdx >= 0 && cols[dateColIdx]) {
             const raw = cols[dateColIdx].trim();
             const dm = raw.match(/(\d{2})\/(\d{2})\/(\d{4})/);
-            if (dm) rowDate = dm[3] + '-' + dm[2] + '-' + dm[1];
+            if (dm) { rowDate = dm[3] + '-' + dm[2] + '-' + dm[1]; hasPerRowDate = true; }
             const ymd = raw.match(/(\d{4})-(\d{2})-(\d{2})/);
-            if (ymd) rowDate = ymd[0];
+            if (ymd) { rowDate = ymd[0]; hasPerRowDate = true; }
           }
 
           const amountRaw = cols[3].trim();
@@ -416,18 +425,33 @@ function FileUploadForm() {
 
           if (amount < 0) {
             const absAmount = Math.abs(amount);
-            dailyCosts[rowDate] = (dailyCosts[rowDate] || 0) + absAmount;
+            if (rowDate) {
+              dailyCosts[rowDate] = (dailyCosts[rowDate] || 0) + absAmount;
+            }
             totalCost += absAmount;
           }
         }
 
-        if (!headerDate && Object.keys(dailyCosts).length === 0) {
+        if (!headerDateStart && Object.keys(dailyCosts).length === 0) {
           setMktParseError('Không tìm thấy ngày trong file');
           return;
         }
         if (totalCost <= 0) {
           setMktParseError('Không tìm thấy chi phí quảng cáo trong file');
           return;
+        }
+
+        if (!hasPerRowDate && headerDateStart) {
+          const allDays: string[] = [];
+          const d = new Date(headerDateStart);
+          const end = new Date(headerDateEnd || headerDateStart);
+          while (d <= end) {
+            allDays.push(d.toISOString().slice(0, 10));
+            d.setDate(d.getDate() + 1);
+          }
+          if (allDays.length === 0) allDays.push(headerDateStart);
+          const perDay = Math.round(totalCost / allDays.length);
+          allDays.forEach(function(day) { dailyCosts[day] = perDay; });
         }
 
         setMktDataMap(dailyCosts);
