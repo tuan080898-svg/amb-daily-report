@@ -75,13 +75,14 @@ export async function dbAddShop(shop: Shop): Promise<void> {
 }
 
 export async function dbUpdateShop(shop: Shop): Promise<void> {
-  await db().from('shops').update({
+  const { error } = await db().from('shops').update({
     name: shop.name,
     channel: shop.channel,
     region: shop.region,
     assigned_to: shop.assignedTo,
     default_monthly_target: shop.defaultMonthlyTarget,
   }).eq('id', shop.id);
+  if (error) throw new Error('Cập nhật shop thất bại: ' + error.message);
 }
 
 export async function dbDeleteShop(shopId: string): Promise<void> {
