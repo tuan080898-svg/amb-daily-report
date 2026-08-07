@@ -590,7 +590,8 @@ function FileUploadForm() {
       try {
         const existing = JSON.parse(localStorage.getItem('amb_sku_imports') || '[]');
         const filtered = existing.filter(function(e: { shopId: string; dateFrom: string; dateTo: string }) {
-          return !(e.shopId === entry.shopId && e.dateFrom === entry.dateFrom && e.dateTo === entry.dateTo);
+          if (e.shopId !== entry.shopId) return true;
+          return e.dateTo < entry.dateFrom || e.dateFrom > entry.dateTo;
         });
         filtered.push(entry);
         localStorage.setItem('amb_sku_imports', JSON.stringify(filtered));
