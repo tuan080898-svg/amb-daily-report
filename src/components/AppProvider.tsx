@@ -53,6 +53,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     const user = state.users.find(u => u.email === email && u.password === password);
     if (user) {
       setState(s => ({ ...s, currentUser: user }));
+      try { localStorage.setItem('amb_user_id', user.id); } catch {}
       return true;
     }
     return false;
@@ -60,7 +61,19 @@ export default function AppProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     setState(s => ({ ...s, currentUser: null }));
+    try { localStorage.removeItem('amb_user_id'); } catch {}
   }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    try {
+      const savedId = localStorage.getItem('amb_user_id');
+      if (savedId && !state.currentUser) {
+        const user = state.users.find(u => u.id === savedId);
+        if (user) setState(s => ({ ...s, currentUser: user }));
+      }
+    } catch {}
+  }, [loading]);
 
   const addReport = useCallback((report: DailyReport) => {
     setState(s => ({ ...s, reports: [...s.reports, report] }));
