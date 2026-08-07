@@ -576,11 +576,33 @@ function FileUploadForm() {
       }
     }
 
+    if (collectedSkuCodes.length > 0 && selectedShopId && validRows.length > 0) {
+      const shop = shops.find(function(s) { return s.id === selectedShopId; });
+      const dates = validRows.map(function(r) { return r.date; }).sort();
+      const entry = {
+        shopId: selectedShopId,
+        shopName: shop?.name || selectedShopId,
+        dateFrom: dates[0],
+        dateTo: dates[dates.length - 1],
+        skuCodes: collectedSkuCodes,
+        importedAt: new Date().toISOString(),
+      };
+      try {
+        const existing = JSON.parse(localStorage.getItem('amb_sku_imports') || '[]');
+        const filtered = existing.filter(function(e: { shopId: string; dateFrom: string; dateTo: string }) {
+          return !(e.shopId === entry.shopId && e.dateFrom === entry.dateFrom && e.dateTo === entry.dateTo);
+        });
+        filtered.push(entry);
+        localStorage.setItem('amb_sku_imports', JSON.stringify(filtered));
+      } catch (_) {}
+    }
+
     const mktTotal = Object.values(mktDataMap).reduce(function(a, b) { return a + b; }, 0);
     const parts: string[] = [];
     if (added > 0) parts.push(added + ' báo cáo mới');
     if (updated > 0) parts.push('cập nhật ' + updated + ' báo cáo');
     if (mktTotal > 0) parts.push('CP QC ' + formatCurrency(mktTotal));
+    if (collectedSkuCodes.length > 0) parts.push(collectedSkuCodes.length + ' SKU');
     setSuccess('Đã import: ' + parts.join(', '));
 
     setParsedRows([]);
