@@ -17,35 +17,35 @@ const IS_SUPABASE = IS_SUPABASE_CONFIGURED;
 
 export default function AppProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState(createInitialState);
-  const [loading, setLoading] = useState(IS_SUPABASE);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!IS_SUPABASE) {
-      try {
-        const savedId = localStorage.getItem('amb_user_id');
-        if (savedId) {
-          const user = state.users.find(u => u.id === savedId);
-          if (user) setState(s => ({ ...s, currentUser: user }));
-        }
-      } catch {}
-      return;
-    }
     let cancelled = false;
 
-    async function loadAll() {
+    async function init() {
+      let savedId: string | null = null;
+      try { savedId = localStorage.getItem('amb_user_id'); } catch {}
+
+      if (!IS_SUPABASE) {
+        if (savedId) {
+          setState(s => {
+            const user = s.users.find(u => u.id === savedId);
+            return user ? { ...s, currentUser: user } : s;
+          });
+        }
+        if (!cancelled) setLoading(false);
+        return;
+      }
+
       try {
         const [users, shops, reports, kpis, plans, config] = await Promise.all([
           dbGetUsers(), dbGetShops(), dbGetReports(), dbGetKPIs(), dbGetPlans(), dbGetConfig(),
         ]);
         if (cancelled) return;
         let savedUser = null;
-        try {
-          const savedId = localStorage.getItem('amb_user_id');
-          if (savedId) {
-            const allUsers = users.length > 0 ? users : [];
-            savedUser = allUsers.find(u => u.id === savedId) || null;
-          }
-        } catch {}
+        if (savedId && users.length > 0) {
+          savedUser = users.find(u => u.id === savedId) || null;
+        }
         setState(s => ({
           ...s,
           users: users.length > 0 ? users : s.users,
@@ -58,12 +58,18 @@ export default function AppProvider({ children }: { children: ReactNode }) {
         }));
       } catch (err) {
         console.error('Failed to load from Supabase:', err);
+        if (savedId && !cancelled) {
+          setState(s => {
+            const user = s.users.find(u => u.id === savedId);
+            return user ? { ...s, currentUser: user } : s;
+          });
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
 
-    loadAll();
+    init();
     return () => { cancelled = true; };
   }, []);
 

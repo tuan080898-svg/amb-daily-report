@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppState } from '@/lib/store';
 
@@ -8,8 +8,14 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const { login } = useAppState();
+  const { login, currentUser } = useAppState();
   const router = useRouter();
+
+  useEffect(() => {
+    if (currentUser) {
+      router.replace('/dashboard');
+    }
+  }, [currentUser, router]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
