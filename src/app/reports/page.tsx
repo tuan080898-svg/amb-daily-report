@@ -96,8 +96,9 @@ function FileUploadForm() {
   const mktFileInputRef = useRef<HTMLInputElement>(null);
   const [mktFileName, setMktFileName] = useState('');
   const [mktParseError, setMktParseError] = useState('');
-  const [mktData, setMktData] = useState<{ date: string; totalCost: number; details: { desc: string; amount: number }[] } | null>(null);
-  const [manualMktDate, setManualMktDate] = useState(toDateString(new Date()));
+  const [mktDataMap, setMktDataMap] = useState<Record<string, number>>({});
+  const [manualMktDateFrom, setManualMktDateFrom] = useState(toDateString(new Date()));
+  const [manualMktDateTo, setManualMktDateTo] = useState(toDateString(new Date()));
   const [manualMktAmount, setManualMktAmount] = useState('');
   const [showGuide, setShowGuide] = useState(false);
 
@@ -276,7 +277,7 @@ function FileUploadForm() {
 
     return aggs.map(function(agg) {
       const target = calcDailyTarget(agg.date, shopId, shop);
-      const adCost = (mktData && mktData.date === agg.date) ? mktData.totalCost : 0;
+      const adCost = mktDataMap[agg.date] || 0;
 
       return {
         shopName: shop.name,
@@ -370,7 +371,7 @@ function FileUploadForm() {
     if (!file) return;
     setMktFileName(file.name);
     setMktParseError('');
-    setMktData(null);
+    setMktDataMap({});
 
     const reader = new FileReader();
     reader.onload = function(evt) {
@@ -378,36 +379,49 @@ function FileUploadForm() {
         const text = evt.target?.result as string;
         const lines = text.split(/\r?\n/).filter(function(l) { return l.trim().length > 0; });
 
-        let dateStr = '';
-        const details: { desc: string; amount: number }[] = [];
+        let headerDate = '';
+        const dailyCosts: Record<string, number> = {};
         let totalCost = 0;
         let inData = false;
+        let dateColIdx = -1;
 
         for (const line of lines) {
           if (!inData) {
             const dateMatch = line.match(/Khoảng thời gian:\s*,?\s*(\d{2})\/(\d{2})\/(\d{4})/);
             if (dateMatch) {
-              dateStr = dateMatch[3] + '-' + dateMatch[2] + '-' + dateMatch[1];
+              headerDate = dateMatch[3] + '-' + dateMatch[2] + '-' + dateMatch[1];
             }
             if (line.startsWith('Thứ tự,') || line.startsWith('Thứ tự\t')) {
               inData = true;
+              const headerCols = line.split(',').map(function(c) { return c.trim().toLowerCase(); });
+              dateColIdx = headerCols.findIndex(function(c) { return c === 'ngày' || c === 'date' || c === 'ngay'; });
             }
             continue;
           }
 
           const cols = line.split(',');
           if (cols.length < 4) continue;
-          const desc = cols[2].trim();
+
+          let rowDate = headerDate;
+          if (dateColIdx >= 0 && cols[dateColIdx]) {
+            const raw = cols[dateColIdx].trim();
+            const dm = raw.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+            if (dm) rowDate = dm[3] + '-' + dm[2] + '-' + dm[1];
+            const ymd = raw.match(/(\d{4})-(\d{2})-(\d{2})/);
+            if (ymd) rowDate = ymd[0];
+          }
+
           const amountRaw = cols[3].trim();
           const amount = parseInt(amountRaw.replace(/[^\d-]/g, '')) || 0;
 
           if (amount < 0) {
-            details.push({ desc, amount: Math.abs(amount) });
-            totalCost += Math.abs(amount);
+            const absAmount = Math.abs(amount);
+            dailyCosts[rowDate] = (dailyCosts[rowDate] || 0) + absAmount;
+            totalCost += absAmount;
           }
         }
 
-        if (!dateStr) {
+        if (!headerDate && Object.keys(dailyCosts).length === 0) {
           setMktParseError('Không tìm thấy ngày trong file');
           return;
         }
@@ -416,15 +430,14 @@ function FileUploadForm() {
           return;
         }
 
-        setMktData({ date: dateStr, totalCost, details });
+        setMktDataMap(dailyCosts);
         if (rawData && detectedPlatform && selectedShopId) {
-          const newMkt = { date: dateStr, totalCost, details };
           const aggs = detectedPlatform === 'shopee' ? aggregateShopee(rawData) : aggregateTikTok(rawData);
           const shop = shops.find(function(s) { return s.id === selectedShopId; });
           if (shop) {
             const rows = aggs.map(function(agg) {
               const target = calcDailyTarget(agg.date, selectedShopId, shop);
-              const adCost = newMkt.date === agg.date ? newMkt.totalCost : 0;
+              const adCost = dailyCosts[agg.date] || 0;
               return {
                 shopName: shop.name, shopId: selectedShopId, date: agg.date,
                 targetRevenue: target, actualRevenue: agg.completedRevenue, adSpend: adCost,
@@ -444,9 +457,20 @@ function FileUploadForm() {
 
   function handleManualMktApply() {
     const amount = parseInt(manualMktAmount) || 0;
-    if (!manualMktDate || amount <= 0) return;
-    const newMkt = { date: manualMktDate, totalCost: amount, details: [] };
-    setMktData(newMkt);
+    if (!manualMktDateFrom || amount <= 0) return;
+    const dateTo = manualMktDateTo || manualMktDateFrom;
+    const days: string[] = [];
+    const d = new Date(manualMktDateFrom);
+    const end = new Date(dateTo);
+    while (d <= end) {
+      days.push(d.toISOString().slice(0, 10));
+      d.setDate(d.getDate() + 1);
+    }
+    if (days.length === 0) days.push(manualMktDateFrom);
+    const perDay = Math.round(amount / days.length);
+    const newMap: Record<string, number> = {};
+    days.forEach(function(day) { newMap[day] = perDay; });
+    setMktDataMap(newMap);
     setMktFileName('');
     setMktParseError('');
     if (mktFileInputRef.current) mktFileInputRef.current.value = '';
@@ -456,7 +480,7 @@ function FileUploadForm() {
       if (shop) {
         const rows = aggs.map(function(agg) {
           const target = calcDailyTarget(agg.date, selectedShopId, shop);
-          const adCost = newMkt.date === agg.date ? newMkt.totalCost : 0;
+          const adCost = newMap[agg.date] || 0;
           return {
             shopName: shop.name, shopId: selectedShopId, date: agg.date,
             targetRevenue: target, actualRevenue: agg.completedRevenue, adSpend: adCost,
@@ -506,20 +530,24 @@ function FileUploadForm() {
       }
     }
 
-    if (mktData && selectedShopId && validRows.length === 0) {
-      const existing = reports.find(function(r) {
-        return r.shopId === selectedShopId && r.date === mktData.date;
-      });
-      if (existing) {
-        updateReport({ ...existing, adSpend: mktData.totalCost });
-        updated++;
+    const mktDates = Object.keys(mktDataMap);
+    if (mktDates.length > 0 && selectedShopId && validRows.length === 0) {
+      for (const mktDate of mktDates) {
+        const existing = reports.find(function(r) {
+          return r.shopId === selectedShopId && r.date === mktDate;
+        });
+        if (existing) {
+          updateReport({ ...existing, adSpend: mktDataMap[mktDate] });
+          updated++;
+        }
       }
     }
 
+    const mktTotal = Object.values(mktDataMap).reduce(function(a, b) { return a + b; }, 0);
     const parts: string[] = [];
     if (added > 0) parts.push(added + ' báo cáo mới');
     if (updated > 0) parts.push('cập nhật ' + updated + ' báo cáo');
-    if (mktData) parts.push('CP QC ' + formatCurrency(mktData.totalCost));
+    if (mktTotal > 0) parts.push('CP QC ' + formatCurrency(mktTotal));
     setSuccess('Đã import: ' + parts.join(', '));
 
     setParsedRows([]);
@@ -529,7 +557,7 @@ function FileUploadForm() {
     setRawData(null);
     setTotalRawOrders(0);
     setMktFileName('');
-    setMktData(null);
+    setMktDataMap({});
     setManualMktAmount('');
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (mktFileInputRef.current) mktFileInputRef.current.value = '';
@@ -691,15 +719,15 @@ function FileUploadForm() {
               <p className="text-xs text-gray-500">Tuỳ chọn — bỏ qua nếu không có</p>
             </div>
           </div>
-          {mktData && (
+          {Object.keys(mktDataMap).length > 0 && (
             <div className="flex items-center gap-2">
               <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 border border-blue-500/20 rounded-lg text-sm text-blue-400">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4" /></svg>
-                {mktData.date} — {formatCurrency(mktData.totalCost)} VNĐ
+                {Object.keys(mktDataMap).length} ngày — {formatCurrency(Object.values(mktDataMap).reduce(function(a,b){return a+b},0))} VNĐ
               </span>
               <button
                 type="button"
-                onClick={function() { setMktData(null); setMktFileName(''); setManualMktDate(''); setManualMktAmount(''); if (mktFileInputRef.current) mktFileInputRef.current.value = ''; }}
+                onClick={function() { setMktDataMap({}); setMktFileName(''); setManualMktDateFrom(toDateString(new Date())); setManualMktDateTo(toDateString(new Date())); setManualMktAmount(''); if (mktFileInputRef.current) mktFileInputRef.current.value = ''; }}
                 className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
                 title="Xoá CP QC"
               >
@@ -732,11 +760,11 @@ function FileUploadForm() {
               {mktFileName ? (
                 <div>
                   <p className="text-sm text-gray-200 font-medium">{mktFileName}</p>
-                  {mktData && mktData.details.length > 0 && (
+                  {Object.keys(mktDataMap).length > 0 && (
                     <div className="mt-1.5 text-xs">
-                      <span className="text-gray-500">Ngày {mktData.date}</span>
+                      <span className="text-gray-500">{Object.keys(mktDataMap).length} ngày</span>
                       <span className="mx-1.5 text-gray-600">|</span>
-                      <span className="font-semibold text-red-400">{formatCurrency(mktData.totalCost)} VNĐ</span>
+                      <span className="font-semibold text-red-400">{formatCurrency(Object.values(mktDataMap).reduce(function(a,b){return a+b},0))} VNĐ</span>
                     </div>
                   )}
                 </div>
@@ -756,18 +784,27 @@ function FileUploadForm() {
               <span className="text-xs text-gray-500">Nhập tay</span>
             </div>
             <div className="border border-slate-600 rounded-lg p-4 space-y-3 bg-slate-800/30">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Ngày</label>
+                  <label className="block text-xs text-gray-500 mb-1">Từ ngày</label>
                   <input
                     type="date"
-                    value={manualMktDate}
-                    onChange={function(e) { setManualMktDate(e.target.value); }}
+                    value={manualMktDateFrom}
+                    onChange={function(e) { setManualMktDateFrom(e.target.value); }}
                     className="w-full px-3 py-2 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-gray-500 mb-1">Chi phí (VNĐ)</label>
+                  <label className="block text-xs text-gray-500 mb-1">Đến ngày</label>
+                  <input
+                    type="date"
+                    value={manualMktDateTo}
+                    onChange={function(e) { setManualMktDateTo(e.target.value); }}
+                    className="w-full px-3 py-2 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Tổng CP (VNĐ)</label>
                   <input
                     type="text"
                     inputMode="numeric"
@@ -779,12 +816,12 @@ function FileUploadForm() {
                 </div>
               </div>
               {manualMktAmount && (
-                <p className="text-xs text-gray-500">{formatCurrency(parseInt(manualMktAmount) || 0)} VNĐ</p>
+                <p className="text-xs text-gray-500">{formatCurrency(parseInt(manualMktAmount) || 0)} VNĐ {manualMktDateFrom !== manualMktDateTo && manualMktDateTo ? ' (chia đều ' + (Math.round((new Date(manualMktDateTo).getTime() - new Date(manualMktDateFrom).getTime()) / 86400000) + 1) + ' ngày)' : ''}</p>
               )}
               <button
                 type="button"
                 onClick={handleManualMktApply}
-                disabled={!manualMktDate || !manualMktAmount || parseInt(manualMktAmount) <= 0}
+                disabled={!manualMktDateFrom || !manualMktAmount || parseInt(manualMktAmount) <= 0}
                 className="w-full py-2 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-500 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Áp dụng CP QC
@@ -802,12 +839,12 @@ function FileUploadForm() {
       </div>
 
       {/* MKT-only import */}
-      {mktData && selectedShopId && parsedRows.length === 0 && (
+      {Object.keys(mktDataMap).length > 0 && selectedShopId && parsedRows.length === 0 && (
         <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-5 flex items-center justify-between">
           <div>
             <p className="font-medium text-gray-100">Import chi phí QC</p>
             <p className="text-xs text-gray-500 mt-0.5">
-              {mktData.date} | CP QC: {formatCurrency(mktData.totalCost)}
+              {Object.keys(mktDataMap).length} ngày | CP QC: {formatCurrency(Object.values(mktDataMap).reduce(function(a,b){return a+b},0))}
             </p>
           </div>
           <button
