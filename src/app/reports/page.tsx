@@ -271,13 +271,27 @@ function FileUploadForm() {
     return baseDaily;
   }
 
-  function buildParsedRows(aggs: DailyAgg[], shopId: string): ParsedRow[] {
+  function resolveMktMap(costMap: Record<string, number>, orderDates: string[]): Record<string, number> {
+    const total = Object.values(costMap).reduce(function(a, b) { return a + b; }, 0);
+    if (total <= 0 || orderDates.length === 0) return costMap;
+    const hasMatch = Object.keys(costMap).some(function(d) { return orderDates.includes(d); });
+    if (hasMatch) return costMap;
+    const perDay = Math.round(total / orderDates.length);
+    const distributed: Record<string, number> = {};
+    orderDates.forEach(function(d) { distributed[d] = perDay; });
+    return distributed;
+  }
+
+  function buildParsedRows(aggs: DailyAgg[], shopId: string, overrideMkt?: Record<string, number>): ParsedRow[] {
     const shop = shops.find(function(s) { return s.id === shopId; });
     if (!shop) return [];
 
+    const costMap = overrideMkt || mktDataMap;
+    const effectiveMkt = resolveMktMap(costMap, aggs.map(function(a) { return a.date; }));
+
     return aggs.map(function(agg) {
       const target = calcDailyTarget(agg.date, shopId, shop);
-      const adCost = mktDataMap[agg.date] || 0;
+      const adCost = effectiveMkt[agg.date] || 0;
 
       return {
         shopName: shop.name,
@@ -389,7 +403,7 @@ function FileUploadForm() {
 
         for (const line of lines) {
           if (!inData) {
-            const rangeMatch = line.match(/Khoảng thời gian:\s*,?\s*(\d{2})\/(\d{2})\/(\d{4})\s*-\s*(\d{2})\/(\d{2})\/(\d{4})/);
+            const rangeMatch = line.match(/Khoảng thời gian:\s*,?\s*(\d{2})\/(\d{2})\/(\d{4})\s*-{1,2}\s*(\d{2})\/(\d{2})\/(\d{4})/);
             if (rangeMatch) {
               headerDateStart = rangeMatch[3] + '-' + rangeMatch[2] + '-' + rangeMatch[1];
               headerDateEnd = rangeMatch[6] + '-' + rangeMatch[5] + '-' + rangeMatch[4];
@@ -403,7 +417,9 @@ function FileUploadForm() {
             if (line.startsWith('Thứ tự,') || line.startsWith('Thứ tự\t')) {
               inData = true;
               const headerCols = line.split(',').map(function(c) { return c.trim().toLowerCase(); });
-              dateColIdx = headerCols.findIndex(function(c) { return c === 'ngày' || c === 'date' || c === 'ngay'; });
+              dateColIdx = headerCols.findIndex(function(c) {
+                return c === 'ngày' || c === 'date' || c === 'ngay' || c === 'thời gian' || c === 'thoi gian';
+              });
             }
             continue;
           }
