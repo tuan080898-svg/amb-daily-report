@@ -1,20 +1,11 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { useAppState } from '@/lib/store';
 import { toDateString } from '@/lib/utils';
 import { aggregateProducts, getAllSkuCodes } from '@/lib/sku';
 import { Channel } from '@/lib/types';
-
-interface SkuImport {
-  shopId: string;
-  shopName: string;
-  dateFrom: string;
-  dateTo: string;
-  dailySku: Record<string, string[]>;
-  importedAt: string;
-}
 
 function getMonthStart(d: Date): string {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01';
@@ -29,43 +20,12 @@ function getMonthEnd(d: Date): string {
 }
 
 export default function SkuReportPage() {
-  const { shops } = useAppState();
-  const [imports, setImports] = useState<SkuImport[]>([]);
+  const { shops, skuImports, deleteSkuImport } = useAppState();
+  const imports = skuImports;
   const [filterShop, setFilterShop] = useState('all');
   const [filterChannel, setFilterChannel] = useState<Channel | 'all'>('all');
   const [dateFrom, setDateFrom] = useState(getMonthStart(new Date()));
   const [dateTo, setDateTo] = useState(getMonthEnd(new Date()));
-
-  useEffect(function() {
-    try {
-      const raw = localStorage.getItem('amb_sku_imports');
-      if (raw) {
-        const parsed = JSON.parse(raw) as Array<Record<string, unknown>>;
-        var needsMigration = false;
-        const data = parsed.map(function(item) {
-          if (item.dailySku) return item as unknown as SkuImport;
-          needsMigration = true;
-          var oldCodes = (item.skuCodes || []) as string[];
-          var singleDay: Record<string, string[]> = {};
-          if (oldCodes.length > 0 && item.dateFrom) {
-            singleDay[item.dateFrom as string] = oldCodes;
-          }
-          return {
-            shopId: item.shopId as string,
-            shopName: item.shopName as string,
-            dateFrom: item.dateFrom as string,
-            dateTo: item.dateTo as string,
-            dailySku: singleDay,
-            importedAt: item.importedAt as string,
-          };
-        });
-        if (needsMigration) {
-          localStorage.setItem('amb_sku_imports', JSON.stringify(data));
-        }
-        setImports(data);
-      }
-    } catch (_) {}
-  }, []);
 
   const shopOptions = useMemo(function() {
     const seen = new Set<string>();
@@ -161,9 +121,8 @@ export default function SkuReportPage() {
   }
 
   function handleDeleteImport(idx: number) {
-    const updated = imports.filter(function(_, i) { return i !== idx; });
-    setImports(updated);
-    try { localStorage.setItem('amb_sku_imports', JSON.stringify(updated)); } catch (_) {}
+    const imp = imports[idx];
+    if (imp?.id) deleteSkuImport(imp.id);
   }
 
   const dateLabel = dateFrom === dateTo

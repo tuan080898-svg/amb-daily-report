@@ -58,6 +58,16 @@ export interface MonthlyPlan {
   dailyOverrides: Record<string, number>;
 }
 
+export interface SkuImport {
+  id: string;
+  shopId: string;
+  shopName: string;
+  dateFrom: string;
+  dateTo: string;
+  dailySku: Record<string, string[]>;
+  importedAt: string;
+}
+
 export interface AppConfig {
   adsThresholdGreen: number;
   adsThresholdYellow: number;

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, ReactNode } from 'react';
 import { AppContext, createInitialState } from '@/lib/store';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig } from '@/lib/types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport } from '@/lib/types';
 import { IS_SUPABASE_CONFIGURED } from '@/lib/supabase';
 import {
   dbGetUsers, dbAddUser, dbUpdateUser,
@@ -11,6 +11,7 @@ import {
   dbGetKPIs, dbUpdateKPI,
   dbGetPlans, dbUpdatePlan,
   dbGetConfig, dbUpdateConfig,
+  dbGetSkuImports, dbAddSkuImport, dbDeleteSkuImport,
 } from '@/lib/db';
 
 const IS_SUPABASE = IS_SUPABASE_CONFIGURED;
@@ -38,8 +39,8 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const [users, shops, reports, kpis, plans, config] = await Promise.all([
-          dbGetUsers(), dbGetShops(), dbGetReports(), dbGetKPIs(), dbGetPlans(), dbGetConfig(),
+        const [users, shops, reports, kpis, plans, config, skuImps] = await Promise.all([
+          dbGetUsers(), dbGetShops(), dbGetReports(), dbGetKPIs(), dbGetPlans(), dbGetConfig(), dbGetSkuImports(),
         ]);
         if (cancelled) return;
         let savedUser = null;
@@ -53,6 +54,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           reports,
           monthlyKPIs: kpis,
           monthlyPlans: plans,
+          skuImports: skuImps,
           config,
           currentUser: savedUser,
         }));
@@ -156,6 +158,22 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const addSkuImportCb = useCallback((imp: SkuImport) => {
+    setState(s => {
+      const filtered = s.skuImports.filter(e => {
+        if (e.shopId !== imp.shopId) return true;
+        return e.dateTo < imp.dateFrom || e.dateFrom > imp.dateTo;
+      });
+      return { ...s, skuImports: [...filtered, imp] };
+    });
+    if (IS_SUPABASE) dbAddSkuImport(imp).catch(err => { console.error(err); });
+  }, []);
+
+  const deleteSkuImportCb = useCallback((id: string) => {
+    setState(s => ({ ...s, skuImports: s.skuImports.filter(e => e.id !== id) }));
+    if (IS_SUPABASE) dbDeleteSkuImport(id).catch(err => { console.error(err); });
+  }, []);
+
   const getUserShops = useCallback((userId: string): Shop[] => {
     const user = state.users.find(u => u.id === userId);
     if (!user) return [];
@@ -181,6 +199,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       addShop, updateShop, deleteShop,
       updateKPI, updatePlan, updateConfig,
       addUser, updateUser, getUserShops,
+      addSkuImport: addSkuImportCb, deleteSkuImport: deleteSkuImportCb,
     }}>
       {children}
     </AppContext.Provider>

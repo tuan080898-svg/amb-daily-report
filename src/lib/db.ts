@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig } from './types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport } from './types';
 import { DEFAULT_CONFIG } from './utils';
 
 function db() {
@@ -217,4 +217,45 @@ export async function dbUpdateConfig(config: AppConfig): Promise<void> {
     cancel_return_threshold_yellow: config.cancelReturnThresholdYellow,
     cancel_return_threshold_red: config.cancelReturnThresholdRed,
   }).eq('id', 1);
+}
+
+// ==================== SKU Imports ====================
+
+export async function dbGetSkuImports(): Promise<SkuImport[]> {
+  const { data } = await db().from('sku_imports').select('*').order('imported_at', { ascending: false });
+  if (!data) return [];
+  return data.map(r => ({
+    id: r.id,
+    shopId: r.shop_id,
+    shopName: r.shop_name,
+    dateFrom: r.date_from,
+    dateTo: r.date_to,
+    dailySku: (r.daily_sku as Record<string, string[]>) || {},
+    importedAt: r.imported_at,
+  }));
+}
+
+export async function dbAddSkuImport(imp: SkuImport): Promise<void> {
+  await db().from('sku_imports').delete()
+    .eq('shop_id', imp.shopId)
+    .gte('date_from', imp.dateFrom)
+    .lte('date_to', imp.dateTo);
+  await db().from('sku_imports').delete()
+    .eq('shop_id', imp.shopId)
+    .lte('date_from', imp.dateTo)
+    .gte('date_to', imp.dateFrom);
+  const { error } = await db().from('sku_imports').insert({
+    id: imp.id,
+    shop_id: imp.shopId,
+    shop_name: imp.shopName,
+    date_from: imp.dateFrom,
+    date_to: imp.dateTo,
+    daily_sku: imp.dailySku,
+    imported_at: imp.importedAt,
+  });
+  if (error) throw new Error('Lưu SKU thất bại: ' + error.message);
+}
+
+export async function dbDeleteSkuImport(id: string): Promise<void> {
+  await db().from('sku_imports').delete().eq('id', id);
 }

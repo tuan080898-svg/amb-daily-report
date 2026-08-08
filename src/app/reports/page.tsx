@@ -84,7 +84,7 @@ interface ParsedRow {
 }
 
 function FileUploadForm() {
-  const { currentUser, shops, reports, monthlyPlans, monthlyKPIs, config, getUserShops, addReport, updateReport } = useAppState();
+  const { currentUser, shops, reports, monthlyPlans, monthlyKPIs, config, getUserShops, addReport, updateReport, addSkuImport } = useAppState();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
   const [fileNames, setFileNames] = useState<string[]>([]);
@@ -629,23 +629,15 @@ function FileUploadForm() {
     if (skuDates.length > 0 && selectedShopId && validRows.length > 0) {
       const shop = shops.find(function(s) { return s.id === selectedShopId; });
       const sortedDates = skuDates.sort();
-      const entry = {
+      addSkuImport({
+        id: 'sku-' + selectedShopId + '-' + sortedDates[0],
         shopId: selectedShopId,
         shopName: shop?.name || selectedShopId,
         dateFrom: sortedDates[0],
         dateTo: sortedDates[sortedDates.length - 1],
         dailySku: collectedSkuByDate,
         importedAt: new Date().toISOString(),
-      };
-      try {
-        const existing = JSON.parse(localStorage.getItem('amb_sku_imports') || '[]');
-        const filtered = existing.filter(function(e: { shopId: string; dateFrom: string; dateTo: string }) {
-          if (e.shopId !== entry.shopId) return true;
-          return e.dateTo < entry.dateFrom || e.dateFrom > entry.dateTo;
-        });
-        filtered.push(entry);
-        localStorage.setItem('amb_sku_imports', JSON.stringify(filtered));
-      } catch (_) {}
+      });
     }
 
     const totalSkuCount = Object.values(collectedSkuByDate).reduce(function(s, arr) { return s + arr.length; }, 0);
