@@ -1,14 +1,46 @@
-import skuData from '@/data/sku-mappings.json';
+import defaultSkuData from '@/data/sku-mappings.json';
 
 export interface SkuItem {
   product: string;
   quantity: number;
 }
 
-const SKU_MAP: Record<string, SkuItem[]> = skuData;
+export type SkuMap = Record<string, SkuItem[]>;
+
+const STORAGE_KEY = 'amb_sku_mappings';
+
+let cachedMap: SkuMap | null = null;
+
+function loadSkuMap(): SkuMap {
+  if (cachedMap) return cachedMap;
+  if (typeof window === 'undefined') return defaultSkuData as SkuMap;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      cachedMap = JSON.parse(raw) as SkuMap;
+      return cachedMap;
+    }
+  } catch (_) {}
+  cachedMap = defaultSkuData as SkuMap;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(cachedMap));
+  return cachedMap;
+}
+
+export function getSkuMap(): SkuMap {
+  return loadSkuMap();
+}
+
+export function saveSkuMap(map: SkuMap): void {
+  cachedMap = map;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+}
+
+export function invalidateCache(): void {
+  cachedMap = null;
+}
 
 export function getSkuProducts(skuCode: string): SkuItem[] {
-  return SKU_MAP[skuCode.trim()] || [];
+  return loadSkuMap()[skuCode.trim()] || [];
 }
 
 export function isComboSku(skuCode: string): boolean {
@@ -47,8 +79,9 @@ export function aggregateProducts(skuCodes: string[]): ProductSummary[] {
 }
 
 export function getAllProducts(): string[] {
+  const skuMap = loadSkuMap();
   const products = new Set<string>();
-  for (const items of Object.values(SKU_MAP)) {
+  for (const items of Object.values(skuMap)) {
     for (const item of items) {
       products.add(item.product);
     }
@@ -57,5 +90,5 @@ export function getAllProducts(): string[] {
 }
 
 export function getAllSkuCodes(): string[] {
-  return Object.keys(SKU_MAP).sort();
+  return Object.keys(loadSkuMap()).sort();
 }

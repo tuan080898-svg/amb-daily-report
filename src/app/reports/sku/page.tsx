@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
+import Link from 'next/link';
 import { useAppState } from '@/lib/store';
 import { toDateString } from '@/lib/utils';
 import { aggregateProducts, getAllSkuCodes } from '@/lib/sku';
@@ -285,6 +286,7 @@ export default function SkuReportPage() {
                     <th className="text-left px-4 py-2.5 font-medium text-gray-400">Mã SKU</th>
                     <th className="text-right px-4 py-2.5 font-medium text-gray-400">Số lần xuất hiện</th>
                     <th className="text-left px-4 py-2.5 font-medium text-gray-400">Shop</th>
+                    <th className="text-center px-4 py-2.5 font-medium text-gray-400 w-24"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
@@ -301,6 +303,12 @@ export default function SkuReportPage() {
                               return <span key={s} className="inline-flex px-2 py-0.5 rounded text-xs bg-slate-800 text-gray-400">{s}</span>;
                             })}
                           </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-center">
+                          <Link
+                            href={'/admin/sku?add=' + encodeURIComponent(item.sku)}
+                            className="inline-flex px-2 py-1 rounded text-xs bg-blue-500/15 text-blue-400 hover:bg-blue-500/25 transition-colors"
+                          >+ Mapping</Link>
                         </td>
                       </tr>
                     );
