@@ -2,10 +2,10 @@
 
 import { useState, useMemo } from 'react';
 import { useAppState } from '@/lib/store';
-import { formatCurrency, getDaysInMonth, getSaleDays, calcPlanTotal } from '@/lib/utils';
+import { formatCurrency, getDaysInMonth, getSaleDays, calcPlanTotal, getDailyTarget, getDayType } from '@/lib/utils';
 
 export default function AdminKPIPage() {
-  const { currentUser, shops, users, monthlyKPIs, monthlyPlans, updateKPI } = useAppState();
+  const { currentUser, shops, users, reports, monthlyKPIs, monthlyPlans, updateKPI, updateReport } = useAppState();
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
   const [editingShopId, setEditingShopId] = useState<string | null>(null);
@@ -35,9 +35,34 @@ export default function AdminKPIPage() {
 
   function handleSave(shopId: string) {
     updateKPI({ shopId, month: selectedMonth, kpiAmount: editValue });
+
+    const shop = shops.find(s => s.id === shopId);
+    let updatedCount = 0;
+    if (shop) {
+      const plan = monthlyPlans.find(p => p.shopId === shopId && p.month === selectedMonth);
+      if (!plan) {
+        const affectedReports = reports.filter(r => r.shopId === shopId && r.date.startsWith(selectedMonth));
+        const baseDaily = getDailyTarget(editValue, year, month);
+        for (const report of affectedReports) {
+          const dayType = getDayType(report.date);
+          const newTarget = dayType === 'sale_double' ? Math.round(baseDaily * 3)
+            : dayType === 'sale_fixed' ? Math.round(baseDaily * 2)
+            : baseDaily;
+          if (newTarget !== report.targetRevenue) {
+            updateReport({ ...report, targetRevenue: newTarget });
+            updatedCount++;
+          }
+        }
+      }
+    }
+
     setEditingShopId(null);
-    setSuccess(`Đã cập nhật KPI cho ${shops.find(s => s.id === shopId)?.name}`);
-    setTimeout(() => setSuccess(''), 3000);
+    const shopName = shop?.name || '';
+    const msg = updatedCount > 0
+      ? `Đã cập nhật KPI cho ${shopName} — ${updatedCount} báo cáo đã tính lại target`
+      : `Đã cập nhật KPI cho ${shopName}`;
+    setSuccess(msg);
+    setTimeout(() => setSuccess(''), 5000);
   }
 
   const totalKPI = kpiData.reduce((s, d) => s + d.kpiAmount, 0);
