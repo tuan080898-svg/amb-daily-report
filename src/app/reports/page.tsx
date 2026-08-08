@@ -6,7 +6,7 @@ import { toDateString, getDailyTarget, getTargetForDate, getDayType, formatCurre
 import { DailyReport, Shop } from '@/lib/types';
 import * as XLSX from 'xlsx';
 import { aggregateProducts, getSkuProducts, ProductSummary } from '@/lib/sku';
-import { loadInventory, addSaleTransactions } from '@/lib/inventory';
+import { loadInventory, addSaleTransactions, type Warehouse } from '@/lib/inventory';
 
 export default function ReportFormPage() {
   return (
@@ -104,6 +104,7 @@ function FileUploadForm() {
   const [manualMktAmount, setManualMktAmount] = useState('');
   const [showGuide, setShowGuide] = useState(false);
   const [collectedSkuByDate, setCollectedSkuByDate] = useState<Record<string, string[]>>({});
+  const [collectedSkuByDateWh, setCollectedSkuByDateWh] = useState<Record<string, Record<string, string[]>>>({});
 
   const userShops = useMemo(function() {
     if (!currentUser) return [];
@@ -226,6 +227,7 @@ function FileUploadForm() {
     const orderSeen = new Set<string>();
     const dailyMap = new Map<string, DailyAgg>();
     const skuByDate: Record<string, string[]> = {};
+    const skuByDateWh: Record<string, Record<string, string[]>> = {};
 
     for (const row of data) {
       const orderId = String(row['Order ID'] || '').trim();
@@ -253,6 +255,12 @@ function FileUploadForm() {
           if (!skuByDate[date]) skuByDate[date] = [];
           const qty = parseNum(row['Quantity']) || 1;
           for (let i = 0; i < qty; i++) skuByDate[date].push(sku);
+
+          var warehouseName = String(row['Warehouse Name'] || '').trim();
+          var skuWh: Warehouse = warehouseName.toLowerCase().includes('hcm') ? 'HCM' : 'HN';
+          if (!skuByDateWh[date]) skuByDateWh[date] = {};
+          if (!skuByDateWh[date][skuWh]) skuByDateWh[date][skuWh] = [];
+          for (let j = 0; j < qty; j++) skuByDateWh[date][skuWh].push(sku);
         }
       }
 
@@ -268,6 +276,7 @@ function FileUploadForm() {
 
     setTotalRawOrders(orderSeen.size);
     setCollectedSkuByDate(skuByDate);
+    setCollectedSkuByDateWh(skuByDateWh);
     return Array.from(dailyMap.values()).sort(function(a, b) { return a.date.localeCompare(b.date); });
   }
 
@@ -340,6 +349,7 @@ function FileUploadForm() {
     setRawData(null);
     setTotalRawOrders(0);
     setCollectedSkuByDate({});
+    setCollectedSkuByDateWh({});
 
     const reader = new FileReader();
     reader.onload = function(evt) {
@@ -605,27 +615,55 @@ function FileUploadForm() {
     const totalSkuCount = Object.values(collectedSkuByDate).reduce(function(s, arr) { return s + arr.length; }, 0);
 
     var inventoryDeducted = 0;
+    var inventoryByWh: Record<string, number> = {};
     if (totalSkuCount > 0) {
       try {
         var invData = loadInventory();
         var shopObj = shops.find(function(s) { return s.id === selectedShopId; });
         var shopLabel = shopObj?.name || selectedShopId;
-        var shopRegion = (shopObj?.region || 'HCM') as 'HCM' | 'HN';
-        Object.entries(collectedSkuByDate).forEach(function(entry) {
-          var date = entry[0]; var codes = entry[1];
-          var productQty: Record<string, number> = {};
-          codes.forEach(function(code) {
-            var items = getSkuProducts(code);
-            items.forEach(function(it) {
-              productQty[it.product] = (productQty[it.product] || 0) + it.quantity;
+        var hasWhData = Object.keys(collectedSkuByDateWh).length > 0;
+
+        if (hasWhData) {
+          Object.entries(collectedSkuByDateWh).forEach(function(dateEntry) {
+            var date = dateEntry[0];
+            var whMap = dateEntry[1];
+            Object.entries(whMap).forEach(function(whEntry) {
+              var wh = whEntry[0] as Warehouse;
+              var codes = whEntry[1];
+              var productQty: Record<string, number> = {};
+              codes.forEach(function(code) {
+                var items = getSkuProducts(code);
+                items.forEach(function(it) {
+                  productQty[it.product] = (productQty[it.product] || 0) + it.quantity;
+                });
+              });
+              var sales = Object.entries(productQty).map(function(e) { return { product: e[0], quantity: e[1] }; });
+              if (sales.length > 0) {
+                invData = addSaleTransactions(invData, sales, date, shopLabel, wh);
+                var deducted = sales.reduce(function(s, x) { return s + x.quantity; }, 0);
+                inventoryDeducted += deducted;
+                inventoryByWh[wh] = (inventoryByWh[wh] || 0) + deducted;
+              }
             });
           });
-          var sales = Object.entries(productQty).map(function(e) { return { product: e[0], quantity: e[1] }; });
-          if (sales.length > 0) {
-            invData = addSaleTransactions(invData, sales, date, shopLabel, shopRegion);
-            inventoryDeducted += sales.reduce(function(s, x) { return s + x.quantity; }, 0);
-          }
-        });
+        } else {
+          var shopRegion = (shopObj?.region || 'HCM') as Warehouse;
+          Object.entries(collectedSkuByDate).forEach(function(entry) {
+            var date = entry[0]; var codes = entry[1];
+            var productQty: Record<string, number> = {};
+            codes.forEach(function(code) {
+              var items = getSkuProducts(code);
+              items.forEach(function(it) {
+                productQty[it.product] = (productQty[it.product] || 0) + it.quantity;
+              });
+            });
+            var sales = Object.entries(productQty).map(function(e) { return { product: e[0], quantity: e[1] }; });
+            if (sales.length > 0) {
+              invData = addSaleTransactions(invData, sales, date, shopLabel, shopRegion);
+              inventoryDeducted += sales.reduce(function(s, x) { return s + x.quantity; }, 0);
+            }
+          });
+        }
       } catch (_) {}
     }
 
@@ -635,7 +673,15 @@ function FileUploadForm() {
     if (updated > 0) parts.push('cập nhật ' + updated + ' báo cáo');
     if (mktTotal > 0) parts.push('CP QC ' + formatCurrency(mktTotal));
     if (totalSkuCount > 0) parts.push(totalSkuCount + ' SKU');
-    if (inventoryDeducted > 0) parts.push('trừ kho ' + inventoryDeducted + ' SP');
+    if (inventoryDeducted > 0) {
+      var whKeys = Object.keys(inventoryByWh);
+      if (whKeys.length > 1) {
+        var whParts = whKeys.map(function(w) { return w + ' ' + inventoryByWh[w]; });
+        parts.push('trừ kho ' + whParts.join(' + ') + ' SP');
+      } else {
+        parts.push('trừ kho ' + inventoryDeducted + ' SP');
+      }
+    }
     setSuccess('Đã import: ' + parts.join(', '));
 
     setParsedRows([]);
@@ -645,6 +691,7 @@ function FileUploadForm() {
     setRawData(null);
     setTotalRawOrders(0);
     setCollectedSkuByDate({});
+    setCollectedSkuByDateWh({});
     setMktFileName('');
     setMktDataMap({});
     setManualMktAmount('');
