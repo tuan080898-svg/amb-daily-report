@@ -92,10 +92,31 @@ export default function SkuReportPage() {
     return productSummary.reduce(function(sum, p) { return sum + p.totalQuantity; }, 0);
   }, [productSummary]);
 
-  const unmatchedCount = useMemo(function() {
+  const unmatchedDetails = useMemo(function() {
     const knownSkus = new Set(getAllSkuCodes());
-    return allSkuCodes.filter(function(c) { return !knownSkus.has(c); }).length;
-  }, [allSkuCodes]);
+    var byCode: Record<string, { count: number; shops: Set<string> }> = {};
+    filteredImports.forEach(function(f) {
+      var shop = shops.find(function(s) { return s.id === f.shopId; });
+      var shopName = shop?.name || f.shopName;
+      Object.entries(f.dailySku).forEach(function(entry) {
+        var d = entry[0]; var codes = entry[1];
+        if (dateFrom && d < dateFrom) return;
+        if (dateTo && d > dateTo) return;
+        codes.forEach(function(c) {
+          if (knownSkus.has(c)) return;
+          if (!byCode[c]) byCode[c] = { count: 0, shops: new Set() };
+          byCode[c].count++;
+          byCode[c].shops.add(shopName);
+        });
+      });
+    });
+    return Object.entries(byCode)
+      .map(function(e) { return { sku: e[0], count: e[1].count, shops: Array.from(e[1].shops) }; })
+      .sort(function(a, b) { return b.count - a.count; });
+  }, [filteredImports, dateFrom, dateTo, shops]);
+
+  const unmatchedCount = unmatchedDetails.reduce(function(s, d) { return s + d.count; }, 0);
+  const [showUnmapped, setShowUnmapped] = useState(false);
 
   function setQuickRange(type: 'today' | 'thisMonth' | 'lastMonth' | 'last3Months') {
     const now = new Date();
@@ -212,8 +233,59 @@ export default function SkuReportPage() {
               <p className="text-xs text-gray-500 mb-1">Loại SP</p>
               <p className="text-2xl font-bold text-blue-400">{productSummary.length}</p>
               {unmatchedCount > 0 && (
-                <p className="text-xs text-amber-400 mt-1">{unmatchedCount} SKU chưa mapping</p>
+                <button
+                  onClick={function() { setShowUnmapped(!showUnmapped); }}
+                  className="text-xs text-amber-400 mt-1 hover:text-amber-300 underline decoration-dotted cursor-pointer"
+                >{unmatchedCount} SKU chưa mapping {showUnmapped ? '▲' : '▼'}</button>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Unmapped SKU detail */}
+        {showUnmapped && unmatchedDetails.length > 0 && (
+          <div className="bg-slate-900 border border-amber-500/30 rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-700/50 flex items-center justify-between">
+              <div>
+                <h2 className="font-semibold text-amber-400 text-sm">SKU chưa mapping</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{unmatchedDetails.length} mã SKU cần bổ sung vào bảng mapping</p>
+              </div>
+              <button
+                onClick={function() { setShowUnmapped(false); }}
+                className="p-1.5 text-gray-500 hover:text-gray-300 rounded transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-800/80 border-b border-slate-700/50">
+                    <th className="text-left px-4 py-2.5 font-medium text-gray-400">Mã SKU</th>
+                    <th className="text-right px-4 py-2.5 font-medium text-gray-400">Số lần xuất hiện</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-gray-400">Shop</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {unmatchedDetails.map(function(item) {
+                    return (
+                      <tr key={item.sku} className="hover:bg-slate-800/50">
+                        <td className="px-4 py-2.5">
+                          <code className="px-2 py-0.5 bg-slate-800 rounded text-amber-300 text-xs font-mono">{item.sku}</code>
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-gray-300">{item.count}</td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex flex-wrap gap-1">
+                            {item.shops.map(function(s) {
+                              return <span key={s} className="inline-flex px-2 py-0.5 rounded text-xs bg-slate-800 text-gray-400">{s}</span>;
+                            })}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
