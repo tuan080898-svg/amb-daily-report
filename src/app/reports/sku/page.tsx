@@ -39,7 +39,28 @@ export default function SkuReportPage() {
     try {
       const raw = localStorage.getItem('amb_sku_imports');
       if (raw) {
-        const data = JSON.parse(raw) as SkuImport[];
+        const parsed = JSON.parse(raw) as Array<Record<string, unknown>>;
+        var needsMigration = false;
+        const data = parsed.map(function(item) {
+          if (item.dailySku) return item as unknown as SkuImport;
+          needsMigration = true;
+          var oldCodes = (item.skuCodes || []) as string[];
+          var singleDay: Record<string, string[]> = {};
+          if (oldCodes.length > 0 && item.dateFrom) {
+            singleDay[item.dateFrom as string] = oldCodes;
+          }
+          return {
+            shopId: item.shopId as string,
+            shopName: item.shopName as string,
+            dateFrom: item.dateFrom as string,
+            dateTo: item.dateTo as string,
+            dailySku: singleDay,
+            importedAt: item.importedAt as string,
+          };
+        });
+        if (needsMigration) {
+          localStorage.setItem('amb_sku_imports', JSON.stringify(data));
+        }
         setImports(data);
       }
     } catch (_) {}
