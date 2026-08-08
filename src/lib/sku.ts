@@ -92,3 +92,15 @@ export function getAllProducts(): string[] {
 export function getAllSkuCodes(): string[] {
   return Object.keys(loadSkuMap()).sort();
 }
+
+export function getProductSkuCodes(): Record<string, string[]> {
+  const skuMap = loadSkuMap();
+  const result: Record<string, string[]> = {};
+  for (const [code, items] of Object.entries(skuMap)) {
+    for (const item of items) {
+      if (!result[item.product]) result[item.product] = [];
+      if (!result[item.product].includes(code)) result[item.product].push(code);
+    }
+  }
+  return result;
+}

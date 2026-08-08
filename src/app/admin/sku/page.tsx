@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAppState } from '@/lib/store';
 import { getSkuMap, saveSkuMap, invalidateCache, type SkuItem, type SkuMap } from '@/lib/sku';
+import { loadInventory, saveInventory } from '@/lib/inventory';
 
 interface EditingEntry {
   skuCode: string;
@@ -96,8 +97,24 @@ export default function AdminSkuPage() {
     saveSkuMap(updated);
     invalidateCache();
     setSkuMap(getSkuMap());
+
+    var newProducts: string[] = [];
+    var inv = loadInventory();
+    validItems.forEach(function(it) {
+      var name = it.product.trim();
+      if (name && !inv.products[name]) {
+        inv.products[name] = { initialStock: 0, alertThreshold: 10 };
+        newProducts.push(name);
+      }
+    });
+    if (newProducts.length > 0) {
+      saveInventory(inv);
+    }
+
     setEditing(null);
-    showSuccess(editing.isNew ? 'Đã thêm SKU ' + code : 'Đã cập nhật SKU ' + code);
+    var msg = editing.isNew ? 'Đã thêm SKU ' + code : 'Đã cập nhật SKU ' + code;
+    if (newProducts.length > 0) msg += ' (+ ' + newProducts.length + ' SP mới vào kho)';
+    showSuccess(msg);
   }
 
   function handleAddItem() {
