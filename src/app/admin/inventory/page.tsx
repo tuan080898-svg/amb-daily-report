@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppState } from '@/lib/store';
 import { getProductSkuCodes } from '@/lib/sku';
 import {
@@ -10,23 +10,41 @@ import {
   type InventoryData, type InventoryTransaction,
 } from '@/lib/inventory';
 
-type EditMode = null | { product: string; type: 'config' | 'import' | 'export' | 'audit' | 'history' };
+type ActionTab = 'import' | 'export' | 'audit' | 'config';
+interface BatchItem {
+  product: string;
+  quantity: number;
+}
 
 export default function AdminInventoryPage() {
   const { currentUser } = useAppState();
   const [inv, setInv] = useState<InventoryData>({ products: {}, transactions: [] });
-  const [search, setSearch] = useState('');
-  const [editMode, setEditMode] = useState<EditMode>(null);
-  const [editStock, setEditStock] = useState(0);
-  const [editThreshold, setEditThreshold] = useState(0);
-  const [actionQty, setActionQty] = useState(0);
-  const [actionNote, setActionNote] = useState('');
-  const [auditQty, setAuditQty] = useState(0);
-  const [successMsg, setSuccessMsg] = useState('');
+  const [tableSearch, setTableSearch] = useState('');
   const [showOnlyTracked, setShowOnlyTracked] = useState(false);
+  const [successMsg, setSuccessMsg] = useState('');
+  const [historyProduct, setHistoryProduct] = useState<string | null>(null);
+
+  // Unified operation panel
+  const [activeTab, setActiveTab] = useState<ActionTab>('import');
+  const [opSearch, setOpSearch] = useState('');
+  const [opShowDropdown, setOpShowDropdown] = useState(false);
+  const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
+  const [opNote, setOpNote] = useState('');
+  const [configThreshold, setConfigThreshold] = useState(10);
+  const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(function() {
     setInv(loadInventory());
+  }, []);
+
+  useEffect(function() {
+    function handleClickOutside(e: MouseEvent) {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setOpShowDropdown(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return function() { document.removeEventListener('mousedown', handleClickOutside); };
   }, []);
 
   var allProducts = useMemo(function() {
@@ -36,6 +54,19 @@ export default function AdminInventoryPage() {
   var productSkuMap = useMemo(function() {
     return getProductSkuCodes();
   }, []);
+
+  // Search results for operation panel
+  var opResults = useMemo(function() {
+    if (!opSearch.trim()) return [];
+    var q = opSearch.trim().toLowerCase();
+    var selectedNames = new Set(batchItems.map(function(b) { return b.product; }));
+    return allProducts.filter(function(p) {
+      if (selectedNames.has(p)) return false;
+      if (p.toLowerCase().includes(q)) return true;
+      var codes = productSkuMap[p] || [];
+      return codes.some(function(c) { return c.toLowerCase().includes(q); });
+    }).slice(0, 8);
+  }, [opSearch, allProducts, productSkuMap, batchItems]);
 
   var productRows = useMemo(function() {
     var rows = allProducts.map(function(product) {
@@ -50,15 +81,15 @@ export default function AdminInventoryPage() {
     if (showOnlyTracked) {
       rows = rows.filter(function(r) { return r.initial > 0; });
     }
-    if (search.trim()) {
-      var q = search.trim().toLowerCase();
+    if (tableSearch.trim()) {
+      var q = tableSearch.trim().toLowerCase();
       rows = rows.filter(function(r) {
         if (r.product.toLowerCase().includes(q)) return true;
         return r.skuCodes.some(function(c) { return c.toLowerCase().includes(q); });
       });
     }
     return rows;
-  }, [allProducts, inv, search, showOnlyTracked, productSkuMap]);
+  }, [allProducts, inv, tableSearch, showOnlyTracked, productSkuMap]);
 
   var lowStockAlerts = useMemo(function() {
     return getLowStockProducts(inv);
@@ -81,102 +112,127 @@ export default function AdminInventoryPage() {
     return n.toLocaleString('vi-VN');
   }
 
-  function handleSetConfig(product: string) {
-    var config = inv.products[product];
-    setEditStock(config ? config.initialStock : 0);
-    setEditThreshold(config ? config.alertThreshold : 10);
-    setEditMode({ product: product, type: 'config' });
+  function handleAddToBatch(product: string) {
+    var existing = batchItems.find(function(b) { return b.product === product; });
+    if (existing) return;
+    var defaultQty = 0;
+    if (activeTab === 'audit') {
+      defaultQty = getCurrentStock(inv, product);
+    }
+    setBatchItems(batchItems.concat([{ product: product, quantity: defaultQty }]));
+    setOpSearch('');
+    setOpShowDropdown(false);
   }
 
-  function handleSaveConfig() {
-    if (!editMode) return;
+  function handleRemoveFromBatch(product: string) {
+    setBatchItems(batchItems.filter(function(b) { return b.product !== product; }));
+  }
+
+  function handleBatchQtyChange(product: string, qty: number) {
+    setBatchItems(batchItems.map(function(b) {
+      if (b.product !== product) return b;
+      return { product: b.product, quantity: qty };
+    }));
+  }
+
+  function handleSubmitBatch() {
+    if (batchItems.length === 0) return;
+    var validItems = batchItems.filter(function(b) { return b.quantity > 0 || activeTab === 'audit'; });
+    if (validItems.length === 0 && activeTab !== 'audit') { alert('Vui lòng nhập số lượng > 0'); return; }
+
     var updated = { products: Object.assign({}, inv.products), transactions: inv.transactions.slice() };
-    updated.products[editMode.product] = { initialStock: editStock, alertThreshold: editThreshold };
-    saveInventory(updated);
-    setInv(updated);
-    setEditMode(null);
-    showSuccess('Đã cập nhật tồn kho: ' + editMode.product);
+    var count = 0;
+
+    if (activeTab === 'import') {
+      validItems.forEach(function(item) {
+        var tx: InventoryTransaction = {
+          id: 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+          date: new Date().toISOString().slice(0, 10),
+          product: item.product,
+          quantity: item.quantity,
+          type: 'import',
+          note: opNote || 'Nhập kho',
+        };
+        updated.transactions = updated.transactions.concat([tx]);
+        count++;
+      });
+      saveInventory(updated);
+      setInv(updated);
+      showSuccess('Đã nhập kho ' + count + ' sản phẩm');
+    } else if (activeTab === 'export') {
+      validItems.forEach(function(item) {
+        var tx: InventoryTransaction = {
+          id: 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+          date: new Date().toISOString().slice(0, 10),
+          product: item.product,
+          quantity: -item.quantity,
+          type: 'adjust',
+          note: opNote || 'Trừ kho thủ công',
+        };
+        updated.transactions = updated.transactions.concat([tx]);
+        count++;
+      });
+      saveInventory(updated);
+      setInv(updated);
+      showSuccess('Đã trừ kho ' + count + ' sản phẩm');
+    } else if (activeTab === 'audit') {
+      batchItems.forEach(function(item) {
+        var current = getCurrentStock(updated, item.product);
+        var diff = item.quantity - current;
+        if (diff === 0) return;
+        var tx: InventoryTransaction = {
+          id: 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+          date: new Date().toISOString().slice(0, 10),
+          product: item.product,
+          quantity: diff,
+          type: 'adjust',
+          note: (opNote || 'Kiểm kho') + ' (trước: ' + current + ' → sau: ' + item.quantity + ')',
+        };
+        updated.transactions = updated.transactions.concat([tx]);
+        count++;
+      });
+      saveInventory(updated);
+      setInv(updated);
+      showSuccess(count > 0 ? 'Đã cân đối ' + count + ' sản phẩm' : 'Tồn kho khớp, không cần điều chỉnh');
+    } else if (activeTab === 'config') {
+      batchItems.forEach(function(item) {
+        updated.products[item.product] = { initialStock: item.quantity, alertThreshold: configThreshold };
+        count++;
+      });
+      saveInventory(updated);
+      setInv(updated);
+      showSuccess('Đã cài đặt tồn kho cho ' + count + ' sản phẩm');
+    }
+
+    setBatchItems([]);
+    setOpNote('');
   }
 
-  function handleOpenImport(product: string) {
-    setActionQty(0);
-    setActionNote('Nhập kho');
-    setEditMode({ product: product, type: 'import' });
+  function handleSwitchTab(tab: ActionTab) {
+    setActiveTab(tab);
+    setBatchItems([]);
+    setOpSearch('');
+    setOpNote('');
   }
 
-  function handleSaveImport() {
-    if (!editMode || actionQty <= 0) return;
-    var updated = addStockImport(inv, editMode.product, actionQty, actionNote || 'Nhập kho');
-    setInv(updated);
-    setEditMode(null);
-    showSuccess('Đã nhập +' + actionQty + ' ' + editMode.product);
-  }
+  var historyTxs = historyProduct ? getProductTransactions(inv, historyProduct) : [];
+  var historyStock = historyProduct ? getCurrentStock(inv, historyProduct) : 0;
 
-  function handleOpenExport(product: string) {
-    setActionQty(0);
-    setActionNote('Trừ kho thủ công');
-    setEditMode({ product: product, type: 'export' });
-  }
-
-  function handleSaveExport() {
-    if (!editMode || actionQty <= 0) return;
-    var tx: InventoryTransaction = {
-      id: 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-      date: new Date().toISOString().slice(0, 10),
-      product: editMode.product,
-      quantity: -actionQty,
-      type: 'adjust',
-      note: actionNote || 'Trừ kho thủ công',
-    };
-    var updated = { products: Object.assign({}, inv.products), transactions: inv.transactions.concat([tx]) };
-    saveInventory(updated);
-    setInv(updated);
-    setEditMode(null);
-    showSuccess('Đã trừ -' + actionQty + ' ' + editMode.product);
-  }
-
-  function handleOpenAudit(product: string) {
-    var current = getCurrentStock(inv, product);
-    setAuditQty(current);
-    setActionNote('Kiểm kho');
-    setEditMode({ product: product, type: 'audit' });
-  }
-
-  function handleSaveAudit() {
-    if (!editMode) return;
-    var current = getCurrentStock(inv, editMode.product);
-    var diff = auditQty - current;
-    if (diff === 0) { setEditMode(null); showSuccess('Tồn kho khớp, không cần điều chỉnh'); return; }
-    var tx: InventoryTransaction = {
-      id: 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-      date: new Date().toISOString().slice(0, 10),
-      product: editMode.product,
-      quantity: diff,
-      type: 'adjust',
-      note: (actionNote || 'Kiểm kho') + ' (trước: ' + current + ' → sau: ' + auditQty + ')',
-    };
-    var updated = { products: Object.assign({}, inv.products), transactions: inv.transactions.concat([tx]) };
-    saveInventory(updated);
-    setInv(updated);
-    setEditMode(null);
-    showSuccess('Kiểm kho ' + editMode.product + ': ' + (diff > 0 ? '+' : '') + diff + ' (thực tế: ' + auditQty + ')');
-  }
-
-  function handleShowHistory(product: string) {
-    setEditMode({ product: product, type: 'history' });
-  }
-
-  var editTxs = editMode?.type === 'history' ? getProductTransactions(inv, editMode.product) : [];
-  var editCurrentStock = editMode ? getCurrentStock(inv, editMode.product) : 0;
+  var tabConfig = {
+    import: { label: 'Nhập kho', color: 'emerald', qtyLabel: 'SL nhập', notePlaceholder: 'VD: Nhập từ NCC tháng 8', btnLabel: 'Nhập kho', btnClass: 'bg-emerald-600 hover:bg-emerald-500' },
+    export: { label: 'Trừ kho', color: 'red', qtyLabel: 'SL trừ', notePlaceholder: 'VD: Hàng lỗi, trả NCC', btnLabel: 'Trừ kho', btnClass: 'bg-red-600 hover:bg-red-500' },
+    audit: { label: 'Kiểm kho', color: 'purple', qtyLabel: 'Thực tế', notePlaceholder: 'VD: Kiểm kho tháng 8', btnLabel: 'Cân đối kho', btnClass: 'bg-purple-600 hover:bg-purple-500' },
+    config: { label: 'Cài đặt tồn', color: 'blue', qtyLabel: 'Tồn đầu', notePlaceholder: '', btnLabel: 'Lưu cài đặt', btnClass: 'bg-blue-600 hover:bg-blue-500' },
+  };
+  var tc = tabConfig[activeTab];
+  var borderColor = 'border-' + tc.color + '-500/30';
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-100">Quản lý Kho</h1>
-          <p className="text-sm text-gray-500 mt-1">{trackedCount}/{allProducts.length} sản phẩm đang theo dõi</p>
-        </div>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-100">Quản lý Kho</h1>
+        <p className="text-sm text-gray-500 mt-1">{trackedCount}/{allProducts.length} sản phẩm đang theo dõi</p>
       </div>
 
       {/* Success */}
@@ -200,12 +256,9 @@ export default function AdminInventoryPage() {
                     )}>{alert.status === 'out' ? 'HẾT HÀNG' : 'SẮP HẾT'}</span>
                     <span className="text-sm text-gray-200">{alert.product}</span>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <span className={'text-sm font-semibold ' + (alert.status === 'out' ? 'text-red-400' : 'text-amber-400')}>
-                      Còn {formatNum(alert.current)} (ngưỡng: {formatNum(alert.threshold)})
-                    </span>
-                    <button onClick={function() { handleOpenImport(alert.product); }} className="px-3 py-1 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 transition-colors">+ Nhập kho</button>
-                  </div>
+                  <span className={'text-sm font-semibold ' + (alert.status === 'out' ? 'text-red-400' : 'text-amber-400')}>
+                    Còn {formatNum(alert.current)} (ngưỡng: {formatNum(alert.threshold)})
+                  </span>
                 </div>
               );
             })}
@@ -213,123 +266,164 @@ export default function AdminInventoryPage() {
         </div>
       )}
 
-      {/* Config form */}
-      {editMode && editMode.type === 'config' && (
-        <div className="mb-6 bg-slate-900 border border-blue-500/30 rounded-xl p-5">
-          <h2 className="font-semibold text-gray-100 mb-4">Cài đặt tồn kho: {editMode.product}</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Tồn kho ban đầu</label>
-              <input type="number" min={0} value={editStock} onChange={function(e) { setEditStock(parseInt(e.target.value) || 0); }}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none" autoFocus />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Ngưỡng cảnh báo (sắp hết)</label>
-              <input type="number" min={0} value={editThreshold} onChange={function(e) { setEditThreshold(parseInt(e.target.value) || 0); }}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none" />
-            </div>
-          </div>
-          <div className="flex items-center gap-3 mt-4">
-            <button onClick={handleSaveConfig} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 transition-colors">Lưu</button>
-            <button onClick={function() { setEditMode(null); }} className="px-4 py-2 text-gray-400 border border-slate-600 rounded-lg text-sm hover:bg-slate-800 transition-colors">Hủy</button>
-          </div>
+      {/* === UNIFIED OPERATION PANEL === */}
+      <div className={'mb-6 bg-slate-900 border rounded-xl overflow-hidden ' + borderColor}>
+        {/* Tabs */}
+        <div className="flex border-b border-slate-700/50">
+          {(['import', 'export', 'audit', 'config'] as ActionTab[]).map(function(tab) {
+            var cfg = tabConfig[tab];
+            var isActive = activeTab === tab;
+            return (
+              <button key={tab} onClick={function() { handleSwitchTab(tab); }}
+                className={'flex-1 px-4 py-3 text-sm font-medium transition-colors ' + (
+                  isActive ? 'text-' + cfg.color + '-400 bg-' + cfg.color + '-500/10 border-b-2 border-' + cfg.color + '-400' : 'text-gray-500 hover:text-gray-300 hover:bg-slate-800/50'
+                )}>
+                {cfg.label}
+              </button>
+            );
+          })}
         </div>
-      )}
 
-      {/* Import form */}
-      {editMode && editMode.type === 'import' && (
-        <div className="mb-6 bg-slate-900 border border-emerald-500/30 rounded-xl p-5">
-          <h2 className="font-semibold text-emerald-400 mb-1">Nhập kho: {editMode.product}</h2>
-          <p className="text-xs text-gray-500 mb-4">Tồn hiện tại: {formatNum(editCurrentStock)}</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Số lượng nhập thêm</label>
-              <input type="number" min={1} value={actionQty || ''} onChange={function(e) { setActionQty(parseInt(e.target.value) || 0); }}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none" autoFocus />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Ghi chú</label>
-              <input type="text" value={actionNote} onChange={function(e) { setActionNote(e.target.value); }}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none" placeholder="VD: Nhập từ NCC" />
+        <div className="p-5">
+          {/* Search + Add */}
+          <div className="mb-4" ref={searchRef}>
+            <label className="block text-xs text-gray-400 mb-1.5">Tìm sản phẩm hoặc mã SKU</label>
+            <div className="relative">
+              <input type="text" value={opSearch}
+                onChange={function(e) { setOpSearch(e.target.value); setOpShowDropdown(true); }}
+                onFocus={function() { if (opSearch.trim()) setOpShowDropdown(true); }}
+                placeholder="Gõ tên sản phẩm hoặc mã SKU để thêm..."
+                className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none" />
+              {/* Dropdown results */}
+              {opShowDropdown && opResults.length > 0 && (
+                <div className="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                  {opResults.map(function(product) {
+                    var codes = productSkuMap[product] || [];
+                    var current = getCurrentStock(inv, product);
+                    var hasConfig = inv.products[product] && inv.products[product].initialStock > 0;
+                    return (
+                      <button key={product} onClick={function() { handleAddToBatch(product); }}
+                        className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-slate-700 transition-colors text-left border-b border-slate-700/50 last:border-0">
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm text-gray-200">{product}</span>
+                          <div className="flex flex-wrap gap-1 mt-0.5">
+                            {codes.slice(0, 3).map(function(c) {
+                              return <code key={c} className="px-1 py-0.5 bg-slate-900 rounded text-xs text-blue-300 font-mono">{c}</code>;
+                            })}
+                            {codes.length > 3 && <span className="text-xs text-gray-500">+{codes.length - 3}</span>}
+                          </div>
+                        </div>
+                        <div className="text-right ml-3 shrink-0">
+                          {hasConfig ? (
+                            <span className="text-xs text-gray-400">Tồn: {formatNum(current)}</span>
+                          ) : (
+                            <span className="text-xs text-gray-600">Chưa cài đặt</span>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
-          {actionQty > 0 && <p className="text-xs text-emerald-400 mt-2">Sau nhập: {formatNum(editCurrentStock)} → {formatNum(editCurrentStock + actionQty)}</p>}
-          <div className="flex items-center gap-3 mt-4">
-            <button onClick={handleSaveImport} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-500 transition-colors">Nhập kho</button>
-            <button onClick={function() { setEditMode(null); }} className="px-4 py-2 text-gray-400 border border-slate-600 rounded-lg text-sm hover:bg-slate-800 transition-colors">Hủy</button>
-          </div>
+
+          {/* Batch list */}
+          {batchItems.length > 0 && (
+            <div className="mb-4">
+              <div className="text-xs text-gray-400 mb-2">Đã chọn ({batchItems.length} sản phẩm)</div>
+              <div className="space-y-2">
+                {batchItems.map(function(item) {
+                  var current = getCurrentStock(inv, item.product);
+                  var codes = productSkuMap[item.product] || [];
+                  return (
+                    <div key={item.product} className="flex items-center gap-3 bg-slate-800/50 border border-slate-700/50 rounded-lg px-4 py-3">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm text-gray-200">{item.product}</div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {codes.slice(0, 2).map(function(c) {
+                            return <code key={c} className="px-1 py-0.5 bg-slate-900 rounded text-xs text-blue-300 font-mono">{c}</code>;
+                          })}
+                          {codes.length > 2 && <span className="text-xs text-gray-500">+{codes.length - 2}</span>}
+                          <span className="text-xs text-gray-500">· Tồn: {formatNum(current)}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <label className="text-xs text-gray-500">{tc.qtyLabel}:</label>
+                        <input type="number" min={0} value={item.quantity || ''}
+                          onChange={function(e) { handleBatchQtyChange(item.product, parseInt(e.target.value) || 0); }}
+                          className="w-24 px-2 py-1.5 bg-slate-800 border border-slate-600 rounded text-sm text-gray-200 text-center focus:border-blue-500 outline-none" />
+                        {activeTab === 'import' && item.quantity > 0 && (
+                          <span className="text-xs text-emerald-400">→ {formatNum(current + item.quantity)}</span>
+                        )}
+                        {activeTab === 'export' && item.quantity > 0 && (
+                          <span className="text-xs text-red-400">→ {formatNum(current - item.quantity)}</span>
+                        )}
+                        {activeTab === 'audit' && (function() {
+                          var diff = item.quantity - current;
+                          if (diff === 0) return <span className="text-xs text-gray-500">khớp</span>;
+                          return <span className={'text-xs ' + (diff > 0 ? 'text-emerald-400' : 'text-red-400')}>{diff > 0 ? '+' : ''}{formatNum(diff)}</span>;
+                        })()}
+                      </div>
+                      <button onClick={function() { handleRemoveFromBatch(item.product); }}
+                        className="p-1 text-gray-500 hover:text-red-400 rounded transition-colors" title="Xóa">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Note + threshold + submit */}
+          {batchItems.length > 0 && (
+            <div className="flex flex-wrap items-end gap-3">
+              {activeTab !== 'config' && (
+                <div className="flex-1 min-w-[200px]">
+                  <label className="block text-xs text-gray-400 mb-1">Ghi chú</label>
+                  <input type="text" value={opNote} onChange={function(e) { setOpNote(e.target.value); }}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none"
+                    placeholder={tc.notePlaceholder} />
+                </div>
+              )}
+              {activeTab === 'config' && (
+                <div className="w-48">
+                  <label className="block text-xs text-gray-400 mb-1">Ngưỡng cảnh báo</label>
+                  <input type="number" min={0} value={configThreshold} onChange={function(e) { setConfigThreshold(parseInt(e.target.value) || 0); }}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none" />
+                </div>
+              )}
+              <button onClick={handleSubmitBatch}
+                className={'px-6 py-2 text-white rounded-lg text-sm font-medium transition-colors ' + tc.btnClass}>
+                {tc.btnLabel} ({batchItems.length})
+              </button>
+              <button onClick={function() { setBatchItems([]); setOpNote(''); }}
+                className="px-4 py-2 text-gray-400 border border-slate-600 rounded-lg text-sm hover:bg-slate-800 transition-colors">
+                Hủy
+              </button>
+            </div>
+          )}
+
+          {batchItems.length === 0 && !opSearch.trim() && (
+            <p className="text-sm text-gray-600 text-center py-2">Gõ tên sản phẩm hoặc mã SKU ở ô tìm kiếm phía trên để bắt đầu</p>
+          )}
         </div>
-      )}
+      </div>
 
-      {/* Export/deduct form */}
-      {editMode && editMode.type === 'export' && (
-        <div className="mb-6 bg-slate-900 border border-red-500/30 rounded-xl p-5">
-          <h2 className="font-semibold text-red-400 mb-1">Trừ kho: {editMode.product}</h2>
-          <p className="text-xs text-gray-500 mb-4">Tồn hiện tại: {formatNum(editCurrentStock)}</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Số lượng trừ</label>
-              <input type="number" min={1} value={actionQty || ''} onChange={function(e) { setActionQty(parseInt(e.target.value) || 0); }}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-red-500 outline-none" autoFocus />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Lý do</label>
-              <input type="text" value={actionNote} onChange={function(e) { setActionNote(e.target.value); }}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-red-500 outline-none" placeholder="VD: Hàng lỗi, trả NCC" />
-            </div>
-          </div>
-          {actionQty > 0 && <p className="text-xs text-red-400 mt-2">Sau trừ: {formatNum(editCurrentStock)} → {formatNum(editCurrentStock - actionQty)}</p>}
-          <div className="flex items-center gap-3 mt-4">
-            <button onClick={handleSaveExport} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-500 transition-colors">Trừ kho</button>
-            <button onClick={function() { setEditMode(null); }} className="px-4 py-2 text-gray-400 border border-slate-600 rounded-lg text-sm hover:bg-slate-800 transition-colors">Hủy</button>
-          </div>
-        </div>
-      )}
-
-      {/* Audit/stock check form */}
-      {editMode && editMode.type === 'audit' && (
-        <div className="mb-6 bg-slate-900 border border-purple-500/30 rounded-xl p-5">
-          <h2 className="font-semibold text-purple-400 mb-1">Kiểm kho: {editMode.product}</h2>
-          <p className="text-xs text-gray-500 mb-4">Tồn trên hệ thống: {formatNum(editCurrentStock)}</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Tồn kho thực tế (đếm được)</label>
-              <input type="number" min={0} value={auditQty} onChange={function(e) { setAuditQty(parseInt(e.target.value) || 0); }}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-purple-500 outline-none" autoFocus />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-400 mb-1">Ghi chú</label>
-              <input type="text" value={actionNote} onChange={function(e) { setActionNote(e.target.value); }}
-                className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-purple-500 outline-none" placeholder="VD: Kiểm kho tháng 8" />
-            </div>
-          </div>
-          {(function() {
-            var diff = auditQty - editCurrentStock;
-            if (diff === 0) return <p className="text-xs text-gray-400 mt-2">Tồn kho khớp</p>;
-            return <p className={'text-xs mt-2 ' + (diff > 0 ? 'text-emerald-400' : 'text-red-400')}>
-              Chênh lệch: {diff > 0 ? '+' : ''}{formatNum(diff)} (hệ thống: {formatNum(editCurrentStock)} → thực tế: {formatNum(auditQty)})
-            </p>;
-          })()}
-          <div className="flex items-center gap-3 mt-4">
-            <button onClick={handleSaveAudit} className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-500 transition-colors">Cân đối kho</button>
-            <button onClick={function() { setEditMode(null); }} className="px-4 py-2 text-gray-400 border border-slate-600 rounded-lg text-sm hover:bg-slate-800 transition-colors">Hủy</button>
-          </div>
-        </div>
-      )}
-
-      {/* History */}
-      {editMode && editMode.type === 'history' && (
+      {/* History modal */}
+      {historyProduct && (
         <div className="mb-6 bg-slate-900 border border-slate-600 rounded-xl overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-700/50 flex items-center justify-between">
             <div>
-              <h2 className="font-semibold text-gray-100 text-sm">Lịch sử: {editMode.product}</h2>
-              <p className="text-xs text-gray-500 mt-0.5">{editTxs.length} giao dịch · Tồn hiện tại: {formatNum(editCurrentStock)}</p>
+              <h2 className="font-semibold text-gray-100 text-sm">Lịch sử: {historyProduct}</h2>
+              <p className="text-xs text-gray-500 mt-0.5">{historyTxs.length} giao dịch · Tồn hiện tại: {formatNum(historyStock)}</p>
             </div>
-            <button onClick={function() { setEditMode(null); }} className="p-1.5 text-gray-500 hover:text-gray-300 rounded transition-colors">
+            <button onClick={function() { setHistoryProduct(null); }} className="p-1.5 text-gray-500 hover:text-gray-300 rounded transition-colors">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
           </div>
-          {editTxs.length > 0 ? (
+          {historyTxs.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -341,7 +435,7 @@ export default function AdminInventoryPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {editTxs.map(function(tx) {
+                  {historyTxs.map(function(tx) {
                     var isIn = tx.quantity > 0;
                     return (
                       <tr key={tx.id} className="hover:bg-slate-800/50">
@@ -369,18 +463,6 @@ export default function AdminInventoryPage() {
         </div>
       )}
 
-      {/* Search */}
-      <div className="flex flex-wrap items-center gap-3 mb-4">
-        <input type="text" value={search} onChange={function(e) { setSearch(e.target.value); }}
-          placeholder="Tìm sản phẩm hoặc mã SKU..."
-          className="flex-1 min-w-[200px] max-w-md px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none" />
-        <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
-          <input type="checkbox" checked={showOnlyTracked} onChange={function(e) { setShowOnlyTracked(e.target.checked); }}
-            className="rounded border-slate-600 bg-slate-800 text-blue-500" />
-          Chỉ SP đang theo dõi
-        </label>
-      </div>
-
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4">
@@ -405,11 +487,23 @@ export default function AdminInventoryPage() {
         </div>
       </div>
 
+      {/* Table search */}
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <input type="text" value={tableSearch} onChange={function(e) { setTableSearch(e.target.value); }}
+          placeholder="Tìm trong bảng tồn kho..."
+          className="flex-1 min-w-[200px] max-w-md px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none" />
+        <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer">
+          <input type="checkbox" checked={showOnlyTracked} onChange={function(e) { setShowOnlyTracked(e.target.checked); }}
+            className="rounded border-slate-600 bg-slate-800 text-blue-500" />
+          Chỉ SP đang theo dõi
+        </label>
+      </div>
+
       {/* Product table */}
       <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden">
         <div className="px-5 py-4 border-b border-slate-700/50">
           <h2 className="font-semibold text-gray-100 text-sm">
-            Danh sách sản phẩm {search.trim() ? '(' + productRows.length + ' kết quả)' : ''}
+            Bảng tồn kho {tableSearch.trim() ? '(' + productRows.length + ' kết quả)' : ''}
           </h2>
         </div>
         <div className="overflow-x-auto">
@@ -421,8 +515,8 @@ export default function AdminInventoryPage() {
                 <th className="text-right px-4 py-2.5 font-medium text-gray-400">Tồn đầu</th>
                 <th className="text-right px-4 py-2.5 font-medium text-gray-400">Tồn hiện tại</th>
                 <th className="text-right px-4 py-2.5 font-medium text-gray-400">Ngưỡng</th>
-                <th className="text-center px-4 py-2.5 font-medium text-gray-400 w-20">TT</th>
-                <th className="text-center px-4 py-2.5 font-medium text-gray-400 w-44">Thao tác</th>
+                <th className="text-center px-4 py-2.5 font-medium text-gray-400 w-16">TT</th>
+                <th className="text-center px-4 py-2.5 font-medium text-gray-400 w-16">Xem</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -458,27 +552,12 @@ export default function AdminInventoryPage() {
                       {row.status === 'unset' && <span className="text-xs text-gray-600">—</span>}
                     </td>
                     <td className="px-4 py-3 text-center">
-                      <div className="flex items-center justify-center gap-0.5">
-                        <button onClick={function() { handleSetConfig(row.product); }} className="p-1.5 text-gray-500 hover:text-blue-400 hover:bg-blue-500/10 rounded transition-colors" title="Cài đặt">
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                      {row.initial > 0 && (
+                        <button onClick={function() { setHistoryProduct(row.product); }}
+                          className="p-1.5 text-gray-500 hover:text-gray-300 hover:bg-slate-700 rounded transition-colors" title="Lịch sử">
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                         </button>
-                        {row.initial > 0 && (
-                          <>
-                            <button onClick={function() { handleOpenImport(row.product); }} className="p-1.5 text-gray-500 hover:text-emerald-400 hover:bg-emerald-500/10 rounded transition-colors" title="Nhập kho">
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
-                            </button>
-                            <button onClick={function() { handleOpenExport(row.product); }} className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors" title="Trừ kho">
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M18 12H6" /></svg>
-                            </button>
-                            <button onClick={function() { handleOpenAudit(row.product); }} className="p-1.5 text-gray-500 hover:text-purple-400 hover:bg-purple-500/10 rounded transition-colors" title="Kiểm kho">
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>
-                            </button>
-                            <button onClick={function() { handleShowHistory(row.product); }} className="p-1.5 text-gray-500 hover:text-gray-300 hover:bg-slate-700 rounded transition-colors" title="Lịch sử">
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                            </button>
-                          </>
-                        )}
-                      </div>
+                      )}
                     </td>
                   </tr>
                 );
@@ -488,7 +567,7 @@ export default function AdminInventoryPage() {
         </div>
         {productRows.length === 0 && (
           <div className="text-center py-8 text-gray-500 text-sm">
-            {search.trim() ? 'Không tìm thấy sản phẩm hoặc SKU phù hợp' : 'Chưa có sản phẩm nào'}
+            {tableSearch.trim() ? 'Không tìm thấy sản phẩm hoặc SKU phù hợp' : 'Chưa có sản phẩm nào'}
           </div>
         )}
       </div>
