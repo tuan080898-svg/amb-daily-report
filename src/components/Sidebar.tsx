@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { href: '/reports/history', label: 'Lịch sử báo cáo', icon: '📋', roles: ['admin', 'employee'] },
   { href: '/reports/sku', label: 'SP bán chạy', icon: '🏆', roles: ['admin', 'employee'] },
   { href: '/admin/sku', label: 'Quản lý SKU', icon: '🏷️', roles: ['admin'] },
+  { href: '/admin/inventory', label: 'Quản lý Kho', icon: '📦', roles: ['admin'] },
   { href: '/admin/shops', label: 'Quản lý shop', icon: '🏪', roles: ['admin'] },
   { href: '/admin/targets', label: 'KPI tháng', icon: '💰', roles: ['admin'] },
   { href: '/admin/users', label: 'Quản lý user', icon: '👥', roles: ['admin'] },

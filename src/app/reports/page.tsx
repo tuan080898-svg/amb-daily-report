@@ -5,7 +5,8 @@ import { useAppState } from '@/lib/store';
 import { toDateString, getDailyTarget, getTargetForDate, getDayType, formatCurrency, formatPercent } from '@/lib/utils';
 import { DailyReport, Shop } from '@/lib/types';
 import * as XLSX from 'xlsx';
-import { aggregateProducts, ProductSummary } from '@/lib/sku';
+import { aggregateProducts, getSkuProducts, ProductSummary } from '@/lib/sku';
+import { loadInventory, addSaleTransactions } from '@/lib/inventory';
 
 export default function ReportFormPage() {
   return (
@@ -602,12 +603,37 @@ function FileUploadForm() {
     }
 
     const totalSkuCount = Object.values(collectedSkuByDate).reduce(function(s, arr) { return s + arr.length; }, 0);
+
+    var inventoryDeducted = 0;
+    if (totalSkuCount > 0) {
+      try {
+        var invData = loadInventory();
+        var shopLabel = shops.find(function(s) { return s.id === selectedShopId; })?.name || selectedShopId;
+        Object.entries(collectedSkuByDate).forEach(function(entry) {
+          var date = entry[0]; var codes = entry[1];
+          var productQty: Record<string, number> = {};
+          codes.forEach(function(code) {
+            var items = getSkuProducts(code);
+            items.forEach(function(it) {
+              productQty[it.product] = (productQty[it.product] || 0) + it.quantity;
+            });
+          });
+          var sales = Object.entries(productQty).map(function(e) { return { product: e[0], quantity: e[1] }; });
+          if (sales.length > 0) {
+            invData = addSaleTransactions(invData, sales, date, shopLabel);
+            inventoryDeducted += sales.reduce(function(s, x) { return s + x.quantity; }, 0);
+          }
+        });
+      } catch (_) {}
+    }
+
     const mktTotal = Object.values(mktDataMap).reduce(function(a, b) { return a + b; }, 0);
     const parts: string[] = [];
     if (added > 0) parts.push(added + ' báo cáo mới');
     if (updated > 0) parts.push('cập nhật ' + updated + ' báo cáo');
     if (mktTotal > 0) parts.push('CP QC ' + formatCurrency(mktTotal));
     if (totalSkuCount > 0) parts.push(totalSkuCount + ' SKU');
+    if (inventoryDeducted > 0) parts.push('trừ kho ' + inventoryDeducted + ' SP');
     setSuccess('Đã import: ' + parts.join(', '));
 
     setParsedRows([]);
