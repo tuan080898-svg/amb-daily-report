@@ -87,13 +87,13 @@ function FileUploadForm() {
   const { currentUser, shops, reports, monthlyPlans, monthlyKPIs, config, getUserShops, addReport, updateReport } = useAppState();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
-  const [fileName, setFileName] = useState('');
+  const [fileNames, setFileNames] = useState<string[]>([]);
   const [parseError, setParseError] = useState('');
   const [success, setSuccess] = useState('');
   const [importing, setImporting] = useState(false);
   const [detectedPlatform, setDetectedPlatform] = useState<DetectedPlatform>(null);
   const [selectedShopId, setSelectedShopId] = useState('');
-  const [rawData, setRawData] = useState<XLSX.WorkSheet | null>(null);
+  const [rawDataList, setRawDataList] = useState<XLSX.WorkSheet[]>([]);
   const [totalRawOrders, setTotalRawOrders] = useState(0);
   const mktFileInputRef = useRef<HTMLInputElement>(null);
   const [mktFileName, setMktFileName] = useState('');
@@ -113,10 +113,10 @@ function FileUploadForm() {
 
   const currentStep = useMemo(() => {
     if (parsedRows.length > 0) return 4;
-    if (rawData && detectedPlatform && selectedShopId) return 3;
+    if (rawDataList.length > 0 && detectedPlatform && selectedShopId) return 3;
     if (selectedShopId) return 2;
     return 1;
-  }, [parsedRows, rawData, detectedPlatform, selectedShopId]);
+  }, [parsedRows, rawDataList, detectedPlatform, selectedShopId]);
 
   function detectPlatform(headers: string[]): DetectedPlatform {
     const h0 = (headers[0] || '').trim();
@@ -174,8 +174,8 @@ function FileUploadForm() {
     return 0;
   }
 
-  function aggregateShopee(ws: XLSX.WorkSheet): DailyAgg[] {
-    const data = normalizeKeys(XLSX.utils.sheet_to_json(ws) as Record<string, unknown>[]);
+  function aggregateShopee(rawRows: Record<string, unknown>[]): DailyAgg[] {
+    const data = normalizeKeys(rawRows);
     const orderSeen = new Set<string>();
     const dailyMap = new Map<string, DailyAgg>();
     const skuByDate: Record<string, string[]> = {};
@@ -222,8 +222,8 @@ function FileUploadForm() {
     return Array.from(dailyMap.values()).sort(function(a, b) { return a.date.localeCompare(b.date); });
   }
 
-  function aggregateTikTok(ws: XLSX.WorkSheet): DailyAgg[] {
-    const data = normalizeKeys(XLSX.utils.sheet_to_json(ws) as Record<string, unknown>[]);
+  function aggregateTikTok(rawRows: Record<string, unknown>[]): DailyAgg[] {
+    const data = normalizeKeys(rawRows);
     const orderSeen = new Set<string>();
     const dailyMap = new Map<string, DailyAgg>();
     const skuByDate: Record<string, string[]> = {};
@@ -338,75 +338,103 @@ function FileUploadForm() {
   }
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    var files = e.target.files;
+    if (!files || files.length === 0) return;
 
-    setFileName(file.name);
+    setFileNames(Array.from(files).map(function(f) { return f.name; }));
     setParseError('');
     setSuccess('');
     setParsedRows([]);
     setDetectedPlatform(null);
-    setRawData(null);
+    setRawDataList([]);
     setTotalRawOrders(0);
     setCollectedSkuByDate({});
     setCollectedSkuByDateWh({});
 
-    const reader = new FileReader();
-    reader.onload = function(evt) {
-      try {
-        const arrayBuffer = evt.target?.result as ArrayBuffer;
-        const wb = XLSX.read(arrayBuffer, { type: 'array' });
+    var pending = files.length;
+    var worksheets: XLSX.WorkSheet[] = [];
+    var detPlat: DetectedPlatform = null;
+    var hasError = false;
 
-        let ws: XLSX.WorkSheet | undefined;
-        let platform: DetectedPlatform = null;
+    for (var fi = 0; fi < files.length; fi++) {
+      (function(file) {
+        var reader = new FileReader();
+        reader.onload = function(evt) {
+          if (hasError) return;
+          try {
+            var arrayBuffer = evt.target?.result as ArrayBuffer;
+            var wb = XLSX.read(arrayBuffer, { type: 'array' });
 
-        if (wb.SheetNames.includes('OrderSKUList')) {
-          ws = wb.Sheets['OrderSKUList'];
-          platform = 'tiktok';
-        } else {
-          ws = wb.Sheets[wb.SheetNames[0]];
-          const jsonData = normalizeKeys(XLSX.utils.sheet_to_json(ws, { range: 0 }) as Record<string, unknown>[]);
-          if (jsonData.length > 0) {
-            const headers = Object.keys(jsonData[0]);
-            platform = detectPlatform(headers);
+            var ws: XLSX.WorkSheet | undefined;
+            var platform: DetectedPlatform = null;
+
+            if (wb.SheetNames.includes('OrderSKUList')) {
+              ws = wb.Sheets['OrderSKUList'];
+              platform = 'tiktok';
+            } else {
+              ws = wb.Sheets[wb.SheetNames[0]];
+              var jsonData = normalizeKeys(XLSX.utils.sheet_to_json(ws, { range: 0 }) as Record<string, unknown>[]);
+              if (jsonData.length > 0) {
+                var headers = Object.keys(jsonData[0]);
+                platform = detectPlatform(headers);
+              }
+            }
+
+            if (!ws || !platform) {
+              setParseError('File "' + file.name + '" không nhận diện được định dạng.');
+              hasError = true;
+              return;
+            }
+
+            var checkData: Record<string, unknown>[] = XLSX.utils.sheet_to_json(ws);
+            if (checkData.length === 0) {
+              setParseError('File "' + file.name + '" không có dữ liệu');
+              hasError = true;
+              return;
+            }
+
+            if (detPlat && detPlat !== platform) {
+              setParseError('Các file phải cùng nền tảng (Shopee hoặc TikTok).');
+              hasError = true;
+              return;
+            }
+
+            detPlat = platform;
+            worksheets.push(ws);
+            pending--;
+
+            if (pending === 0) {
+              setDetectedPlatform(detPlat);
+              setRawDataList(worksheets);
+              if (selectedShopId) {
+                processWithShop(worksheets, detPlat, selectedShopId);
+              }
+            }
+          } catch (err) {
+            setParseError('Lỗi đọc file "' + file.name + '": ' + String(err));
+            hasError = true;
           }
-        }
-
-        if (!ws || !platform) {
-          setParseError('Không nhận diện được định dạng file. Hỗ trợ file đơn hàng từ Shopee (header tiếng Việt) hoặc TikTok (header tiếng Anh).');
-          return;
-        }
-
-        const checkData: Record<string, unknown>[] = XLSX.utils.sheet_to_json(ws);
-        if (checkData.length === 0) {
-          setParseError('File không có dữ liệu');
-          return;
-        }
-
-        setDetectedPlatform(platform);
-        setRawData(ws);
-
-        if (selectedShopId) {
-          processWithShop(ws, platform, selectedShopId);
-        }
-      } catch (err) {
-        setParseError('Lỗi đọc file: ' + String(err));
-      }
-    };
-    reader.readAsArrayBuffer(file);
+        };
+        reader.readAsArrayBuffer(file);
+      })(files[fi]);
+    }
   }
 
-  function processWithShop(ws: XLSX.WorkSheet, platform: DetectedPlatform, shopId: string) {
-    if (!platform || !ws) return;
-    const aggs = platform === 'shopee' ? aggregateShopee(ws) : aggregateTikTok(ws);
-    const rows = buildParsedRows(aggs, shopId);
+  function processWithShop(wsList: XLSX.WorkSheet[], platform: DetectedPlatform, shopId: string) {
+    if (!platform || wsList.length === 0) return;
+    var allData: Record<string, unknown>[] = [];
+    for (var i = 0; i < wsList.length; i++) {
+      allData = allData.concat(XLSX.utils.sheet_to_json(wsList[i]) as Record<string, unknown>[]);
+    }
+    var aggs = platform === 'shopee' ? aggregateShopee(allData) : aggregateTikTok(allData);
+    var rows = buildParsedRows(aggs, shopId);
     setParsedRows(rows);
   }
 
   function handleShopChange(shopId: string) {
     setSelectedShopId(shopId);
-    if (rawData && detectedPlatform) {
-      processWithShop(rawData, detectedPlatform, shopId);
+    if (rawDataList.length > 0 && detectedPlatform) {
+      processWithShop(rawDataList, detectedPlatform, shopId);
     }
   }
 
@@ -501,8 +529,12 @@ function FileUploadForm() {
         }
 
         setMktDataMap(dailyCosts);
-        if (rawData && detectedPlatform && selectedShopId) {
-          const aggs = detectedPlatform === 'shopee' ? aggregateShopee(rawData) : aggregateTikTok(rawData);
+        if (rawDataList.length > 0 && detectedPlatform && selectedShopId) {
+          var allMktData: Record<string, unknown>[] = [];
+          for (var mi = 0; mi < rawDataList.length; mi++) {
+            allMktData = allMktData.concat(XLSX.utils.sheet_to_json(rawDataList[mi]) as Record<string, unknown>[]);
+          }
+          const aggs = detectedPlatform === 'shopee' ? aggregateShopee(allMktData) : aggregateTikTok(allMktData);
           const rows = buildParsedRows(aggs, selectedShopId, dailyCosts);
           setParsedRows(rows);
         }
@@ -532,8 +564,12 @@ function FileUploadForm() {
     setMktFileName('');
     setMktParseError('');
     if (mktFileInputRef.current) mktFileInputRef.current.value = '';
-    if (rawData && detectedPlatform && selectedShopId) {
-      const aggs = detectedPlatform === 'shopee' ? aggregateShopee(rawData) : aggregateTikTok(rawData);
+    if (rawDataList.length > 0 && detectedPlatform && selectedShopId) {
+      var allManualData: Record<string, unknown>[] = [];
+      for (var mi = 0; mi < rawDataList.length; mi++) {
+        allManualData = allManualData.concat(XLSX.utils.sheet_to_json(rawDataList[mi]) as Record<string, unknown>[]);
+      }
+      const aggs = detectedPlatform === 'shopee' ? aggregateShopee(allManualData) : aggregateTikTok(allManualData);
       const rows = buildParsedRows(aggs, selectedShopId, newMap);
       setParsedRows(rows);
     }
@@ -685,10 +721,10 @@ function FileUploadForm() {
     setSuccess('Đã import: ' + parts.join(', '));
 
     setParsedRows([]);
-    setFileName('');
+    setFileNames([]);
     setImporting(false);
     setDetectedPlatform(null);
-    setRawData(null);
+    setRawDataList([]);
     setTotalRawOrders(0);
     setCollectedSkuByDate({});
     setCollectedSkuByDateWh({});
@@ -798,7 +834,7 @@ function FileUploadForm() {
           </div>
           <div
             className={`border-2 border-dashed rounded-lg p-6 text-center transition-all cursor-pointer ${
-              fileName ? 'border-blue-500/30 bg-blue-500/5' : 'border-slate-600 hover:border-blue-500/40 hover:bg-slate-800/50'
+              fileNames.length > 0 ? 'border-blue-500/30 bg-blue-500/5' : 'border-slate-600 hover:border-blue-500/40 hover:bg-slate-800/50'
             }`}
             onClick={function() { fileInputRef.current?.click(); }}
           >
@@ -806,15 +842,27 @@ function FileUploadForm() {
               ref={fileInputRef}
               type="file"
               accept=".xlsx,.xls,.csv"
+              multiple
               onChange={handleFileChange}
               className="hidden"
             />
-            {fileName ? (
+            {fileNames.length > 0 ? (
               <div>
                 <div className="w-10 h-10 mx-auto mb-2 rounded-lg bg-blue-500/15 flex items-center justify-center">
                   <svg className="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                 </div>
-                <p className="text-sm text-gray-200 font-medium">{fileName}</p>
+                {fileNames.length === 1 ? (
+                  <p className="text-sm text-gray-200 font-medium">{fileNames[0]}</p>
+                ) : (
+                  <div>
+                    <p className="text-sm text-gray-200 font-medium">{fileNames.length} file đã chọn</p>
+                    <div className="mt-1 space-y-0.5">
+                      {fileNames.map(function(name, idx) {
+                        return <p key={idx} className="text-xs text-gray-400 truncate">{name}</p>;
+                      })}
+                    </div>
+                  </div>
+                )}
                 {detectedPlatform && (
                   <div className="flex items-center justify-center gap-2 mt-2">
                     <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + (detectedPlatform === 'shopee' ? 'bg-orange-500/15 text-orange-400' : 'bg-pink-500/15 text-pink-400')}>
@@ -831,7 +879,7 @@ function FileUploadForm() {
                   <svg className="w-5 h-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}><path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
                 </div>
                 <p className="text-sm text-gray-300 font-medium">Click để chọn file (.xlsx)</p>
-                <p className="text-xs text-gray-500 mt-1">Shopee / TikTok Shop</p>
+                <p className="text-xs text-gray-500 mt-1">Shopee / TikTok Shop — hỗ trợ nhiều file</p>
               </>
             )}
           </div>
