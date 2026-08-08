@@ -102,7 +102,7 @@ function FileUploadForm() {
   const [manualMktDateTo, setManualMktDateTo] = useState(toDateString(new Date()));
   const [manualMktAmount, setManualMktAmount] = useState('');
   const [showGuide, setShowGuide] = useState(false);
-  const [collectedSkuCodes, setCollectedSkuCodes] = useState<string[]>([]);
+  const [collectedSkuByDate, setCollectedSkuByDate] = useState<Record<string, string[]>>({});
 
   const userShops = useMemo(function() {
     if (!currentUser) return [];
@@ -176,7 +176,7 @@ function FileUploadForm() {
     const data = normalizeKeys(XLSX.utils.sheet_to_json(ws) as Record<string, unknown>[]);
     const orderSeen = new Set<string>();
     const dailyMap = new Map<string, DailyAgg>();
-    const skuCodes: string[] = [];
+    const skuByDate: Record<string, string[]> = {};
 
     for (const row of data) {
       const orderId = String(row['Mã đơn hàng'] || '').trim();
@@ -199,8 +199,9 @@ function FileUploadForm() {
         agg.completedRevenue += calcLineRevenue(row);
         const sku = String(row['SKU phân loại hàng'] || '').trim();
         if (sku) {
+          if (!skuByDate[date]) skuByDate[date] = [];
           const qty = parseNum(row['Số lượng']) || 1;
-          for (let i = 0; i < qty; i++) skuCodes.push(sku);
+          for (let i = 0; i < qty; i++) skuByDate[date].push(sku);
         }
       }
 
@@ -215,7 +216,7 @@ function FileUploadForm() {
     }
 
     setTotalRawOrders(orderSeen.size);
-    setCollectedSkuCodes(skuCodes);
+    setCollectedSkuByDate(skuByDate);
     return Array.from(dailyMap.values()).sort(function(a, b) { return a.date.localeCompare(b.date); });
   }
 
@@ -223,7 +224,7 @@ function FileUploadForm() {
     const data = normalizeKeys(XLSX.utils.sheet_to_json(ws) as Record<string, unknown>[]);
     const orderSeen = new Set<string>();
     const dailyMap = new Map<string, DailyAgg>();
-    const skuCodes: string[] = [];
+    const skuByDate: Record<string, string[]> = {};
 
     for (const row of data) {
       const orderId = String(row['Order ID'] || '').trim();
@@ -248,8 +249,9 @@ function FileUploadForm() {
         agg.completedRevenue += skuRevenue;
         const sku = String(row['Seller SKU'] || '').trim();
         if (sku) {
+          if (!skuByDate[date]) skuByDate[date] = [];
           const qty = parseNum(row['Quantity']) || 1;
-          for (let i = 0; i < qty; i++) skuCodes.push(sku);
+          for (let i = 0; i < qty; i++) skuByDate[date].push(sku);
         }
       }
 
@@ -264,7 +266,7 @@ function FileUploadForm() {
     }
 
     setTotalRawOrders(orderSeen.size);
-    setCollectedSkuCodes(skuCodes);
+    setCollectedSkuByDate(skuByDate);
     return Array.from(dailyMap.values()).sort(function(a, b) { return a.date.localeCompare(b.date); });
   }
 
@@ -336,7 +338,7 @@ function FileUploadForm() {
     setDetectedPlatform(null);
     setRawData(null);
     setTotalRawOrders(0);
-    setCollectedSkuCodes([]);
+    setCollectedSkuByDate({});
 
     const reader = new FileReader();
     reader.onload = function(evt) {
@@ -576,15 +578,16 @@ function FileUploadForm() {
       }
     }
 
-    if (collectedSkuCodes.length > 0 && selectedShopId && validRows.length > 0) {
+    const skuDates = Object.keys(collectedSkuByDate);
+    if (skuDates.length > 0 && selectedShopId && validRows.length > 0) {
       const shop = shops.find(function(s) { return s.id === selectedShopId; });
-      const dates = validRows.map(function(r) { return r.date; }).sort();
+      const sortedDates = skuDates.sort();
       const entry = {
         shopId: selectedShopId,
         shopName: shop?.name || selectedShopId,
-        dateFrom: dates[0],
-        dateTo: dates[dates.length - 1],
-        skuCodes: collectedSkuCodes,
+        dateFrom: sortedDates[0],
+        dateTo: sortedDates[sortedDates.length - 1],
+        dailySku: collectedSkuByDate,
         importedAt: new Date().toISOString(),
       };
       try {
@@ -598,12 +601,13 @@ function FileUploadForm() {
       } catch (_) {}
     }
 
+    const totalSkuCount = Object.values(collectedSkuByDate).reduce(function(s, arr) { return s + arr.length; }, 0);
     const mktTotal = Object.values(mktDataMap).reduce(function(a, b) { return a + b; }, 0);
     const parts: string[] = [];
     if (added > 0) parts.push(added + ' báo cáo mới');
     if (updated > 0) parts.push('cập nhật ' + updated + ' báo cáo');
     if (mktTotal > 0) parts.push('CP QC ' + formatCurrency(mktTotal));
-    if (collectedSkuCodes.length > 0) parts.push(collectedSkuCodes.length + ' SKU');
+    if (totalSkuCount > 0) parts.push(totalSkuCount + ' SKU');
     setSuccess('Đã import: ' + parts.join(', '));
 
     setParsedRows([]);
@@ -612,7 +616,7 @@ function FileUploadForm() {
     setDetectedPlatform(null);
     setRawData(null);
     setTotalRawOrders(0);
-    setCollectedSkuCodes([]);
+    setCollectedSkuByDate({});
     setMktFileName('');
     setMktDataMap({});
     setManualMktAmount('');
@@ -623,10 +627,13 @@ function FileUploadForm() {
 
   const validCount = parsedRows.filter(function(r) { return !r.error; }).length;
   const errorCount = parsedRows.filter(function(r) { return !!r.error; }).length;
+  const allCollectedSkuCodes = useMemo(function() {
+    return Object.values(collectedSkuByDate).flat();
+  }, [collectedSkuByDate]);
   const productSummary = useMemo(function() {
-    if (collectedSkuCodes.length === 0) return [];
-    return aggregateProducts(collectedSkuCodes);
-  }, [collectedSkuCodes]);
+    if (allCollectedSkuCodes.length === 0) return [];
+    return aggregateProducts(allCollectedSkuCodes);
+  }, [allCollectedSkuCodes]);
 
   if (!currentUser) return null;
 
@@ -1052,7 +1059,7 @@ function FileUploadForm() {
               <div>
                 <h2 className="font-semibold text-gray-100">Sản phẩm bán chạy</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {productSummary.length} sản phẩm từ {collectedSkuCodes.length} SKU
+                  {productSummary.length} sản phẩm từ {allCollectedSkuCodes.length} SKU
                 </p>
               </div>
             </div>

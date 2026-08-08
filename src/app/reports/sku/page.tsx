@@ -11,7 +11,7 @@ interface SkuImport {
   shopName: string;
   dateFrom: string;
   dateTo: string;
-  skuCodes: string[];
+  dailySku: Record<string, string[]>;
   importedAt: string;
 }
 
@@ -73,8 +73,15 @@ export default function SkuReportPage() {
   }, [imports, filterShop, filterChannel, dateFrom, dateTo, shops]);
 
   const allSkuCodes = useMemo(function() {
-    return filteredImports.flatMap(function(f) { return f.skuCodes; });
-  }, [filteredImports]);
+    return filteredImports.flatMap(function(f) {
+      return Object.entries(f.dailySku)
+        .filter(function(entry) {
+          var d = entry[0];
+          return (!dateFrom || d >= dateFrom) && (!dateTo || d <= dateTo);
+        })
+        .flatMap(function(entry) { return entry[1]; });
+    });
+  }, [filteredImports, dateFrom, dateTo]);
 
   const productSummary = useMemo(function() {
     if (allSkuCodes.length === 0) return [];
@@ -292,7 +299,7 @@ export default function SkuReportPage() {
                       )}>{shop?.channel || 'Shop'}</span>
                       <div>
                         <p className="text-sm text-gray-200">{shop?.name || imp.shopName}</p>
-                        <p className="text-xs text-gray-500">{imp.dateFrom} &rarr; {imp.dateTo} | {imp.skuCodes.length} SKU</p>
+                        <p className="text-xs text-gray-500">{imp.dateFrom} &rarr; {imp.dateTo} | {Object.values(imp.dailySku).reduce(function(sum, arr) { return sum + arr.length; }, 0)} SKU</p>
                       </div>
                     </div>
                     <button
