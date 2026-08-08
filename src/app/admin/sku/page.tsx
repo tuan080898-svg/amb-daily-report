@@ -103,7 +103,7 @@ export default function AdminSkuPage() {
     validItems.forEach(function(it) {
       var name = it.product.trim();
       if (name && !inv.products[name]) {
-        inv.products[name] = { initialStock: 0, alertThreshold: 10 };
+        inv.products[name] = { HCM: { initialStock: 0, alertThreshold: 10 }, HN: { initialStock: 0, alertThreshold: 10 } };
         newProducts.push(name);
       }
     });

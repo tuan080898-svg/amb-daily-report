@@ -608,7 +608,9 @@ function FileUploadForm() {
     if (totalSkuCount > 0) {
       try {
         var invData = loadInventory();
-        var shopLabel = shops.find(function(s) { return s.id === selectedShopId; })?.name || selectedShopId;
+        var shopObj = shops.find(function(s) { return s.id === selectedShopId; });
+        var shopLabel = shopObj?.name || selectedShopId;
+        var shopRegion = (shopObj?.region || 'HCM') as 'HCM' | 'HN';
         Object.entries(collectedSkuByDate).forEach(function(entry) {
           var date = entry[0]; var codes = entry[1];
           var productQty: Record<string, number> = {};
@@ -620,7 +622,7 @@ function FileUploadForm() {
           });
           var sales = Object.entries(productQty).map(function(e) { return { product: e[0], quantity: e[1] }; });
           if (sales.length > 0) {
-            invData = addSaleTransactions(invData, sales, date, shopLabel);
+            invData = addSaleTransactions(invData, sales, date, shopLabel, shopRegion);
             inventoryDeducted += sales.reduce(function(s, x) { return s + x.quantity; }, 0);
           }
         });
