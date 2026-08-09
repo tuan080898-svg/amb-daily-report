@@ -47,6 +47,42 @@ export default function AppProvider({ children }: { children: ReactNode }) {
         if (savedId && users.length > 0) {
           savedUser = users.find(u => u.id === savedId) || null;
         }
+        let finalSkuImps = skuImps;
+        if (skuImps.length === 0) {
+          try {
+            const raw = localStorage.getItem('amb_sku_imports');
+            if (raw) {
+              const parsed = JSON.parse(raw) as Array<Record<string, unknown>>;
+              const migrated: SkuImport[] = parsed.map((item, i) => {
+                const dailySku = item.dailySku
+                  ? (item.dailySku as Record<string, string[]>)
+                  : (() => {
+                      const codes = (item.skuCodes || []) as string[];
+                      const d: Record<string, string[]> = {};
+                      if (codes.length > 0 && item.dateFrom) d[item.dateFrom as string] = codes;
+                      return d;
+                    })();
+                return {
+                  id: 'sku-' + (item.shopId as string) + '-' + (item.dateFrom as string) + '-' + i,
+                  shopId: item.shopId as string,
+                  shopName: item.shopName as string,
+                  dateFrom: item.dateFrom as string,
+                  dateTo: item.dateTo as string,
+                  dailySku,
+                  importedAt: (item.importedAt as string) || new Date().toISOString(),
+                };
+              });
+              if (migrated.length > 0) {
+                finalSkuImps = migrated;
+                for (const imp of migrated) {
+                  dbAddSkuImport(imp).catch(() => {});
+                }
+                localStorage.removeItem('amb_sku_imports');
+              }
+            }
+          } catch {}
+        }
+
         setState(s => ({
           ...s,
           users: users.length > 0 ? users : s.users,
@@ -54,7 +90,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           reports,
           monthlyKPIs: kpis,
           monthlyPlans: plans,
-          skuImports: skuImps,
+          skuImports: finalSkuImps,
           config,
           currentUser: savedUser,
         }));
