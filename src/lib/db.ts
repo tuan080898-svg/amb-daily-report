@@ -238,13 +238,9 @@ export async function dbGetSkuImports(): Promise<SkuImport[]> {
 export async function dbAddSkuImport(imp: SkuImport): Promise<void> {
   await db().from('sku_imports').delete()
     .eq('shop_id', imp.shopId)
-    .gte('date_from', imp.dateFrom)
-    .lte('date_to', imp.dateTo);
-  await db().from('sku_imports').delete()
-    .eq('shop_id', imp.shopId)
     .lte('date_from', imp.dateTo)
     .gte('date_to', imp.dateFrom);
-  const { error } = await db().from('sku_imports').insert({
+  const { error } = await db().from('sku_imports').upsert({
     id: imp.id,
     shop_id: imp.shopId,
     shop_name: imp.shopName,

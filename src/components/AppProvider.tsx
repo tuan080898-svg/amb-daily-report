@@ -74,10 +74,9 @@ export default function AppProvider({ children }: { children: ReactNode }) {
               });
               if (migrated.length > 0) {
                 finalSkuImps = migrated;
-                for (const imp of migrated) {
-                  dbAddSkuImport(imp).catch(() => {});
-                }
-                localStorage.removeItem('amb_sku_imports');
+                Promise.all(migrated.map(imp => dbAddSkuImport(imp)))
+                  .then(() => { try { localStorage.removeItem('amb_sku_imports'); } catch {} })
+                  .catch(() => {});
               }
             }
           } catch {}
@@ -202,12 +201,12 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       });
       return { ...s, skuImports: [...filtered, imp] };
     });
-    if (IS_SUPABASE) dbAddSkuImport(imp).catch(err => { console.error(err); });
+    if (IS_SUPABASE) dbAddSkuImport(imp).catch(err => { console.error(err); alert('Lỗi lưu SKU vào database — hãy kiểm tra bảng sku_imports đã tạo trong Supabase chưa.'); });
   }, []);
 
   const deleteSkuImportCb = useCallback((id: string) => {
     setState(s => ({ ...s, skuImports: s.skuImports.filter(e => e.id !== id) }));
-    if (IS_SUPABASE) dbDeleteSkuImport(id).catch(err => { console.error(err); });
+    if (IS_SUPABASE) dbDeleteSkuImport(id).catch(err => { console.error(err); alert('Lỗi xoá SKU: ' + err.message); });
   }, []);
 
   const getUserShops = useCallback((userId: string): Shop[] => {
