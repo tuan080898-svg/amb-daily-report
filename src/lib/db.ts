@@ -219,39 +219,40 @@ export async function dbUpdateConfig(config: AppConfig): Promise<void> {
   }).eq('id', 1);
 }
 
-// ==================== SKU Imports ====================
+// ==================== SKU Imports (Supabase Storage) ====================
+
+const SKU_BUCKET = 'sku-data';
+const SKU_FILE = 'imports.json';
 
 export async function dbGetSkuImports(): Promise<SkuImport[]> {
-  const { data } = await db().from('sku_imports').select('*').order('imported_at', { ascending: false });
-  if (!data) return [];
-  return data.map(r => ({
-    id: r.id,
-    shopId: r.shop_id,
-    shopName: r.shop_name,
-    dateFrom: r.date_from,
-    dateTo: r.date_to,
-    dailySku: (r.daily_sku as Record<string, string[]>) || {},
-    importedAt: r.imported_at,
-  }));
+  const { data, error } = await db().storage.from(SKU_BUCKET).download(SKU_FILE);
+  if (error || !data) return [];
+  try {
+    const text = await data.text();
+    const arr = JSON.parse(text) as SkuImport[];
+    return arr.sort((a, b) => b.importedAt.localeCompare(a.importedAt));
+  } catch {
+    return [];
+  }
 }
 
-export async function dbAddSkuImport(imp: SkuImport): Promise<void> {
-  await db().from('sku_imports').delete()
-    .eq('shop_id', imp.shopId)
-    .lte('date_from', imp.dateTo)
-    .gte('date_to', imp.dateFrom);
-  const { error } = await db().from('sku_imports').upsert({
-    id: imp.id,
-    shop_id: imp.shopId,
-    shop_name: imp.shopName,
-    date_from: imp.dateFrom,
-    date_to: imp.dateTo,
-    daily_sku: imp.dailySku,
-    imported_at: imp.importedAt,
-  });
+async function saveSkuList(list: SkuImport[]): Promise<void> {
+  const blob = new Blob([JSON.stringify(list)], { type: 'application/json' });
+  const { error } = await db().storage.from(SKU_BUCKET).upload(SKU_FILE, blob, { upsert: true });
   if (error) throw new Error('Lưu SKU thất bại: ' + error.message);
 }
 
+export async function dbAddSkuImport(imp: SkuImport): Promise<void> {
+  const existing = await dbGetSkuImports();
+  const filtered = existing.filter(e => {
+    if (e.shopId !== imp.shopId) return true;
+    return e.dateTo < imp.dateFrom || e.dateFrom > imp.dateTo;
+  });
+  filtered.push(imp);
+  await saveSkuList(filtered);
+}
+
 export async function dbDeleteSkuImport(id: string): Promise<void> {
-  await db().from('sku_imports').delete().eq('id', id);
+  const existing = await dbGetSkuImports();
+  await saveSkuList(existing.filter(e => e.id !== id));
 }
