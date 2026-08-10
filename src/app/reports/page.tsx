@@ -84,7 +84,7 @@ interface ParsedRow {
 }
 
 function FileUploadForm() {
-  const { currentUser, shops, reports, monthlyPlans, monthlyKPIs, config, getUserShops, addReport, updateReport, addSkuImport } = useAppState();
+  const { currentUser, shops, reports, monthlyPlans, monthlyKPIs, config, getUserShops, addReport, updateReport, addSkuImport, addAnalytics } = useAppState();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
   const [fileNames, setFileNames] = useState<string[]>([]);
@@ -105,6 +105,8 @@ function FileUploadForm() {
   const [showGuide, setShowGuide] = useState(false);
   const [collectedSkuByDate, setCollectedSkuByDate] = useState<Record<string, string[]>>({});
   const [collectedSkuByDateWh, setCollectedSkuByDateWh] = useState<Record<string, Record<string, string[]>>>({});
+  const [collectedHourly, setCollectedHourly] = useState<Record<number, { revenue: number; orders: Set<string> }>>({});
+  const [collectedProvince, setCollectedProvince] = useState<Record<string, { revenue: number; orders: Set<string> }>>({});
 
   const userShops = useMemo(function() {
     if (!currentUser) return [];
@@ -165,6 +167,14 @@ function FileUploadForm() {
     });
   }
 
+  function normalizeProvince(raw: string): string {
+    if (!raw) return '';
+    var s = raw.trim();
+    if (s.startsWith('Tỉnh ')) s = s.slice(5);
+    if (s.startsWith('Thành phố ')) s = s.slice(10);
+    return s.trim();
+  }
+
   function calcLineRevenue(row: Record<string, unknown>): number {
     const giaUuDai = parseNum(row['Giá ưu đãi']);
     const soLuong = parseNum(row['Số lượng']) || 1;
@@ -179,6 +189,8 @@ function FileUploadForm() {
     const orderSeen = new Set<string>();
     const dailyMap = new Map<string, DailyAgg>();
     const skuByDate: Record<string, string[]> = {};
+    const hourlyMap: Record<number, { revenue: number; orders: Set<string> }> = {};
+    const provinceMap: Record<string, { revenue: number; orders: Set<string> }> = {};
 
     for (const row of data) {
       const orderId = String(row['Mã đơn hàng'] || '').trim();
@@ -198,12 +210,31 @@ function FileUploadForm() {
       };
 
       if (!isCancelled) {
-        agg.completedRevenue += calcLineRevenue(row);
+        const lineRev = calcLineRevenue(row);
+        agg.completedRevenue += lineRev;
         const sku = String(row['SKU phân loại hàng'] || '').trim();
         if (sku) {
           if (!skuByDate[date]) skuByDate[date] = [];
           const qty = parseNum(row['Số lượng']) || 1;
           for (let i = 0; i < qty; i++) skuByDate[date].push(sku);
+        }
+
+        // Hourly data
+        const timeMatch = dateRaw.match(/(\d{2}):(\d{2})/);
+        const hour = timeMatch ? parseInt(timeMatch[1]) : -1;
+        if (hour >= 0 && hour <= 23) {
+          if (!hourlyMap[hour]) hourlyMap[hour] = { revenue: 0, orders: new Set() };
+          hourlyMap[hour].revenue += lineRev;
+          hourlyMap[hour].orders.add(orderId);
+        }
+
+        // Province data
+        const provinceRaw = String(row['Tỉnh/Thành phố'] || '').trim();
+        const province = normalizeProvince(provinceRaw);
+        if (province) {
+          if (!provinceMap[province]) provinceMap[province] = { revenue: 0, orders: new Set() };
+          provinceMap[province].revenue += lineRev;
+          provinceMap[province].orders.add(orderId);
         }
       }
 
@@ -219,6 +250,8 @@ function FileUploadForm() {
 
     setTotalRawOrders(orderSeen.size);
     setCollectedSkuByDate(skuByDate);
+    setCollectedHourly(hourlyMap);
+    setCollectedProvince(provinceMap);
     return Array.from(dailyMap.values()).sort(function(a, b) { return a.date.localeCompare(b.date); });
   }
 
@@ -228,6 +261,8 @@ function FileUploadForm() {
     const dailyMap = new Map<string, DailyAgg>();
     const skuByDate: Record<string, string[]> = {};
     const skuByDateWh: Record<string, Record<string, string[]>> = {};
+    const hourlyMap: Record<number, { revenue: number; orders: Set<string> }> = {};
+    const provinceMap: Record<string, { revenue: number; orders: Set<string> }> = {};
 
     for (const row of data) {
       const orderId = String(row['Order ID'] || '').trim();
@@ -262,6 +297,24 @@ function FileUploadForm() {
           if (!skuByDateWh[date][skuWh]) skuByDateWh[date][skuWh] = [];
           for (let j = 0; j < qty; j++) skuByDateWh[date][skuWh].push(sku);
         }
+
+        // Hourly data
+        const timeMatch = dateRaw.match(/(\d{2}):(\d{2}):(\d{2})/);
+        const hour = timeMatch ? parseInt(timeMatch[1]) : -1;
+        if (hour >= 0 && hour <= 23) {
+          if (!hourlyMap[hour]) hourlyMap[hour] = { revenue: 0, orders: new Set() };
+          hourlyMap[hour].revenue += skuRevenue;
+          hourlyMap[hour].orders.add(orderId);
+        }
+
+        // Province data
+        const provinceRaw = String(row['Province'] || '').trim();
+        const province = normalizeProvince(provinceRaw);
+        if (province) {
+          if (!provinceMap[province]) provinceMap[province] = { revenue: 0, orders: new Set() };
+          provinceMap[province].revenue += skuRevenue;
+          provinceMap[province].orders.add(orderId);
+        }
       }
 
       if (!orderSeen.has(orderId)) {
@@ -277,6 +330,8 @@ function FileUploadForm() {
     setTotalRawOrders(orderSeen.size);
     setCollectedSkuByDate(skuByDate);
     setCollectedSkuByDateWh(skuByDateWh);
+    setCollectedHourly(hourlyMap);
+    setCollectedProvince(provinceMap);
     return Array.from(dailyMap.values()).sort(function(a, b) { return a.date.localeCompare(b.date); });
   }
 
@@ -350,6 +405,8 @@ function FileUploadForm() {
     setTotalRawOrders(0);
     setCollectedSkuByDate({});
     setCollectedSkuByDateWh({});
+    setCollectedHourly({});
+    setCollectedProvince({});
 
     var pending = files.length;
     var worksheets: XLSX.WorkSheet[] = [];
@@ -640,6 +697,44 @@ function FileUploadForm() {
       });
     }
 
+    // Analytics import (hourly + province)
+    const hasHourly = Object.keys(collectedHourly).length > 0;
+    const hasProvince = Object.keys(collectedProvince).length > 0;
+    if ((hasHourly || hasProvince) && selectedShopId && validRows.length > 0) {
+      const shop = shops.find(function(s) { return s.id === selectedShopId; });
+      const sortedDates = Object.keys(collectedSkuByDate).length > 0
+        ? Object.keys(collectedSkuByDate).sort()
+        : validRows.map(function(r) { return r.date; }).sort();
+      const hourlyData: { hour: number; revenue: number; orders: number }[] = [];
+      for (var h = 0; h < 24; h++) {
+        const entry = collectedHourly[h];
+        hourlyData.push({
+          hour: h,
+          revenue: entry ? Math.round(entry.revenue) : 0,
+          orders: entry ? entry.orders.size : 0,
+        });
+      }
+      const provinceData = Object.entries(collectedProvince)
+        .map(function(entry) {
+          return {
+            province: entry[0],
+            revenue: Math.round(entry[1].revenue),
+            orders: entry[1].orders.size,
+          };
+        })
+        .sort(function(a, b) { return b.revenue - a.revenue; });
+      addAnalytics({
+        id: 'analytics-' + selectedShopId + '-' + (sortedDates[0] || validRows[0].date),
+        shopId: selectedShopId,
+        shopName: shop?.name || selectedShopId,
+        dateFrom: sortedDates[0] || validRows[0].date,
+        dateTo: sortedDates[sortedDates.length - 1] || validRows[validRows.length - 1].date,
+        hourlyData: hourlyData,
+        provinceData: provinceData,
+        importedAt: new Date().toISOString(),
+      });
+    }
+
     const totalSkuCount = Object.values(collectedSkuByDate).reduce(function(s, arr) { return s + arr.length; }, 0);
 
     var inventoryDeducted = 0;
@@ -720,6 +815,8 @@ function FileUploadForm() {
     setTotalRawOrders(0);
     setCollectedSkuByDate({});
     setCollectedSkuByDateWh({});
+    setCollectedHourly({});
+    setCollectedProvince({});
     setMktFileName('');
     setMktDataMap({});
     setManualMktAmount('');

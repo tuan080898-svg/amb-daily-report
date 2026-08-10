@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport } from './types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport } from './types';
 import { DEFAULT_CONFIG } from './utils';
 
 function db() {
@@ -270,4 +270,57 @@ export async function dbAddSkuImport(imp: SkuImport): Promise<void> {
 export async function dbDeleteSkuImport(id: string): Promise<void> {
   const existing = await dbGetSkuImports();
   await saveSkuList(existing.filter(e => e.id !== id));
+}
+
+// ==================== Analytics Imports (Supabase Storage) ====================
+
+const ANALYTICS_BUCKET = 'analytics-data';
+const ANALYTICS_FILE = 'imports.json';
+
+export async function dbGetAnalytics(): Promise<AnalyticsImport[]> {
+  try {
+    const { data, error } = await db().storage.from(ANALYTICS_BUCKET).download(ANALYTICS_FILE);
+    if (error) {
+      console.warn('[Analytics] download error:', error.message);
+      return [];
+    }
+    if (!data) {
+      console.warn('[Analytics] download returned null data');
+      return [];
+    }
+    const text = await data.text();
+    const arr = JSON.parse(text) as AnalyticsImport[];
+    console.log('[Analytics] loaded', arr.length, 'imports from Storage');
+    return arr.sort(function(a, b) { return b.importedAt.localeCompare(a.importedAt); });
+  } catch (e) {
+    console.error('[Analytics] unexpected error loading analytics:', e);
+    return [];
+  }
+}
+
+async function saveAnalyticsList(list: AnalyticsImport[]): Promise<void> {
+  const json = JSON.stringify(list);
+  const blob = new Blob([json], { type: 'application/json' });
+  console.log('[Analytics] saving', list.length, 'imports, size:', json.length, 'bytes');
+  const { error } = await db().storage.from(ANALYTICS_BUCKET).upload(ANALYTICS_FILE, blob, { upsert: true });
+  if (error) {
+    console.error('[Analytics] save error:', error.message);
+    throw new Error('Lưu Analytics thất bại: ' + error.message);
+  }
+  console.log('[Analytics] saved OK');
+}
+
+export async function dbAddAnalytics(imp: AnalyticsImport): Promise<void> {
+  const existing = await dbGetAnalytics();
+  const filtered = existing.filter(function(e) {
+    if (e.shopId !== imp.shopId) return true;
+    return e.dateTo < imp.dateFrom || e.dateFrom > imp.dateTo;
+  });
+  filtered.push(imp);
+  await saveAnalyticsList(filtered);
+}
+
+export async function dbDeleteAnalytics(id: string): Promise<void> {
+  const existing = await dbGetAnalytics();
+  await saveAnalyticsList(existing.filter(function(e) { return e.id !== id; }));
 }

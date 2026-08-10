@@ -68,6 +68,17 @@ export interface SkuImport {
   importedAt: string;
 }
 
+export interface AnalyticsImport {
+  id: string;
+  shopId: string;
+  shopName: string;
+  dateFrom: string;
+  dateTo: string;
+  hourlyData: { hour: number; revenue: number; orders: number }[];
+  provinceData: { province: string; revenue: number; orders: number }[];
+  importedAt: string;
+}
+
 export interface AppConfig {
   adsThresholdGreen: number;
   adsThresholdYellow: number;

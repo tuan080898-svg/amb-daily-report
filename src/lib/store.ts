@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext } from 'react';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport } from './types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport } from './types';
 import { DEFAULT_CONFIG } from './utils';
 import { MOCK_SHOPS, MOCK_USERS, MOCK_REPORTS, MOCK_KPIS, MOCK_PLANS } from './mock-data';
 
@@ -13,6 +13,7 @@ export interface AppState {
   monthlyKPIs: MonthlyKPI[];
   monthlyPlans: MonthlyPlan[];
   skuImports: SkuImport[];
+  analyticsImports: AnalyticsImport[];
   config: AppConfig;
   login: (email: string, password: string) => boolean;
   logout: () => void;
@@ -29,9 +30,11 @@ export interface AppState {
   getUserShops: (userId: string) => Shop[];
   addSkuImport: (imp: SkuImport) => void;
   deleteSkuImport: (id: string) => void;
+  addAnalytics: (imp: AnalyticsImport) => void;
+  deleteAnalytics: (id: string) => void;
 }
 
-export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addReport' | 'updateReport' | 'addShop' | 'updateShop' | 'deleteShop' | 'updateKPI' | 'updatePlan' | 'updateConfig' | 'addUser' | 'updateUser' | 'getUserShops' | 'addSkuImport' | 'deleteSkuImport'> {
+export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addReport' | 'updateReport' | 'addShop' | 'updateShop' | 'deleteShop' | 'updateKPI' | 'updatePlan' | 'updateConfig' | 'addUser' | 'updateUser' | 'getUserShops' | 'addSkuImport' | 'deleteSkuImport' | 'addAnalytics' | 'deleteAnalytics'> {
   return {
     currentUser: null,
     users: [...MOCK_USERS],
@@ -40,6 +43,7 @@ export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addRe
     monthlyKPIs: [...MOCK_KPIS],
     monthlyPlans: [...MOCK_PLANS],
     skuImports: [],
+    analyticsImports: [],
     config: { ...DEFAULT_CONFIG },
   };
 }
