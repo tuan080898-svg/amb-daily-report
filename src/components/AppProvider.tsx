@@ -209,7 +209,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       });
       return { ...s, skuImports: [...filtered, imp] };
     });
-    if (IS_SUPABASE) dbAddSkuImport(imp).catch(err => { console.error(err); alert('Lỗi lưu SKU vào database — hãy kiểm tra bảng sku_imports đã tạo trong Supabase chưa.'); });
+    if (IS_SUPABASE) dbAddSkuImport(imp).then(() => console.log('[SKU] save complete')).catch(err => { console.error('[SKU] save failed:', err); alert('Lỗi lưu SKU: ' + err.message); });
   }, []);
 
   const deleteSkuImportCb = useCallback((id: string) => {

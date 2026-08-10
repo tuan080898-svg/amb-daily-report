@@ -225,21 +225,36 @@ const SKU_BUCKET = 'sku-data';
 const SKU_FILE = 'imports.json';
 
 export async function dbGetSkuImports(): Promise<SkuImport[]> {
-  const { data, error } = await db().storage.from(SKU_BUCKET).download(SKU_FILE);
-  if (error || !data) return [];
   try {
+    const { data, error } = await db().storage.from(SKU_BUCKET).download(SKU_FILE);
+    if (error) {
+      console.warn('[SKU] download error:', error.message);
+      return [];
+    }
+    if (!data) {
+      console.warn('[SKU] download returned null data');
+      return [];
+    }
     const text = await data.text();
     const arr = JSON.parse(text) as SkuImport[];
+    console.log('[SKU] loaded', arr.length, 'imports from Storage');
     return arr.sort((a, b) => b.importedAt.localeCompare(a.importedAt));
-  } catch {
+  } catch (e) {
+    console.error('[SKU] unexpected error loading SKU:', e);
     return [];
   }
 }
 
 async function saveSkuList(list: SkuImport[]): Promise<void> {
-  const blob = new Blob([JSON.stringify(list)], { type: 'application/json' });
+  const json = JSON.stringify(list);
+  const blob = new Blob([json], { type: 'application/json' });
+  console.log('[SKU] saving', list.length, 'imports, size:', json.length, 'bytes');
   const { error } = await db().storage.from(SKU_BUCKET).upload(SKU_FILE, blob, { upsert: true });
-  if (error) throw new Error('Lưu SKU thất bại: ' + error.message);
+  if (error) {
+    console.error('[SKU] save error:', error.message);
+    throw new Error('Lưu SKU thất bại: ' + error.message);
+  }
+  console.log('[SKU] saved OK');
 }
 
 export async function dbAddSkuImport(imp: SkuImport): Promise<void> {
