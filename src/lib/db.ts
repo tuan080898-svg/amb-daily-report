@@ -112,7 +112,7 @@ export async function dbGetReports(): Promise<DailyReport[]> {
 }
 
 export async function dbAddReport(report: DailyReport): Promise<void> {
-  const { error } = await db().from('daily_reports').insert({
+  const { error } = await db().from('daily_reports').upsert({
     id: report.id,
     date: report.date,
     shop_id: report.shopId,

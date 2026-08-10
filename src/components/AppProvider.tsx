@@ -127,7 +127,15 @@ export default function AppProvider({ children }: { children: ReactNode }) {
 
 
   const addReport = useCallback((report: DailyReport) => {
-    setState(s => ({ ...s, reports: [...s.reports, report] }));
+    setState(s => {
+      const exists = s.reports.some(r => r.id === report.id);
+      return {
+        ...s,
+        reports: exists
+          ? s.reports.map(r => r.id === report.id ? report : r)
+          : [...s.reports, report],
+      };
+    });
     if (IS_SUPABASE) dbAddReport(report).catch(err => { console.error(err); alert('Lỗi lưu báo cáo: ' + err.message); });
   }, []);
 

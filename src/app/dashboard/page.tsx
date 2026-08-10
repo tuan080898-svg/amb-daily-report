@@ -179,6 +179,21 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Quick date buttons */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <span className="text-xs text-gray-500">Nhanh:</span>
+        {[
+          { label: 'Hôm nay', fn: () => { const d = toDateString(new Date()); setDateFrom(d); setDateTo(d); } },
+          { label: 'Hôm qua', fn: () => { const d = new Date(); d.setDate(d.getDate() - 1); const s = toDateString(d); setDateFrom(s); setDateTo(s); } },
+          { label: '7 ngày', fn: () => { const end = new Date(); const start = new Date(); start.setDate(end.getDate() - 6); setDateFrom(toDateString(start)); setDateTo(toDateString(end)); } },
+          { label: '30 ngày', fn: () => { const end = new Date(); const start = new Date(); start.setDate(end.getDate() - 29); setDateFrom(toDateString(start)); setDateTo(toDateString(end)); } },
+          { label: 'Tháng này', fn: () => { const d = new Date(); setDateFrom(d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01'); setDateTo(toDateString(d)); } },
+          { label: 'Tháng trước', fn: () => { const d = new Date(); const prev = new Date(d.getFullYear(), d.getMonth() - 1, 1); const last = new Date(d.getFullYear(), d.getMonth(), 0); setDateFrom(toDateString(prev)); setDateTo(toDateString(last)); } },
+        ].map(btn => (
+          <button key={btn.label} onClick={btn.fn} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">{btn.label}</button>
+        ))}
+      </div>
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <SummaryCard label="Tổng target" value={formatCurrency(summary.totalTarget)} sub="đ" />
