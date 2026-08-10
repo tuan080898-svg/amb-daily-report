@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { useAppState } from '@/lib/store';
 import { toDateString } from '@/lib/utils';
@@ -24,8 +24,18 @@ export default function SkuReportPage() {
   const imports = skuImports;
   const [filterShop, setFilterShop] = useState('all');
   const [filterChannel, setFilterChannel] = useState<Channel | 'all'>('all');
-  const [dateFrom, setDateFrom] = useState(getMonthStart(new Date()));
-  const [dateTo, setDateTo] = useState(getMonthEnd(new Date()));
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    if (initialized || imports.length === 0) return;
+    const allFrom = imports.map(i => i.dateFrom).sort();
+    const allTo = imports.map(i => i.dateTo).sort();
+    setDateFrom(allFrom[0]);
+    setDateTo(allTo[allTo.length - 1]);
+    setInitialized(true);
+  }, [imports, initialized]);
 
   const shopOptions = useMemo(function() {
     const seen = new Set<string>();
@@ -100,9 +110,16 @@ export default function SkuReportPage() {
   const unmatchedCount = unmatchedDetails.reduce(function(s, d) { return s + d.count; }, 0);
   const [showUnmapped, setShowUnmapped] = useState(false);
 
-  function setQuickRange(type: 'today' | 'thisMonth' | 'lastMonth' | 'last3Months') {
+  function setQuickRange(type: 'all' | 'today' | 'thisMonth' | 'lastMonth' | 'last3Months') {
     const now = new Date();
-    if (type === 'today') {
+    if (type === 'all') {
+      if (imports.length > 0) {
+        const allFrom = imports.map(i => i.dateFrom).sort();
+        const allTo = imports.map(i => i.dateTo).sort();
+        setDateFrom(allFrom[0]);
+        setDateTo(allTo[allTo.length - 1]);
+      }
+    } else if (type === 'today') {
       const d = toDateString(now);
       setDateFrom(d);
       setDateTo(d);
@@ -187,6 +204,7 @@ export default function SkuReportPage() {
       {imports.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <span className="text-xs text-gray-500">Nhanh:</span>
+          <button onClick={function() { setQuickRange('all'); }} className="px-3 py-1 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-500 border border-blue-500 transition-colors font-medium">Tất cả</button>
           <button onClick={function() { setQuickRange('today'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Hôm nay</button>
           <button onClick={function() { setQuickRange('thisMonth'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Tháng này</button>
           <button onClick={function() { setQuickRange('lastMonth'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Tháng trước</button>
@@ -391,7 +409,11 @@ export default function SkuReportPage() {
         {imports.length > 0 && filteredImports.length === 0 && (
           <div className="text-center py-8">
             <p className="text-gray-400">Không có dữ liệu SKU trong khoảng thời gian này</p>
-            <p className="text-sm text-gray-500 mt-1">Thử chọn khoảng ngày khác hoặc bỏ lọc shop</p>
+            <p className="text-sm text-gray-500 mt-1">Dữ liệu có sẵn: {imports.map(i => i.dateFrom).sort()[0]} → {imports.map(i => i.dateTo).sort().reverse()[0]}</p>
+            <button
+              onClick={function() { setQuickRange('all'); }}
+              className="mt-3 px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+            >Xem tất cả dữ liệu</button>
           </div>
         )}
       </div>
