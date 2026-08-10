@@ -20,8 +20,13 @@ function getMonthEnd(d: Date): string {
 }
 
 export default function SkuReportPage() {
-  const { shops, skuImports, deleteSkuImport } = useAppState();
-  const imports = skuImports;
+  const { currentUser, shops, skuImports, deleteSkuImport, getUserShops } = useAppState();
+  const userShops = useMemo(() => {
+    if (!currentUser) return [];
+    return getUserShops(currentUser.id);
+  }, [currentUser, getUserShops]);
+  const userShopIds = useMemo(() => new Set(userShops.map(s => s.id)), [userShops]);
+  const imports = useMemo(() => skuImports.filter(imp => userShopIds.has(imp.shopId)), [skuImports, userShopIds]);
   const [filterShop, setFilterShop] = useState('all');
   const [filterChannel, setFilterChannel] = useState<Channel | 'all'>('all');
   const [dateFrom, setDateFrom] = useState('');

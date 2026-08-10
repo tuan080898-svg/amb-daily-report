@@ -18,8 +18,13 @@ function getMonthEnd(d: Date): string {
 }
 
 export default function AnalyticsPage() {
-  const { shops, analyticsImports, deleteAnalytics } = useAppState();
-  const imports = analyticsImports;
+  const { currentUser, shops, analyticsImports, deleteAnalytics, getUserShops } = useAppState();
+  const userShops = useMemo(function() {
+    if (!currentUser) return [];
+    return getUserShops(currentUser.id);
+  }, [currentUser, getUserShops]);
+  const userShopIds = useMemo(function() { return new Set(userShops.map(function(s) { return s.id; })); }, [userShops]);
+  const imports = useMemo(function() { return analyticsImports.filter(function(imp) { return userShopIds.has(imp.shopId); }); }, [analyticsImports, userShopIds]);
   const [filterShop, setFilterShop] = useState('all');
   const [filterChannel, setFilterChannel] = useState<Channel | 'all'>('all');
   const [dateFrom, setDateFrom] = useState('');
