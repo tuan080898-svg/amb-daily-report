@@ -127,7 +127,7 @@ export default function AnalyticsPage() {
     return mergedProvince.reduce(function(sum, p) { return sum + p.revenue; }, 0);
   }, [mergedProvince]);
 
-  function setQuickRange(type: 'all' | 'today' | 'thisMonth' | 'lastMonth' | 'last3Months') {
+  function setQuickRange(type: 'all' | 'yesterday' | 'thisMonth' | 'lastMonth' | 'last3Months') {
     const now = new Date();
     if (type === 'all') {
       if (imports.length > 0) {
@@ -136,8 +136,10 @@ export default function AnalyticsPage() {
         setDateFrom(allFrom[0]);
         setDateTo(allTo[allTo.length - 1]);
       }
-    } else if (type === 'today') {
-      const d = toDateString(now);
+    } else if (type === 'yesterday') {
+      const y = new Date(now);
+      y.setDate(y.getDate() - 1);
+      const d = toDateString(y);
       setDateFrom(d);
       setDateTo(d);
     } else if (type === 'thisMonth') {
@@ -216,7 +218,7 @@ export default function AnalyticsPage() {
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <span className="text-xs text-gray-500">Nhanh:</span>
           <button onClick={function() { setQuickRange('all'); }} className="px-3 py-1 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-500 border border-blue-500 transition-colors font-medium">Tất cả</button>
-          <button onClick={function() { setQuickRange('today'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Hôm nay</button>
+          <button onClick={function() { setQuickRange('yesterday'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Hôm qua</button>
           <button onClick={function() { setQuickRange('thisMonth'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Tháng này</button>
           <button onClick={function() { setQuickRange('lastMonth'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Tháng trước</button>
           <button onClick={function() { setQuickRange('last3Months'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">3 tháng</button>
