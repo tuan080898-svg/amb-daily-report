@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport } from './types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue } from './types';
 import { DEFAULT_CONFIG } from './utils';
 
 function db() {
@@ -323,4 +323,119 @@ export async function dbAddAnalytics(imp: AnalyticsImport): Promise<void> {
 export async function dbDeleteAnalytics(id: string): Promise<void> {
   const existing = await dbGetAnalytics();
   await saveAnalyticsList(existing.filter(function(e) { return e.id !== id; }));
+}
+
+// ==================== CSKH Reviews ====================
+
+export async function dbGetCskhReviews(): Promise<CskhReview[]> {
+  const { data } = await db().from('cskh_reviews').select('*').order('date', { ascending: false });
+  if (!data) return [];
+  return data.map(function(r) {
+    return {
+      id: r.id,
+      date: r.date,
+      reporterId: r.reporter_id,
+      shopId: r.shop_id,
+      orderCode: r.order_code,
+      customerInfo: r.customer_info || '',
+      product: r.product || '',
+      initialStars: r.initial_stars,
+      reviewContent: r.review_content || '',
+      resolutionMethod: r.resolution_method || '',
+      status: r.status,
+      result: r.result || '',
+      note: r.note || '',
+      createdAt: r.created_at || '',
+      updatedAt: r.updated_at || undefined,
+    };
+  });
+}
+
+export async function dbAddCskhReview(review: CskhReview): Promise<void> {
+  const { error } = await db().from('cskh_reviews').upsert({
+    id: review.id,
+    date: review.date,
+    reporter_id: review.reporterId,
+    shop_id: review.shopId,
+    order_code: review.orderCode,
+    customer_info: review.customerInfo,
+    product: review.product,
+    initial_stars: review.initialStars,
+    review_content: review.reviewContent,
+    resolution_method: review.resolutionMethod,
+    status: review.status,
+    result: review.result,
+    note: review.note,
+    created_at: review.createdAt,
+    updated_at: review.updatedAt,
+  });
+  if (error) throw new Error('Lưu đánh giá CSKH thất bại: ' + error.message);
+}
+
+export async function dbUpdateCskhReview(review: CskhReview): Promise<void> {
+  const { error } = await db().from('cskh_reviews').update({
+    status: review.status,
+    result: review.result,
+    resolution_method: review.resolutionMethod,
+    note: review.note,
+    updated_at: new Date().toISOString(),
+  }).eq('id', review.id);
+  if (error) throw new Error('Cập nhật đánh giá CSKH thất bại: ' + error.message);
+}
+
+// ==================== CSKH Issues ====================
+
+export async function dbGetCskhIssues(): Promise<CskhIssue[]> {
+  const { data } = await db().from('cskh_issues').select('*').order('date', { ascending: false });
+  if (!data) return [];
+  return data.map(function(r) {
+    return {
+      id: r.id,
+      date: r.date,
+      reporterId: r.reporter_id,
+      shopId: r.shop_id,
+      orderCode: r.order_code,
+      issueType: r.issue_type,
+      description: r.description || '',
+      resolution: r.resolution || '',
+      urgency: r.urgency,
+      status: r.status,
+      needsIntervention: r.needs_intervention || false,
+      interventionNote: r.intervention_note || '',
+      createdAt: r.created_at || '',
+      updatedAt: r.updated_at || undefined,
+    };
+  });
+}
+
+export async function dbAddCskhIssue(issue: CskhIssue): Promise<void> {
+  const { error } = await db().from('cskh_issues').upsert({
+    id: issue.id,
+    date: issue.date,
+    reporter_id: issue.reporterId,
+    shop_id: issue.shopId,
+    order_code: issue.orderCode,
+    issue_type: issue.issueType,
+    description: issue.description,
+    resolution: issue.resolution,
+    urgency: issue.urgency,
+    status: issue.status,
+    needs_intervention: issue.needsIntervention,
+    intervention_note: issue.interventionNote,
+    created_at: issue.createdAt,
+    updated_at: issue.updatedAt,
+  });
+  if (error) throw new Error('Lưu vấn đề CSKH thất bại: ' + error.message);
+}
+
+export async function dbUpdateCskhIssue(issue: CskhIssue): Promise<void> {
+  const { error } = await db().from('cskh_issues').update({
+    status: issue.status,
+    urgency: issue.urgency,
+    resolution: issue.resolution,
+    needs_intervention: issue.needsIntervention,
+    intervention_note: issue.interventionNote,
+    updated_at: new Date().toISOString(),
+  }).eq('id', issue.id);
+  if (error) throw new Error('Cập nhật vấn đề CSKH thất bại: ' + error.message);
 }

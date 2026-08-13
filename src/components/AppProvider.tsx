@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, ReactNode } from 'react';
 import { AppContext, createInitialState } from '@/lib/store';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport } from '@/lib/types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue } from '@/lib/types';
 import { IS_SUPABASE_CONFIGURED } from '@/lib/supabase';
 import {
   dbGetUsers, dbAddUser, dbUpdateUser,
@@ -13,6 +13,8 @@ import {
   dbGetConfig, dbUpdateConfig,
   dbGetSkuImports, dbAddSkuImport, dbDeleteSkuImport,
   dbGetAnalytics, dbAddAnalytics, dbDeleteAnalytics,
+  dbGetCskhReviews, dbAddCskhReview, dbUpdateCskhReview,
+  dbGetCskhIssues, dbAddCskhIssue, dbUpdateCskhIssue,
 } from '@/lib/db';
 
 const IS_SUPABASE = IS_SUPABASE_CONFIGURED;
@@ -40,8 +42,9 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps] = await Promise.all([
+        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss] = await Promise.all([
           dbGetUsers(), dbGetShops(), dbGetReports(), dbGetKPIs(), dbGetPlans(), dbGetConfig(), dbGetSkuImports(), dbGetAnalytics(),
+          dbGetCskhReviews(), dbGetCskhIssues(),
         ]);
         if (cancelled) return;
         let savedUser = null;
@@ -92,6 +95,8 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           monthlyPlans: plans,
           skuImports: finalSkuImps,
           analyticsImports: analyticsImps,
+          cskhReviews: cskhRevs,
+          cskhIssues: cskhIss,
           config,
           currentUser: savedUser,
         }));
@@ -235,6 +240,48 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     if (IS_SUPABASE) dbDeleteAnalytics(id).catch(err => { console.error(err); alert('Lỗi xoá Analytics: ' + err.message); });
   }, []);
 
+  const addCskhReviewCb = useCallback(function(review: CskhReview) {
+    setState(function(s) {
+      const exists = s.cskhReviews.some(function(r) { return r.id === review.id; });
+      return {
+        ...s,
+        cskhReviews: exists
+          ? s.cskhReviews.map(function(r) { return r.id === review.id ? review : r; })
+          : [...s.cskhReviews, review],
+      };
+    });
+    if (IS_SUPABASE) dbAddCskhReview(review).catch(function(err) { console.error(err); alert('Lỗi lưu đánh giá CSKH: ' + err.message); });
+  }, []);
+
+  const updateCskhReviewCb = useCallback(function(review: CskhReview) {
+    const updated = { ...review, updatedAt: new Date().toISOString() };
+    setState(function(s) {
+      return { ...s, cskhReviews: s.cskhReviews.map(function(r) { return r.id === review.id ? updated : r; }) };
+    });
+    if (IS_SUPABASE) dbUpdateCskhReview(updated).catch(function(err) { console.error(err); alert('Lỗi cập nhật đánh giá CSKH: ' + err.message); });
+  }, []);
+
+  const addCskhIssueCb = useCallback(function(issue: CskhIssue) {
+    setState(function(s) {
+      const exists = s.cskhIssues.some(function(i) { return i.id === issue.id; });
+      return {
+        ...s,
+        cskhIssues: exists
+          ? s.cskhIssues.map(function(i) { return i.id === issue.id ? issue : i; })
+          : [...s.cskhIssues, issue],
+      };
+    });
+    if (IS_SUPABASE) dbAddCskhIssue(issue).catch(function(err) { console.error(err); alert('Lỗi lưu vấn đề CSKH: ' + err.message); });
+  }, []);
+
+  const updateCskhIssueCb = useCallback(function(issue: CskhIssue) {
+    const updated = { ...issue, updatedAt: new Date().toISOString() };
+    setState(function(s) {
+      return { ...s, cskhIssues: s.cskhIssues.map(function(i) { return i.id === issue.id ? updated : i; }) };
+    });
+    if (IS_SUPABASE) dbUpdateCskhIssue(updated).catch(function(err) { console.error(err); alert('Lỗi cập nhật vấn đề CSKH: ' + err.message); });
+  }, []);
+
   const getUserShops = useCallback((userId: string): Shop[] => {
     const user = state.users.find(u => u.id === userId);
     if (!user) return [];
@@ -262,6 +309,8 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       addUser, updateUser, getUserShops,
       addSkuImport: addSkuImportCb, deleteSkuImport: deleteSkuImportCb,
       addAnalytics: addAnalyticsCb, deleteAnalytics: deleteAnalyticsCb,
+      addCskhReview: addCskhReviewCb, updateCskhReview: updateCskhReviewCb,
+      addCskhIssue: addCskhIssueCb, updateCskhIssue: updateCskhIssueCb,
     }}>
       {children}
     </AppContext.Provider>

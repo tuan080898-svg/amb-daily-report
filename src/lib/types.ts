@@ -94,3 +94,38 @@ export interface CalculatedMetrics {
   adsAlert: AlertColor;
   cancelReturnAlert: AlertColor;
 }
+
+export interface CskhReview {
+  id: string;
+  date: string;
+  reporterId: string;
+  shopId: string;
+  orderCode: string;
+  customerInfo: string;
+  product: string;
+  initialStars: number;
+  reviewContent: string;
+  resolutionMethod: string;
+  status: string;
+  result: string;
+  note: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface CskhIssue {
+  id: string;
+  date: string;
+  reporterId: string;
+  shopId: string;
+  orderCode: string;
+  issueType: string;
+  description: string;
+  resolution: string;
+  urgency: string;
+  status: string;
+  needsIntervention: boolean;
+  interventionNote: string;
+  createdAt: string;
+  updatedAt?: string;
+}
