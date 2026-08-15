@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAppState } from '@/lib/store';
 import { getSkuMap, saveSkuMap, invalidateCache, type SkuItem, type SkuMap } from '@/lib/sku';
 import { loadInventory, saveInventory } from '@/lib/inventory';
+import * as XLSX from 'xlsx';
 
 interface EditingEntry {
   skuCode: string;
@@ -13,13 +14,96 @@ interface EditingEntry {
   originalCode?: string;
 }
 
+function parseNum(val: unknown): number {
+  if (typeof val === 'number') return Math.round(val);
+  if (!val) return 0;
+  var str = String(val).replace(/[^\d.,]/g, '').trim();
+  if (/\.\d{2}$/.test(str)) { str = str.replace(/,/g, ''); return Math.max(0, Math.round(parseFloat(str)) || 0); }
+  str = str.replace(/[.,]/g, '');
+  return Math.max(0, parseInt(str) || 0);
+}
+
+function fmt(n: number): string {
+  return n.toLocaleString('vi-VN') + 'đ';
+}
+
 export default function AdminSkuPage() {
-  const { currentUser } = useAppState();
+  const { currentUser, cogsEntries, saveCogs } = useAppState();
+  const isAdmin = currentUser?.role === 'admin';
   const searchParams = useSearchParams();
   const [skuMap, setSkuMap] = useState<SkuMap>({});
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<EditingEntry | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
+  const cogsFileRef = useRef<HTMLInputElement>(null);
+  const [cogsUploading, setCogsUploading] = useState(false);
+
+  const cogsMap = useMemo(function() {
+    var m = new Map<string, number>();
+    cogsEntries.forEach(function(e) { m.set(e.sku, e.cost); });
+    return m;
+  }, [cogsEntries]);
+
+  function handleCogsUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    var files = e.target.files;
+    if (!files || files.length === 0) return;
+    setCogsUploading(true);
+    var allEntries = new Map<string, { sku: string; name: string; cost: number }>();
+    cogsEntries.forEach(function(entry) { allEntries.set(entry.sku, entry); });
+    var processed = 0;
+    var totalFiles = files.length;
+
+    Array.from(files).forEach(function(file) {
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        try {
+          var data = new Uint8Array(ev.target?.result as ArrayBuffer);
+          var wb = XLSX.read(data, { type: 'array' });
+          var ws = wb.Sheets[wb.SheetNames[0]];
+          var rows = XLSX.utils.sheet_to_json(ws, { defval: '' }) as Record<string, unknown>[];
+          var headers = Object.keys(rows[0] || {});
+          var isShopeeFormat = headers.some(function(h) { return h.includes('SKU phân loại hàng'); });
+
+          if (isShopeeFormat) {
+            rows.forEach(function(row) {
+              var sku = String(row['SKU phân loại hàng'] || '').trim().replace(/\n/g, '');
+              if (!sku) return;
+              var name = String(row['Tên phân loại hàng'] || '').trim();
+              var costKey = headers.find(function(h) { return h.includes('Giá vốn'); }) || '';
+              var cost = parseNum(row[costKey]);
+              if (cost > 0) allEntries.set(sku, { sku: sku, name: name, cost: cost });
+            });
+          } else {
+            rows.forEach(function(row) {
+              var sku = String(row['Seller SKU'] || '').trim();
+              if (!sku || sku === 'null') return;
+              var name = String(row['Variation'] || row['Product Name'] || '').trim();
+              var colKeys = Object.keys(row);
+              var costVal = 0;
+              for (var i = 0; i < colKeys.length; i++) {
+                var v = row[colKeys[i]];
+                if (typeof v === 'number' && v > 100 && colKeys[i] !== 'SKU ID') { costVal = Math.round(v); break; }
+              }
+              if (costVal <= 0) {
+                var emptyKey = colKeys.find(function(k) { return k.trim() === '' || k === '__EMPTY'; });
+                if (emptyKey) costVal = parseNum(row[emptyKey]);
+              }
+              if (costVal > 0) allEntries.set(sku, { sku: sku, name: name, cost: costVal });
+            });
+          }
+        } catch (err) { console.error('Parse COGS error:', err); }
+        processed++;
+        if (processed === totalFiles) {
+          var result = Array.from(allEntries.values());
+          saveCogs(result);
+          showSuccess('Đã cập nhật giá vốn cho ' + result.length + ' SKU');
+          setCogsUploading(false);
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    });
+    e.target.value = '';
+  }
 
   useEffect(function() {
     setSkuMap(getSkuMap());
@@ -165,6 +249,18 @@ export default function AdminSkuPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          {isAdmin && (
+            <>
+              <input ref={cogsFileRef} type="file" accept=".xlsx,.xls" multiple onChange={handleCogsUpload} className="hidden" />
+              <button
+                onClick={function() { cogsFileRef.current?.click(); }}
+                disabled={cogsUploading}
+                className="px-3 py-2 text-sm text-emerald-400 hover:text-emerald-300 border border-emerald-600/50 rounded-lg hover:bg-emerald-500/10 transition-colors disabled:opacity-50"
+              >
+                {cogsUploading ? 'Đang xử lý...' : 'Tải giá vốn'}
+              </button>
+            </>
+          )}
           <button
             onClick={handleResetToDefault}
             className="px-3 py-2 text-sm text-gray-400 hover:text-gray-200 border border-slate-600 rounded-lg hover:bg-slate-800 transition-colors"
@@ -277,7 +373,7 @@ export default function AdminSkuPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
+      <div className={'grid gap-4 mb-6 ' + (isAdmin ? 'grid-cols-4' : 'grid-cols-3')}>
         <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4">
           <p className="text-xs text-gray-500 mb-1">Tổng mã SKU</p>
           <p className="text-2xl font-bold text-gray-100">{totalCodes}</p>
@@ -290,6 +386,15 @@ export default function AdminSkuPage() {
           <p className="text-xs text-gray-500 mb-1">Combo SKU</p>
           <p className="text-2xl font-bold text-emerald-400">{comboCodes}</p>
         </div>
+        {isAdmin && (
+          <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4">
+            <p className="text-xs text-gray-500 mb-1">Có giá vốn</p>
+            <p className="text-2xl font-bold text-amber-400">{cogsEntries.length}</p>
+            {cogsEntries.length > 0 && totalCodes > 0 && (
+              <p className="text-xs text-gray-500 mt-1">{Math.round(cogsEntries.length / totalCodes * 100)}% SKU</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Table */}
@@ -306,6 +411,7 @@ export default function AdminSkuPage() {
                 <th className="text-left px-4 py-2.5 font-medium text-gray-400 w-40">Mã SKU</th>
                 <th className="text-left px-4 py-2.5 font-medium text-gray-400">Sản phẩm</th>
                 <th className="text-center px-4 py-2.5 font-medium text-gray-400 w-20">SL</th>
+                {isAdmin && <th className="text-right px-4 py-2.5 font-medium text-gray-400 w-28">Giá vốn</th>}
                 <th className="text-center px-4 py-2.5 font-medium text-gray-400 w-24">Loại</th>
                 <th className="text-center px-4 py-2.5 font-medium text-gray-400 w-24">Thao tác</th>
               </tr>
@@ -333,6 +439,15 @@ export default function AdminSkuPage() {
                     <td className="px-4 py-3 text-center text-gray-300">
                       {entry.items.reduce(function(s, it) { return s + it.quantity; }, 0)}
                     </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3 text-right">
+                        {cogsMap.has(entry.code) ? (
+                          <span className="text-amber-300 text-xs font-medium">{fmt(cogsMap.get(entry.code)!)}</span>
+                        ) : (
+                          <span className="text-gray-600 text-xs">—</span>
+                        )}
+                      </td>
+                    )}
                     <td className="px-4 py-3 text-center">
                       {isCombo ? (
                         <span className="inline-flex px-2 py-0.5 rounded text-xs bg-purple-500/15 text-purple-400 font-medium">Combo</span>
