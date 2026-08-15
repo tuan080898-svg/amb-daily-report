@@ -358,9 +358,26 @@ export default function PnlPage() {
     setEditFees(false);
   }
 
-  function setQuickRange(type: 'thisMonth' | 'lastMonth' | 'last3Months') {
+  function fmtDate(d: Date): string {
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function setQuickRange(type: 'yesterday' | 'thisWeek' | 'lastWeek' | 'thisMonth' | 'lastMonth' | 'last3Months') {
     var now = new Date();
-    if (type === 'thisMonth') { setDateFrom(getMonthStart(now)); setDateTo(getMonthEnd(now)); }
+    if (type === 'yesterday') {
+      var yd = new Date(now); yd.setDate(yd.getDate() - 1);
+      setDateFrom(fmtDate(yd)); setDateTo(fmtDate(yd));
+    } else if (type === 'thisWeek') {
+      var day = now.getDay(); var diff = day === 0 ? 6 : day - 1;
+      var mon = new Date(now); mon.setDate(mon.getDate() - diff);
+      setDateFrom(fmtDate(mon)); setDateTo(fmtDate(now));
+    } else if (type === 'lastWeek') {
+      var day2 = now.getDay(); var diff2 = day2 === 0 ? 6 : day2 - 1;
+      var thisMon = new Date(now); thisMon.setDate(thisMon.getDate() - diff2);
+      var lastMon = new Date(thisMon); lastMon.setDate(lastMon.getDate() - 7);
+      var lastSun = new Date(thisMon); lastSun.setDate(lastSun.getDate() - 1);
+      setDateFrom(fmtDate(lastMon)); setDateTo(fmtDate(lastSun));
+    } else if (type === 'thisMonth') { setDateFrom(getMonthStart(now)); setDateTo(getMonthEnd(now)); }
     else if (type === 'lastMonth') { var prev = new Date(now.getFullYear(), now.getMonth() - 1, 1); setDateFrom(getMonthStart(prev)); setDateTo(getMonthEnd(prev)); }
     else { var prev3 = new Date(now.getFullYear(), now.getMonth() - 2, 1); setDateFrom(getMonthStart(prev3)); setDateTo(getMonthEnd(now)); }
   }
@@ -451,6 +468,9 @@ export default function PnlPage() {
       {/* Quick date + Fee config */}
       <div className="flex flex-wrap items-center gap-2 mb-6">
         <span className="text-xs text-gray-500">Nhanh:</span>
+        <button onClick={function() { setQuickRange('yesterday'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Hôm qua</button>
+        <button onClick={function() { setQuickRange('thisWeek'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Tuần này</button>
+        <button onClick={function() { setQuickRange('lastWeek'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Tuần trước</button>
         <button onClick={function() { setQuickRange('thisMonth'); }} className="px-3 py-1 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-500 border border-blue-500 transition-colors font-medium">Tháng này</button>
         <button onClick={function() { setQuickRange('lastMonth'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Tháng trước</button>
         <button onClick={function() { setQuickRange('last3Months'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">3 tháng</button>
