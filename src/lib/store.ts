@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext } from 'react';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig } from './types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport } from './types';
 import { DEFAULT_CONFIG } from './utils';
 import { MOCK_SHOPS, MOCK_USERS, MOCK_REPORTS, MOCK_KPIS, MOCK_PLANS } from './mock-data';
 
@@ -18,6 +18,7 @@ export interface AppState {
   cskhIssues: CskhIssue[];
   cogsEntries: CogsEntry[];
   pnlConfig: PnlConfig;
+  pnlImports: PnlImport[];
   config: AppConfig;
   login: (email: string, password: string) => boolean;
   logout: () => void;
@@ -42,9 +43,10 @@ export interface AppState {
   updateCskhIssue: (issue: CskhIssue) => void;
   saveCogs: (entries: CogsEntry[]) => void;
   savePnlConfig: (config: PnlConfig) => void;
+  savePnlImports: (imports: PnlImport[]) => void;
 }
 
-export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addReport' | 'updateReport' | 'addShop' | 'updateShop' | 'deleteShop' | 'updateKPI' | 'updatePlan' | 'updateConfig' | 'addUser' | 'updateUser' | 'getUserShops' | 'addSkuImport' | 'deleteSkuImport' | 'addAnalytics' | 'deleteAnalytics' | 'addCskhReview' | 'updateCskhReview' | 'addCskhIssue' | 'updateCskhIssue' | 'saveCogs' | 'savePnlConfig'> {
+export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addReport' | 'updateReport' | 'addShop' | 'updateShop' | 'deleteShop' | 'updateKPI' | 'updatePlan' | 'updateConfig' | 'addUser' | 'updateUser' | 'getUserShops' | 'addSkuImport' | 'deleteSkuImport' | 'addAnalytics' | 'deleteAnalytics' | 'addCskhReview' | 'updateCskhReview' | 'addCskhIssue' | 'updateCskhIssue' | 'saveCogs' | 'savePnlConfig' | 'savePnlImports'> {
   return {
     currentUser: null,
     users: [...MOCK_USERS],
@@ -57,7 +59,8 @@ export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addRe
     cskhReviews: [],
     cskhIssues: [],
     cogsEntries: [],
-    pnlConfig: { shopeeFeeRate: 6, tiktokFeeRate: 4 },
+    pnlConfig: { shopeeFeeRate: 6, tiktokFeeRate: 34 },
+    pnlImports: [],
     config: { ...DEFAULT_CONFIG },
   };
 }

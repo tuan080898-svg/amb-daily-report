@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig } from './types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport } from './types';
 import { DEFAULT_CONFIG } from './utils';
 
 function db() {
@@ -467,11 +467,11 @@ export async function dbSaveCogs(list: CogsEntry[]): Promise<void> {
 export async function dbGetPnlConfig(): Promise<PnlConfig> {
   try {
     const { data, error } = await db().storage.from(PNL_BUCKET).download(PNL_CONFIG_FILE);
-    if (error || !data) return { shopeeFeeRate: 6, tiktokFeeRate: 4 };
+    if (error || !data) return { shopeeFeeRate: 6, tiktokFeeRate: 34 };
     const text = await data.text();
     return JSON.parse(text) as PnlConfig;
   } catch {
-    return { shopeeFeeRate: 6, tiktokFeeRate: 4 };
+    return { shopeeFeeRate: 6, tiktokFeeRate: 34 };
   }
 }
 
@@ -480,4 +480,24 @@ export async function dbSavePnlConfig(config: PnlConfig): Promise<void> {
   const blob = new Blob([json], { type: 'application/json' });
   const { error } = await db().storage.from(PNL_BUCKET).upload(PNL_CONFIG_FILE, blob, { upsert: true });
   if (error) throw new Error('Lưu cấu hình PnL thất bại: ' + error.message);
+}
+
+const PNL_IMPORTS_FILE = 'imports.json';
+
+export async function dbGetPnlImports(): Promise<PnlImport[]> {
+  try {
+    const { data, error } = await db().storage.from(PNL_BUCKET).download(PNL_IMPORTS_FILE);
+    if (error || !data) return [];
+    const text = await data.text();
+    return JSON.parse(text) as PnlImport[];
+  } catch {
+    return [];
+  }
+}
+
+export async function dbSavePnlImports(list: PnlImport[]): Promise<void> {
+  const json = JSON.stringify(list);
+  const blob = new Blob([json], { type: 'application/json' });
+  const { error } = await db().storage.from(PNL_BUCKET).upload(PNL_IMPORTS_FILE, blob, { upsert: true });
+  if (error) throw new Error('Lưu PnL imports thất bại: ' + error.message);
 }

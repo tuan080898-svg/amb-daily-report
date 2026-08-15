@@ -124,6 +124,26 @@ export interface PnlConfig {
   tiktokFeeRate: number;
 }
 
+export interface PnlDailyData {
+  date: string;
+  revenue: number;
+  cogs: number;
+  platformFee: number;
+  adSpend: number;
+  skuDetails: { sku: string; qty: number; revenue: number; cogs: number; fee: number }[];
+}
+
+export interface PnlImport {
+  id: string;
+  shopId: string;
+  shopName: string;
+  channel: string;
+  dateFrom: string;
+  dateTo: string;
+  dailyData: PnlDailyData[];
+  importedAt: string;
+}
+
 export interface CskhIssue {
   id: string;
   date: string;

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, ReactNode } from 'react';
 import { AppContext, createInitialState } from '@/lib/store';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig } from '@/lib/types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport } from '@/lib/types';
 import { IS_SUPABASE_CONFIGURED } from '@/lib/supabase';
 import {
   dbGetUsers, dbAddUser, dbUpdateUser,
@@ -16,6 +16,7 @@ import {
   dbGetCskhReviews, dbAddCskhReview, dbUpdateCskhReview,
   dbGetCskhIssues, dbAddCskhIssue, dbUpdateCskhIssue,
   dbGetCogs, dbSaveCogs, dbGetPnlConfig, dbSavePnlConfig,
+  dbGetPnlImports, dbSavePnlImports,
 } from '@/lib/db';
 
 const IS_SUPABASE = IS_SUPABASE_CONFIGURED;
@@ -43,9 +44,9 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss, cogsData, pnlCfg] = await Promise.all([
+        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss, cogsData, pnlCfg, pnlImps] = await Promise.all([
           dbGetUsers(), dbGetShops(), dbGetReports(), dbGetKPIs(), dbGetPlans(), dbGetConfig(), dbGetSkuImports(), dbGetAnalytics(),
-          dbGetCskhReviews(), dbGetCskhIssues(), dbGetCogs(), dbGetPnlConfig(),
+          dbGetCskhReviews(), dbGetCskhIssues(), dbGetCogs(), dbGetPnlConfig(), dbGetPnlImports(),
         ]);
         if (cancelled) return;
         let savedUser = null;
@@ -100,6 +101,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           cskhIssues: cskhIss,
           cogsEntries: cogsData,
           pnlConfig: pnlCfg,
+          pnlImports: pnlImps,
           config,
           currentUser: savedUser,
         }));
@@ -295,6 +297,11 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     if (IS_SUPABASE) dbSavePnlConfig(cfg).catch(function(err) { console.error(err); alert('Lỗi lưu cấu hình PnL: ' + err.message); });
   }, []);
 
+  const savePnlImportsCb = useCallback(function(imports: PnlImport[]) {
+    setState(function(s) { return { ...s, pnlImports: imports }; });
+    if (IS_SUPABASE) dbSavePnlImports(imports).catch(function(err) { console.error(err); alert('Lỗi lưu PnL: ' + err.message); });
+  }, []);
+
   const getUserShops = useCallback((userId: string): Shop[] => {
     const user = state.users.find(u => u.id === userId);
     if (!user) return [];
@@ -324,7 +331,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       addAnalytics: addAnalyticsCb, deleteAnalytics: deleteAnalyticsCb,
       addCskhReview: addCskhReviewCb, updateCskhReview: updateCskhReviewCb,
       addCskhIssue: addCskhIssueCb, updateCskhIssue: updateCskhIssueCb,
-      saveCogs: saveCogsCb, savePnlConfig: savePnlConfigCb,
+      saveCogs: saveCogsCb, savePnlConfig: savePnlConfigCb, savePnlImports: savePnlImportsCb,
     }}>
       {children}
     </AppContext.Provider>
