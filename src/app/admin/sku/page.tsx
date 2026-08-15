@@ -12,6 +12,7 @@ interface EditingEntry {
   items: SkuItem[];
   isNew: boolean;
   originalCode?: string;
+  cost: string;
 }
 
 function parseNum(val: unknown): number {
@@ -113,6 +114,7 @@ export default function AdminSkuPage() {
         skuCode: addCode,
         items: [{ product: '', quantity: 1 }],
         isNew: true,
+        cost: '',
       });
       setSearch(addCode);
     }
@@ -139,17 +141,37 @@ export default function AdminSkuPage() {
     setTimeout(function() { setSuccessMsg(''); }, 3000);
   }
 
+  var productCostMap = useMemo(function() {
+    var m = new Map<string, number>();
+    cogsEntries.forEach(function(e) {
+      if (e.name && e.cost > 0) m.set(e.name, e.cost);
+    });
+    return m;
+  }, [cogsEntries]);
+
+  function calcComboCost(items: SkuItem[]): number {
+    var total = 0;
+    items.forEach(function(it) {
+      var name = it.product.trim();
+      var cost = productCostMap.get(name) || 0;
+      total += cost * (it.quantity || 1);
+    });
+    return total;
+  }
+
   function handleNew() {
-    setEditing({ skuCode: '', items: [{ product: '', quantity: 1 }], isNew: true });
+    setEditing({ skuCode: '', items: [{ product: '', quantity: 1 }], isNew: true, cost: '' });
   }
 
   function handleEdit(code: string) {
     var items = skuMap[code] || [];
+    var existingCost = cogsMap.get(code);
     setEditing({
       skuCode: code,
       items: items.map(function(it) { return { product: it.product, quantity: it.quantity }; }),
       isNew: false,
       originalCode: code,
+      cost: existingCost ? String(existingCost) : '',
     });
   }
 
@@ -195,21 +217,34 @@ export default function AdminSkuPage() {
       saveInventory(inv);
     }
 
+    var costVal = parseInt(editing.cost) || 0;
+    if (isAdmin && costVal > 0) {
+      var productName = validItems.map(function(it) { return it.product.trim(); }).join(' + ');
+      var updatedCogs = cogsEntries.filter(function(e) { return e.sku !== code; });
+      updatedCogs.push({ sku: code, name: productName, cost: costVal });
+      saveCogs(updatedCogs);
+    }
+
     setEditing(null);
     var msg = editing.isNew ? 'Đã thêm SKU ' + code : 'Đã cập nhật SKU ' + code;
     if (newProducts.length > 0) msg += ' (+ ' + newProducts.length + ' SP mới vào kho)';
+    if (isAdmin && costVal > 0) msg += ' | Giá vốn: ' + fmt(costVal);
     showSuccess(msg);
   }
 
   function handleAddItem() {
     if (!editing) return;
-    setEditing(Object.assign({}, editing, { items: editing.items.concat([{ product: '', quantity: 1 }]) }));
+    var newItems = editing.items.concat([{ product: '', quantity: 1 }]);
+    var autoCost = newItems.length > 1 ? String(calcComboCost(newItems)) : editing.cost;
+    setEditing(Object.assign({}, editing, { items: newItems, cost: autoCost }));
   }
 
   function handleRemoveItem(idx: number) {
     if (!editing || editing.items.length <= 1) return;
+    var newItems = editing.items.filter(function(_, i) { return i !== idx; });
+    var autoCost = newItems.length > 1 ? String(calcComboCost(newItems)) : editing.cost;
     setEditing(Object.assign({}, editing, {
-      items: editing.items.filter(function(_, i) { return i !== idx; }),
+      items: newItems, cost: autoCost,
     }));
   }
 
@@ -220,7 +255,8 @@ export default function AdminSkuPage() {
       if (field === 'product') return { product: value as string, quantity: it.quantity };
       return { product: it.product, quantity: value as number };
     });
-    setEditing(Object.assign({}, editing, { items: newItems }));
+    var autoCost = newItems.length > 1 ? String(calcComboCost(newItems)) : editing.cost;
+    setEditing(Object.assign({}, editing, { items: newItems, cost: autoCost }));
   }
 
   function handleResetToDefault() {
@@ -343,6 +379,23 @@ export default function AdminSkuPage() {
                 + Thêm sản phẩm (combo)
               </button>
             </div>
+            {isAdmin && (
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">
+                  Giá vốn (VNĐ)
+                  {editing.items.length > 1 && calcComboCost(editing.items) > 0 && (
+                    <span className="ml-2 text-amber-400">Combo tự tính: {fmt(calcComboCost(editing.items))}</span>
+                  )}
+                </label>
+                <input
+                  type="number"
+                  value={editing.cost}
+                  onChange={function(e) { setEditing(Object.assign({}, editing, { cost: e.target.value })); }}
+                  className="w-full max-w-xs px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-amber-300 font-mono focus:border-amber-500 outline-none"
+                  placeholder="VD: 25000"
+                />
+              </div>
+            )}
             <div className="flex items-center gap-3 pt-2">
               <button
                 onClick={handleSave}
