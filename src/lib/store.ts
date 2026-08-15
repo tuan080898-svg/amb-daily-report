@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext } from 'react';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue } from './types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig } from './types';
 import { DEFAULT_CONFIG } from './utils';
 import { MOCK_SHOPS, MOCK_USERS, MOCK_REPORTS, MOCK_KPIS, MOCK_PLANS } from './mock-data';
 
@@ -16,6 +16,8 @@ export interface AppState {
   analyticsImports: AnalyticsImport[];
   cskhReviews: CskhReview[];
   cskhIssues: CskhIssue[];
+  cogsEntries: CogsEntry[];
+  pnlConfig: PnlConfig;
   config: AppConfig;
   login: (email: string, password: string) => boolean;
   logout: () => void;
@@ -38,9 +40,11 @@ export interface AppState {
   updateCskhReview: (review: CskhReview) => void;
   addCskhIssue: (issue: CskhIssue) => void;
   updateCskhIssue: (issue: CskhIssue) => void;
+  saveCogs: (entries: CogsEntry[]) => void;
+  savePnlConfig: (config: PnlConfig) => void;
 }
 
-export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addReport' | 'updateReport' | 'addShop' | 'updateShop' | 'deleteShop' | 'updateKPI' | 'updatePlan' | 'updateConfig' | 'addUser' | 'updateUser' | 'getUserShops' | 'addSkuImport' | 'deleteSkuImport' | 'addAnalytics' | 'deleteAnalytics' | 'addCskhReview' | 'updateCskhReview' | 'addCskhIssue' | 'updateCskhIssue'> {
+export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addReport' | 'updateReport' | 'addShop' | 'updateShop' | 'deleteShop' | 'updateKPI' | 'updatePlan' | 'updateConfig' | 'addUser' | 'updateUser' | 'getUserShops' | 'addSkuImport' | 'deleteSkuImport' | 'addAnalytics' | 'deleteAnalytics' | 'addCskhReview' | 'updateCskhReview' | 'addCskhIssue' | 'updateCskhIssue' | 'saveCogs' | 'savePnlConfig'> {
   return {
     currentUser: null,
     users: [...MOCK_USERS],
@@ -52,6 +56,8 @@ export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addRe
     analyticsImports: [],
     cskhReviews: [],
     cskhIssues: [],
+    cogsEntries: [],
+    pnlConfig: { shopeeFeeRate: 6, tiktokFeeRate: 4 },
     config: { ...DEFAULT_CONFIG },
   };
 }

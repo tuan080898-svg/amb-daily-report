@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, ReactNode } from 'react';
 import { AppContext, createInitialState } from '@/lib/store';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue } from '@/lib/types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig } from '@/lib/types';
 import { IS_SUPABASE_CONFIGURED } from '@/lib/supabase';
 import {
   dbGetUsers, dbAddUser, dbUpdateUser,
@@ -15,6 +15,7 @@ import {
   dbGetAnalytics, dbAddAnalytics, dbDeleteAnalytics,
   dbGetCskhReviews, dbAddCskhReview, dbUpdateCskhReview,
   dbGetCskhIssues, dbAddCskhIssue, dbUpdateCskhIssue,
+  dbGetCogs, dbSaveCogs, dbGetPnlConfig, dbSavePnlConfig,
 } from '@/lib/db';
 
 const IS_SUPABASE = IS_SUPABASE_CONFIGURED;
@@ -42,9 +43,9 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss] = await Promise.all([
+        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss, cogsData, pnlCfg] = await Promise.all([
           dbGetUsers(), dbGetShops(), dbGetReports(), dbGetKPIs(), dbGetPlans(), dbGetConfig(), dbGetSkuImports(), dbGetAnalytics(),
-          dbGetCskhReviews(), dbGetCskhIssues(),
+          dbGetCskhReviews(), dbGetCskhIssues(), dbGetCogs(), dbGetPnlConfig(),
         ]);
         if (cancelled) return;
         let savedUser = null;
@@ -97,6 +98,8 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           analyticsImports: analyticsImps,
           cskhReviews: cskhRevs,
           cskhIssues: cskhIss,
+          cogsEntries: cogsData,
+          pnlConfig: pnlCfg,
           config,
           currentUser: savedUser,
         }));
@@ -282,6 +285,16 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     if (IS_SUPABASE) dbUpdateCskhIssue(updated).catch(function(err) { console.error(err); alert('Lỗi cập nhật vấn đề CSKH: ' + err.message); });
   }, []);
 
+  const saveCogsCb = useCallback(function(entries: CogsEntry[]) {
+    setState(function(s) { return { ...s, cogsEntries: entries }; });
+    if (IS_SUPABASE) dbSaveCogs(entries).catch(function(err) { console.error(err); alert('Lỗi lưu giá vốn: ' + err.message); });
+  }, []);
+
+  const savePnlConfigCb = useCallback(function(cfg: PnlConfig) {
+    setState(function(s) { return { ...s, pnlConfig: cfg }; });
+    if (IS_SUPABASE) dbSavePnlConfig(cfg).catch(function(err) { console.error(err); alert('Lỗi lưu cấu hình PnL: ' + err.message); });
+  }, []);
+
   const getUserShops = useCallback((userId: string): Shop[] => {
     const user = state.users.find(u => u.id === userId);
     if (!user) return [];
@@ -311,6 +324,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       addAnalytics: addAnalyticsCb, deleteAnalytics: deleteAnalyticsCb,
       addCskhReview: addCskhReviewCb, updateCskhReview: updateCskhReviewCb,
       addCskhIssue: addCskhIssueCb, updateCskhIssue: updateCskhIssueCb,
+      saveCogs: saveCogsCb, savePnlConfig: savePnlConfigCb,
     }}>
       {children}
     </AppContext.Provider>

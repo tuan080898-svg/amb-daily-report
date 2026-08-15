@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue } from './types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig } from './types';
 import { DEFAULT_CONFIG } from './utils';
 
 function db() {
@@ -438,4 +438,46 @@ export async function dbUpdateCskhIssue(issue: CskhIssue): Promise<void> {
     updated_at: new Date().toISOString(),
   }).eq('id', issue.id);
   if (error) throw new Error('Cập nhật vấn đề CSKH thất bại: ' + error.message);
+}
+
+// ==================== PnL / COGS (Supabase Storage) ====================
+
+const PNL_BUCKET = 'pnl-data';
+const COGS_FILE = 'cogs.json';
+const PNL_CONFIG_FILE = 'config.json';
+
+export async function dbGetCogs(): Promise<CogsEntry[]> {
+  try {
+    const { data, error } = await db().storage.from(PNL_BUCKET).download(COGS_FILE);
+    if (error || !data) return [];
+    const text = await data.text();
+    return JSON.parse(text) as CogsEntry[];
+  } catch {
+    return [];
+  }
+}
+
+export async function dbSaveCogs(list: CogsEntry[]): Promise<void> {
+  const json = JSON.stringify(list);
+  const blob = new Blob([json], { type: 'application/json' });
+  const { error } = await db().storage.from(PNL_BUCKET).upload(COGS_FILE, blob, { upsert: true });
+  if (error) throw new Error('Lưu giá vốn thất bại: ' + error.message);
+}
+
+export async function dbGetPnlConfig(): Promise<PnlConfig> {
+  try {
+    const { data, error } = await db().storage.from(PNL_BUCKET).download(PNL_CONFIG_FILE);
+    if (error || !data) return { shopeeFeeRate: 6, tiktokFeeRate: 4 };
+    const text = await data.text();
+    return JSON.parse(text) as PnlConfig;
+  } catch {
+    return { shopeeFeeRate: 6, tiktokFeeRate: 4 };
+  }
+}
+
+export async function dbSavePnlConfig(config: PnlConfig): Promise<void> {
+  const json = JSON.stringify(config);
+  const blob = new Blob([json], { type: 'application/json' });
+  const { error } = await db().storage.from(PNL_BUCKET).upload(PNL_CONFIG_FILE, blob, { upsert: true });
+  if (error) throw new Error('Lưu cấu hình PnL thất bại: ' + error.message);
 }

@@ -113,6 +113,17 @@ export interface CskhReview {
   updatedAt?: string;
 }
 
+export interface CogsEntry {
+  sku: string;
+  name: string;
+  cost: number;
+}
+
+export interface PnlConfig {
+  shopeeFeeRate: number;
+  tiktokFeeRate: number;
+}
+
 export interface CskhIssue {
   id: string;
   date: string;
