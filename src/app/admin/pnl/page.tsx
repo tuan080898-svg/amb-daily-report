@@ -100,7 +100,9 @@ export default function PnlPage() {
       imp.dailyData.forEach(function(dd) {
         if (dateFrom && dd.date < dateFrom) return;
         if (dateTo && dd.date > dateTo) return;
-        var profit = dd.revenue - dd.cogs - dd.platformFee - dd.adSpend;
+        var vatRate = imp.channel === 'TikTok' ? 1.10 : 1.08;
+        var adSpendWithVat = Math.round(dd.adSpend * vatRate);
+        var profit = dd.revenue - dd.cogs - dd.platformFee - adSpendWithVat;
         rows.push({
           date: dd.date,
           shopId: imp.shopId,
@@ -109,7 +111,7 @@ export default function PnlPage() {
           revenue: dd.revenue,
           cogs: dd.cogs,
           platformFee: dd.platformFee,
-          adSpend: dd.adSpend,
+          adSpend: adSpendWithVat,
           profit: profit,
         });
       });
@@ -396,7 +398,7 @@ export default function PnlPage() {
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-100">Lãi lỗ (PnL)</h1>
-          <p className="text-sm text-gray-500 mt-1">Doanh thu - Giá vốn - Phí sàn - Quảng cáo = Lợi nhuận</p>
+          <p className="text-sm text-gray-500 mt-1">Doanh thu - Giá vốn - Phí sàn - QC (Shopee +8% VAT, TikTok +10% VAT) = Lợi nhuận</p>
         </div>
       </div>
 
@@ -510,7 +512,7 @@ export default function PnlPage() {
             {totals.revenue > 0 && <p className="text-xs text-gray-500 mt-1">{pct(feeRatio)} DT</p>}
           </div>
           <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4">
-            <p className="text-xs text-gray-500 mb-1">Quảng cáo</p>
+            <p className="text-xs text-gray-500 mb-1">QC (đã VAT)</p>
             <p className="text-xl font-bold text-pink-400">{fmt(totals.adSpend)}</p>
             {totals.revenue > 0 && <p className="text-xs text-gray-500 mt-1">{pct(adRatio)} DT</p>}
           </div>
@@ -554,7 +556,7 @@ export default function PnlPage() {
                     <th className="text-right px-4 py-3 font-medium text-gray-400">Doanh thu</th>
                     <th className="text-right px-4 py-3 font-medium text-gray-400">Giá vốn</th>
                     <th className="text-right px-4 py-3 font-medium text-gray-400">Phí sàn</th>
-                    <th className="text-right px-4 py-3 font-medium text-gray-400">QC</th>
+                    <th className="text-right px-4 py-3 font-medium text-gray-400">QC (+VAT)</th>
                     <th className="text-right px-4 py-3 font-medium text-gray-400">Lợi nhuận</th>
                     <th className="text-right px-4 py-3 font-medium text-gray-400">Biên LN</th>
                   </tr>
@@ -638,7 +640,7 @@ export default function PnlPage() {
                   <th className="text-right px-4 py-3 font-medium text-gray-400">Doanh thu</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-400">Giá vốn</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-400">Phí sàn</th>
-                  <th className="text-right px-4 py-3 font-medium text-gray-400">QC</th>
+                  <th className="text-right px-4 py-3 font-medium text-gray-400">QC (+VAT)</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-400">Lợi nhuận</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-400">Biên LN</th>
                 </tr>
