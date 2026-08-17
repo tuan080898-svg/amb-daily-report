@@ -59,7 +59,7 @@ export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addRe
     cskhReviews: [],
     cskhIssues: [],
     cogsEntries: [],
-    pnlConfig: { shopeeFeeRate: 6, tiktokFeeRate: 34 },
+    pnlConfig: { shopeeFeeRate: 34, tiktokFeeRate: 34, opexRate: 16 },
     pnlImports: [],
     config: { ...DEFAULT_CONFIG },
   };

@@ -648,6 +648,7 @@ function FileUploadForm() {
     }
 
     var dailyMap = new Map<string, { revenue: number; cogs: number; platformFee: number; adSpend: number; skuDetails: { sku: string; qty: number; revenue: number; cogs: number; fee: number }[] }>();
+    var orderSeen = new Set<string>();
 
     for (var ri = 0; ri < allData.length; ri++) {
       var row = allData[ri];
@@ -670,10 +671,11 @@ function FileUploadForm() {
 
         lineRevenue = calcLineRevenue(row);
         qty = parseNum(row['Số lượng']) || 1;
-        var phiCoDinh = parseNum(row['Phí cố định']);
-        var phiDichVu = parseNum(row['Phí Dịch Vụ']);
-        var phiXuLy = parseNum(row['Phí xử lý giao dịch']);
-        lineFee = phiCoDinh + phiDichVu + phiXuLy;
+        if (!orderSeen.has(orderId)) {
+          lineFee = parseNum(row['Phí cố định']) + parseNum(row['Phí Dịch Vụ']) + parseNum(row['Phí xử lý giao dịch']);
+        } else {
+          lineFee = 0;
+        }
         sku = String(row['SKU phân loại hàng'] || '').trim();
       } else {
         orderId = String(row['Order ID'] || '').trim();
@@ -692,6 +694,7 @@ function FileUploadForm() {
         lineFee = Math.round(lineRevenue * feeRate);
       }
 
+      orderSeen.add(orderId);
       var dayData = dailyMap.get(date) || { revenue: 0, cogs: 0, platformFee: 0, adSpend: 0, skuDetails: [] };
       dayData.revenue += lineRevenue;
       dayData.platformFee += lineFee;

@@ -467,11 +467,14 @@ export async function dbSaveCogs(list: CogsEntry[]): Promise<void> {
 export async function dbGetPnlConfig(): Promise<PnlConfig> {
   try {
     const { data, error } = await db().storage.from(PNL_BUCKET).download(PNL_CONFIG_FILE);
-    if (error || !data) return { shopeeFeeRate: 6, tiktokFeeRate: 34 };
+    if (error || !data) return { shopeeFeeRate: 34, tiktokFeeRate: 34, opexRate: 16 };
     const text = await data.text();
-    return JSON.parse(text) as PnlConfig;
+    var parsed = JSON.parse(text) as PnlConfig;
+    if (parsed.opexRate === undefined) parsed.opexRate = 16;
+    if (parsed.shopeeFeeRate <= 10) parsed.shopeeFeeRate = 34;
+    return parsed;
   } catch {
-    return { shopeeFeeRate: 6, tiktokFeeRate: 34 };
+    return { shopeeFeeRate: 34, tiktokFeeRate: 34, opexRate: 16 };
   }
 }
 

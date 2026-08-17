@@ -76,6 +76,7 @@ export default function PnlPage() {
   var [editFees, setEditFees] = useState(false);
   var [shopeeRate, setShopeeRate] = useState(String(pnlConfig.shopeeFeeRate));
   var [tiktokRate, setTiktokRate] = useState(String(pnlConfig.tiktokFeeRate));
+  var [opexRate, setOpexRate] = useState(String(pnlConfig.opexRate));
   var [activeTab, setActiveTab] = useState<'summary' | 'daily' | 'cogs'>('summary');
 
   var cogsMap = useMemo(function() {
@@ -95,14 +96,15 @@ export default function PnlPage() {
   }, [pnlImports, filterShop, filterChannel, dateFrom, dateTo]);
 
   var pnlRows = useMemo(function() {
-    var rows: { date: string; shopId: string; shopName: string; channel: string; revenue: number; cogs: number; platformFee: number; adSpend: number; profit: number }[] = [];
+    var rows: { date: string; shopId: string; shopName: string; channel: string; revenue: number; cogs: number; platformFee: number; adSpend: number; opex: number; profit: number }[] = [];
     filteredImports.forEach(function(imp) {
       imp.dailyData.forEach(function(dd) {
         if (dateFrom && dd.date < dateFrom) return;
         if (dateTo && dd.date > dateTo) return;
         var vatRate = imp.channel === 'TikTok' ? 1.10 : 1.08;
         var adSpendWithVat = Math.round(dd.adSpend * vatRate);
-        var profit = dd.revenue - dd.cogs - dd.platformFee - adSpendWithVat;
+        var opex = Math.round(dd.revenue * pnlConfig.opexRate / 100);
+        var profit = dd.revenue - dd.cogs - dd.platformFee - adSpendWithVat - opex;
         rows.push({
           date: dd.date,
           shopId: imp.shopId,
@@ -112,34 +114,37 @@ export default function PnlPage() {
           cogs: dd.cogs,
           platformFee: dd.platformFee,
           adSpend: adSpendWithVat,
+          opex: opex,
           profit: profit,
         });
       });
     });
     rows.sort(function(a, b) { return a.date.localeCompare(b.date) || a.shopName.localeCompare(b.shopName); });
     return rows;
-  }, [filteredImports, dateFrom, dateTo]);
+  }, [filteredImports, dateFrom, dateTo, pnlConfig.opexRate]);
 
   var totals = useMemo(function() {
-    var t = { revenue: 0, cogs: 0, platformFee: 0, adSpend: 0, profit: 0 };
+    var t = { revenue: 0, cogs: 0, platformFee: 0, adSpend: 0, opex: 0, profit: 0 };
     pnlRows.forEach(function(r) {
       t.revenue += r.revenue;
       t.cogs += r.cogs;
       t.platformFee += r.platformFee;
       t.adSpend += r.adSpend;
+      t.opex += r.opex;
       t.profit += r.profit;
     });
     return t;
   }, [pnlRows]);
 
   var shopSummary = useMemo(function() {
-    var map = new Map<string, { shopName: string; channel: string; revenue: number; cogs: number; platformFee: number; adSpend: number; profit: number }>();
+    var map = new Map<string, { shopName: string; channel: string; revenue: number; cogs: number; platformFee: number; adSpend: number; opex: number; profit: number }>();
     pnlRows.forEach(function(r) {
-      var existing = map.get(r.shopId) || { shopName: r.shopName, channel: r.channel, revenue: 0, cogs: 0, platformFee: 0, adSpend: 0, profit: 0 };
+      var existing = map.get(r.shopId) || { shopName: r.shopName, channel: r.channel, revenue: 0, cogs: 0, platformFee: 0, adSpend: 0, opex: 0, profit: 0 };
       existing.revenue += r.revenue;
       existing.cogs += r.cogs;
       existing.platformFee += r.platformFee;
       existing.adSpend += r.adSpend;
+      existing.opex += r.opex;
       existing.profit += r.profit;
       map.set(r.shopId, existing);
     });
@@ -262,10 +267,11 @@ export default function PnlPage() {
                 var tongGiaBan = parseNum(row['Tổng giá bán (sản phẩm)']);
                 lineRevenue = tongGiaBan > 0 ? tongGiaBan : 0;
               }
-              var phiCoDinh = parseNum(row['Phí cố định']);
-              var phiDichVu = parseNum(row['Phí Dịch Vụ']);
-              var phiXuLy = parseNum(row['Phí xử lý giao dịch']);
-              lineFee = phiCoDinh + phiDichVu + phiXuLy;
+              if (!orderSeen.has(orderId)) {
+                lineFee = parseNum(row['Phí cố định']) + parseNum(row['Phí Dịch Vụ']) + parseNum(row['Phí xử lý giao dịch']);
+              } else {
+                lineFee = 0;
+              }
               sku = String(row['SKU phân loại hàng'] || '').trim();
             } else {
               orderId = String(row['Order ID'] || '').trim();
@@ -356,7 +362,7 @@ export default function PnlPage() {
   }
 
   function handleSaveFees() {
-    savePnlConfig({ shopeeFeeRate: parseFloat(shopeeRate) || 6, tiktokFeeRate: parseFloat(tiktokRate) || 34 });
+    savePnlConfig({ shopeeFeeRate: parseFloat(shopeeRate) || 34, tiktokFeeRate: parseFloat(tiktokRate) || 34, opexRate: parseFloat(opexRate) || 16 });
     setEditFees(false);
   }
 
@@ -392,13 +398,14 @@ export default function PnlPage() {
   var cogsRatio = totals.revenue > 0 ? (totals.cogs / totals.revenue * 100) : 0;
   var feeRatio = totals.revenue > 0 ? (totals.platformFee / totals.revenue * 100) : 0;
   var adRatio = totals.revenue > 0 ? (totals.adSpend / totals.revenue * 100) : 0;
+  var opexRatio = totals.revenue > 0 ? (totals.opex / totals.revenue * 100) : 0;
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-100">Lãi lỗ (PnL)</h1>
-          <p className="text-sm text-gray-500 mt-1">Doanh thu - Giá vốn - Phí sàn - QC (Shopee +8% VAT, TikTok +10% VAT) = Lợi nhuận</p>
+          <p className="text-sm text-gray-500 mt-1">Doanh thu - Giá vốn - Phí sàn - QC (đã VAT) - Vận hành ({pnlConfig.opexRate}%) = Lợi nhuận</p>
         </div>
       </div>
 
@@ -478,15 +485,23 @@ export default function PnlPage() {
         <button onClick={function() { setQuickRange('last3Months'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">3 tháng</button>
         <span className="mx-2 text-slate-700">|</span>
         {!editFees ? (
-          <button onClick={function() { setEditFees(true); setShopeeRate(String(pnlConfig.shopeeFeeRate)); setTiktokRate(String(pnlConfig.tiktokFeeRate)); }}
+          <button onClick={function() { setEditFees(true); setShopeeRate(String(pnlConfig.shopeeFeeRate)); setTiktokRate(String(pnlConfig.tiktokFeeRate)); setOpexRate(String(pnlConfig.opexRate)); }}
             className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">
-            Phí TikTok: {pnlConfig.tiktokFeeRate}% (Shopee lấy từ file)
+            Shopee: {pnlConfig.shopeeFeeRate}% | TikTok: {pnlConfig.tiktokFeeRate}% | Vận hành: {pnlConfig.opexRate}%
           </button>
         ) : (
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400">TikTok</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs text-gray-400">Shopee</span>
+            <input type="number" value={shopeeRate} onChange={function(e) { setShopeeRate(e.target.value); }}
+              className="w-16 px-2 py-1 text-xs rounded bg-slate-800 border border-slate-600 text-gray-200" step="0.5" />
+            <span className="text-xs text-gray-500">%</span>
+            <span className="text-xs text-gray-400 ml-2">TikTok</span>
             <input type="number" value={tiktokRate} onChange={function(e) { setTiktokRate(e.target.value); }}
               className="w-16 px-2 py-1 text-xs rounded bg-slate-800 border border-slate-600 text-gray-200" step="0.5" />
+            <span className="text-xs text-gray-500">%</span>
+            <span className="text-xs text-gray-400 ml-2">Vận hành</span>
+            <input type="number" value={opexRate} onChange={function(e) { setOpexRate(e.target.value); }}
+              className="w-16 px-2 py-1 text-xs rounded bg-slate-800 border border-slate-600 text-gray-200" step="1" />
             <span className="text-xs text-gray-500">%</span>
             <button onClick={handleSaveFees} className="px-2 py-1 text-xs rounded bg-emerald-600 text-white hover:bg-emerald-500">Lưu</button>
             <button onClick={function() { setEditFees(false); }} className="px-2 py-1 text-xs rounded bg-slate-700 text-gray-300 hover:bg-slate-600">Hủy</button>
@@ -496,7 +511,7 @@ export default function PnlPage() {
 
       {/* Summary Cards */}
       {pnlRows.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
           <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4">
             <p className="text-xs text-gray-500 mb-1">Doanh thu</p>
             <p className="text-xl font-bold text-blue-400">{fmt(totals.revenue)}</p>
@@ -515,6 +530,11 @@ export default function PnlPage() {
             <p className="text-xs text-gray-500 mb-1">QC (đã VAT)</p>
             <p className="text-xl font-bold text-pink-400">{fmt(totals.adSpend)}</p>
             {totals.revenue > 0 && <p className="text-xs text-gray-500 mt-1">{pct(adRatio)} DT</p>}
+          </div>
+          <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4">
+            <p className="text-xs text-gray-500 mb-1">Vận hành ({pnlConfig.opexRate}%)</p>
+            <p className="text-xl font-bold text-violet-400">{fmt(totals.opex)}</p>
+            {totals.revenue > 0 && <p className="text-xs text-gray-500 mt-1">{pct(opexRatio)} DT</p>}
           </div>
           <div className={'bg-slate-900 border rounded-xl p-4 ' + (totals.profit >= 0 ? 'border-emerald-500/30' : 'border-red-500/30')}>
             <p className="text-xs text-gray-500 mb-1">Lợi nhuận</p>
@@ -555,8 +575,12 @@ export default function PnlPage() {
                     <th className="text-left px-4 py-3 font-medium text-gray-400">Kênh</th>
                     <th className="text-right px-4 py-3 font-medium text-gray-400">Doanh thu</th>
                     <th className="text-right px-4 py-3 font-medium text-gray-400">Giá vốn</th>
+                    <th className="text-right px-4 py-3 font-medium text-gray-400">% GV</th>
                     <th className="text-right px-4 py-3 font-medium text-gray-400">Phí sàn</th>
+                    <th className="text-right px-4 py-3 font-medium text-gray-400">% Phí sàn</th>
                     <th className="text-right px-4 py-3 font-medium text-gray-400">QC (+VAT)</th>
+                    <th className="text-right px-4 py-3 font-medium text-gray-400">% QC</th>
+                    <th className="text-right px-4 py-3 font-medium text-gray-400">Vận hành</th>
                     <th className="text-right px-4 py-3 font-medium text-gray-400">Lợi nhuận</th>
                     <th className="text-right px-4 py-3 font-medium text-gray-400">Biên LN</th>
                   </tr>
@@ -565,6 +589,9 @@ export default function PnlPage() {
                   {shopSummary.map(function(entry) {
                     var id = entry[0]; var d = entry[1];
                     var margin = d.revenue > 0 ? (d.profit / d.revenue * 100) : 0;
+                    var cogsPct = d.revenue > 0 ? (d.cogs / d.revenue * 100) : 0;
+                    var feePct = d.revenue > 0 ? (d.platformFee / d.revenue * 100) : 0;
+                    var adPct = d.revenue > 0 ? (d.adSpend / d.revenue * 100) : 0;
                     return (
                       <tr key={id} className="hover:bg-slate-800/50">
                         <td className="px-4 py-3 font-medium text-gray-200">{d.shopName}</td>
@@ -573,8 +600,12 @@ export default function PnlPage() {
                         </td>
                         <td className="px-4 py-3 text-right text-blue-300">{fmt(d.revenue)}</td>
                         <td className="px-4 py-3 text-right text-amber-300">{fmt(d.cogs)}</td>
+                        <td className="px-4 py-3 text-right text-xs text-amber-500">{pct(cogsPct)}</td>
                         <td className="px-4 py-3 text-right text-orange-300">{fmt(d.platformFee)}</td>
+                        <td className="px-4 py-3 text-right text-xs text-orange-500">{pct(feePct)}</td>
                         <td className="px-4 py-3 text-right text-pink-300">{fmt(d.adSpend)}</td>
+                        <td className="px-4 py-3 text-right text-xs text-pink-500">{pct(adPct)}</td>
+                        <td className="px-4 py-3 text-right text-violet-300">{fmt(d.opex)}</td>
                         <td className={'px-4 py-3 text-right font-semibold ' + (d.profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>{fmt(d.profit)}</td>
                         <td className={'px-4 py-3 text-right text-xs ' + (margin >= 0 ? 'text-emerald-500' : 'text-red-500')}>{pct(margin)}</td>
                       </tr>
@@ -585,8 +616,12 @@ export default function PnlPage() {
                       <td className="px-4 py-3 text-gray-200" colSpan={2}>Tổng</td>
                       <td className="px-4 py-3 text-right text-blue-300">{fmt(totals.revenue)}</td>
                       <td className="px-4 py-3 text-right text-amber-300">{fmt(totals.cogs)}</td>
+                      <td className="px-4 py-3 text-right text-xs text-amber-500">{pct(totals.revenue > 0 ? totals.cogs / totals.revenue * 100 : 0)}</td>
                       <td className="px-4 py-3 text-right text-orange-300">{fmt(totals.platformFee)}</td>
+                      <td className="px-4 py-3 text-right text-xs text-orange-500">{pct(totals.revenue > 0 ? totals.platformFee / totals.revenue * 100 : 0)}</td>
                       <td className="px-4 py-3 text-right text-pink-300">{fmt(totals.adSpend)}</td>
+                      <td className="px-4 py-3 text-right text-xs text-pink-500">{pct(totals.revenue > 0 ? totals.adSpend / totals.revenue * 100 : 0)}</td>
+                      <td className="px-4 py-3 text-right text-violet-300">{fmt(totals.opex)}</td>
                       <td className={'px-4 py-3 text-right ' + (totals.profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>{fmt(totals.profit)}</td>
                       <td className={'px-4 py-3 text-right text-xs ' + (profitMargin >= 0 ? 'text-emerald-500' : 'text-red-500')}>{pct(profitMargin)}</td>
                     </tr>
@@ -639,8 +674,12 @@ export default function PnlPage() {
                   <th className="text-left px-4 py-3 font-medium text-gray-400">Shop</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-400">Doanh thu</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-400">Giá vốn</th>
+                  <th className="text-right px-4 py-3 font-medium text-gray-400">% GV</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-400">Phí sàn</th>
+                  <th className="text-right px-4 py-3 font-medium text-gray-400">% Phí sàn</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-400">QC (+VAT)</th>
+                  <th className="text-right px-4 py-3 font-medium text-gray-400">% QC</th>
+                  <th className="text-right px-4 py-3 font-medium text-gray-400">Vận hành</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-400">Lợi nhuận</th>
                   <th className="text-right px-4 py-3 font-medium text-gray-400">Biên LN</th>
                 </tr>
@@ -648,6 +687,9 @@ export default function PnlPage() {
               <tbody className="divide-y divide-slate-800">
                 {pnlRows.map(function(r, i) {
                   var margin = r.revenue > 0 ? (r.profit / r.revenue * 100) : 0;
+                  var cogsPct = r.revenue > 0 ? (r.cogs / r.revenue * 100) : 0;
+                  var feePct = r.revenue > 0 ? (r.platformFee / r.revenue * 100) : 0;
+                  var adPct = r.revenue > 0 ? (r.adSpend / r.revenue * 100) : 0;
                   return (
                     <tr key={i} className="hover:bg-slate-800/50">
                       <td className="px-4 py-2.5 text-gray-300 text-xs">{r.date}</td>
@@ -657,8 +699,12 @@ export default function PnlPage() {
                       </td>
                       <td className="px-4 py-2.5 text-right text-blue-300 text-xs">{fmt(r.revenue)}</td>
                       <td className="px-4 py-2.5 text-right text-amber-300 text-xs">{fmt(r.cogs)}</td>
+                      <td className="px-4 py-2.5 text-right text-xs text-amber-500">{pct(cogsPct)}</td>
                       <td className="px-4 py-2.5 text-right text-orange-300 text-xs">{fmt(r.platformFee)}</td>
+                      <td className="px-4 py-2.5 text-right text-xs text-orange-500">{pct(feePct)}</td>
                       <td className="px-4 py-2.5 text-right text-pink-300 text-xs">{fmt(r.adSpend)}</td>
+                      <td className="px-4 py-2.5 text-right text-xs text-pink-500">{pct(adPct)}</td>
+                      <td className="px-4 py-2.5 text-right text-violet-300 text-xs">{fmt(r.opex)}</td>
                       <td className={'px-4 py-2.5 text-right text-xs font-semibold ' + (r.profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>{fmt(r.profit)}</td>
                       <td className={'px-4 py-2.5 text-right text-xs ' + (margin >= 0 ? 'text-emerald-500' : 'text-red-500')}>{pct(margin)}</td>
                     </tr>

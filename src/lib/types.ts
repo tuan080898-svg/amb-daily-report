@@ -122,6 +122,7 @@ export interface CogsEntry {
 export interface PnlConfig {
   shopeeFeeRate: number;
   tiktokFeeRate: number;
+  opexRate: number;
 }
 
 export interface PnlDailyData {
