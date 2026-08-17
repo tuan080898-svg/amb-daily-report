@@ -7,9 +7,15 @@ import { getSkuMap, saveSkuMap, invalidateCache, type SkuItem, type SkuMap } fro
 import { loadInventory, saveInventory } from '@/lib/inventory';
 import * as XLSX from 'xlsx';
 
+interface EditingItem {
+  refSku: string;
+  product: string;
+  quantity: number;
+}
+
 interface EditingEntry {
   skuCode: string;
-  items: SkuItem[];
+  items: EditingItem[];
   isNew: boolean;
   originalCode?: string;
   cost: string;
@@ -112,7 +118,7 @@ export default function AdminSkuPage() {
     if (addCode) {
       setEditing({
         skuCode: addCode,
-        items: [{ product: '', quantity: 1 }],
+        items: [{ refSku: '', product: '', quantity: 1 }],
         isNew: true,
         cost: '',
       });
@@ -141,43 +147,44 @@ export default function AdminSkuPage() {
     setTimeout(function() { setSuccessMsg(''); }, 3000);
   }
 
-  var productCostMap = useMemo(function() {
-    var m = new Map<string, number>();
-    var allEntries = Object.entries(skuMap);
-    allEntries.forEach(function(entry) {
-      var code = entry[0];
-      var items = entry[1];
-      if (items.length === 1 && cogsMap.has(code)) {
-        var unitCost = Math.round(cogsMap.get(code)! / (items[0].quantity || 1));
-        var existing = m.get(items[0].product);
-        if (!existing || unitCost < existing) {
-          m.set(items[0].product, unitCost);
-        }
-      }
-    });
-    return m;
-  }, [skuMap, cogsMap]);
-
-  function calcComboCost(items: SkuItem[]): number {
+  function calcComboCost(items: EditingItem[]): number {
     var total = 0;
     items.forEach(function(it) {
-      var name = it.product.trim();
-      var cost = productCostMap.get(name) || 0;
-      total += cost * (it.quantity || 1);
+      var sku = it.refSku.trim();
+      if (!sku) return;
+      var skuCost = cogsMap.get(sku) || 0;
+      if (skuCost <= 0) return;
+      var skuItems = skuMap[sku];
+      var skuQty = (skuItems && skuItems.length === 1) ? (skuItems[0].quantity || 1) : 1;
+      var unitCost = skuCost / skuQty;
+      total += Math.round(unitCost * (it.quantity || 1));
     });
     return total;
   }
 
   function handleNew() {
-    setEditing({ skuCode: '', items: [{ product: '', quantity: 1 }], isNew: true, cost: '' });
+    setEditing({ skuCode: '', items: [{ refSku: '', product: '', quantity: 1 }], isNew: true, cost: '' });
+  }
+
+  function findSkuForProduct(productName: string): string {
+    var found = '';
+    Object.entries(skuMap).forEach(function(entry) {
+      if (entry[1].length === 1 && entry[1][0].product === productName) {
+        if (!found || entry[0].length < found.length) found = entry[0];
+      }
+    });
+    return found;
   }
 
   function handleEdit(code: string) {
     var items = skuMap[code] || [];
     var existingCost = cogsMap.get(code);
+    var isCombo = items.length > 1;
     setEditing({
       skuCode: code,
-      items: items.map(function(it) { return { product: it.product, quantity: it.quantity }; }),
+      items: items.map(function(it) {
+        return { refSku: isCombo ? findSkuForProduct(it.product) : '', product: it.product, quantity: it.quantity };
+      }),
       isNew: false,
       originalCode: code,
       cost: existingCost ? String(existingCost) : '',
@@ -199,7 +206,7 @@ export default function AdminSkuPage() {
     var code = editing.skuCode.trim();
     if (!code) { alert('Vui lòng nhập mã SKU'); return; }
     var validItems = editing.items.filter(function(it) { return it.product.trim() !== ''; });
-    if (validItems.length === 0) { alert('Vui lòng nhập ít nhất 1 sản phẩm'); return; }
+    if (validItems.length === 0) { alert('Vui lòng nhập ít nhất 1 sản phẩm (kiểm tra mã SKU thành phần)'); return; }
 
     var updated = Object.assign({}, skuMap);
     if (editing.isNew && updated[code]) {
@@ -243,7 +250,13 @@ export default function AdminSkuPage() {
 
   function handleAddItem() {
     if (!editing) return;
-    var newItems = editing.items.concat([{ product: '', quantity: 1 }]);
+    var newItems = editing.items.map(function(it) {
+      if (!it.refSku && it.product.trim()) {
+        return { refSku: findSkuForProduct(it.product.trim()), product: it.product, quantity: it.quantity };
+      }
+      return it;
+    });
+    newItems = newItems.concat([{ refSku: '', product: '', quantity: 1 }]);
     var autoCost = newItems.length > 1 ? String(calcComboCost(newItems)) : editing.cost;
     setEditing(Object.assign({}, editing, { items: newItems, cost: autoCost }));
   }
@@ -252,17 +265,23 @@ export default function AdminSkuPage() {
     if (!editing || editing.items.length <= 1) return;
     var newItems = editing.items.filter(function(_, i) { return i !== idx; });
     var autoCost = newItems.length > 1 ? String(calcComboCost(newItems)) : editing.cost;
-    setEditing(Object.assign({}, editing, {
-      items: newItems, cost: autoCost,
-    }));
+    setEditing(Object.assign({}, editing, { items: newItems, cost: autoCost }));
   }
 
-  function handleItemChange(idx: number, field: 'product' | 'quantity', value: string | number) {
+  function handleItemChange(idx: number, field: 'product' | 'quantity' | 'refSku', value: string | number) {
     if (!editing) return;
     var newItems = editing.items.map(function(it, i) {
       if (i !== idx) return it;
-      if (field === 'product') return { product: value as string, quantity: it.quantity };
-      return { product: it.product, quantity: value as number };
+      if (field === 'refSku') {
+        var code = (value as string).trim();
+        var lookedUp = skuMap[code];
+        if (lookedUp && lookedUp.length >= 1) {
+          return { refSku: value as string, product: lookedUp[0].product, quantity: it.quantity };
+        }
+        return { refSku: value as string, product: '', quantity: it.quantity };
+      }
+      if (field === 'product') return { refSku: it.refSku, product: value as string, quantity: it.quantity };
+      return { refSku: it.refSku, product: it.product, quantity: value as number };
     });
     var autoCost = newItems.length > 1 ? String(calcComboCost(newItems)) : editing.cost;
     setEditing(Object.assign({}, editing, { items: newItems, cost: autoCost }));
@@ -345,36 +364,59 @@ export default function AdminSkuPage() {
               />
             </div>
             <div>
-              <label className="block text-xs text-gray-400 mb-2">Sản phẩm (combo = nhiều dòng)</label>
+              <label className="block text-xs text-gray-400 mb-2">
+                {editing.items.length > 1 ? 'Thành phần combo (nhập mã SKU)' : 'Sản phẩm (combo = nhiều dòng)'}
+              </label>
               <div className="space-y-2">
                 {editing.items.map(function(item, idx) {
+                  var isComboMode = editing.items.length > 1;
+                  var skuValid = isComboMode && item.refSku.trim() && skuMap[item.refSku.trim()];
+                  var skuCost = isComboMode && item.refSku.trim() ? cogsMap.get(item.refSku.trim()) : undefined;
                   return (
-                    <div key={idx} className="flex items-center gap-3">
-                      <input
-                        type="text"
-                        value={item.product}
-                        onChange={function(e) { handleItemChange(idx, 'product', e.target.value); }}
-                        className="flex-1 px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none"
-                        placeholder="Tên sản phẩm"
-                      />
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs text-gray-500">x</span>
-                        <input
-                          type="number"
-                          min={1}
-                          value={item.quantity}
-                          onChange={function(e) { handleItemChange(idx, 'quantity', parseInt(e.target.value) || 1); }}
-                          className="w-16 px-2 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 text-center focus:border-blue-500 outline-none"
-                        />
+                    <div key={idx}>
+                      <div className="flex items-center gap-3">
+                        {isComboMode ? (
+                          <input
+                            type="text"
+                            value={item.refSku}
+                            onChange={function(e) { handleItemChange(idx, 'refSku', e.target.value.toUpperCase()); }}
+                            className={'w-36 px-3 py-2 bg-slate-800 border rounded-lg text-sm font-mono focus:outline-none ' + (item.refSku.trim() ? (skuValid ? 'border-emerald-600 text-emerald-300 focus:border-emerald-500' : 'border-red-600 text-red-300 focus:border-red-500') : 'border-slate-600 text-gray-200 focus:border-blue-500')}
+                            placeholder="Mã SKU"
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            value={item.product}
+                            onChange={function(e) { handleItemChange(idx, 'product', e.target.value); }}
+                            className="flex-1 px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none"
+                            placeholder="Tên sản phẩm"
+                          />
+                        )}
+                        {isComboMode && (
+                          <span className={'text-sm truncate ' + (skuValid ? 'text-gray-300' : 'text-gray-600') + ' flex-1'}>
+                            {skuValid ? item.product : (item.refSku.trim() ? 'Không tìm thấy SKU' : '—')}
+                            {skuCost !== undefined && skuCost > 0 && <span className="ml-1.5 text-xs text-amber-400">({fmt(skuCost)})</span>}
+                          </span>
+                        )}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs text-gray-500">x</span>
+                          <input
+                            type="number"
+                            min={1}
+                            value={item.quantity}
+                            onChange={function(e) { handleItemChange(idx, 'quantity', parseInt(e.target.value) || 1); }}
+                            className="w-16 px-2 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 text-center focus:border-blue-500 outline-none"
+                          />
+                        </div>
+                        {editing.items.length > 1 && (
+                          <button
+                            onClick={function() { handleRemoveItem(idx); }}
+                            className="p-1.5 text-gray-500 hover:text-red-400 rounded transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                          </button>
+                        )}
                       </div>
-                      {editing.items.length > 1 && (
-                        <button
-                          onClick={function() { handleRemoveItem(idx); }}
-                          className="p-1.5 text-gray-500 hover:text-red-400 rounded transition-colors"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                        </button>
-                      )}
                     </div>
                   );
                 })}
@@ -383,7 +425,7 @@ export default function AdminSkuPage() {
                 onClick={handleAddItem}
                 className="mt-2 text-xs text-blue-400 hover:text-blue-300 transition-colors"
               >
-                + Thêm sản phẩm (combo)
+                + Thêm thành phần (combo)
               </button>
             </div>
             {isAdmin && (
@@ -490,15 +532,34 @@ export default function AdminSkuPage() {
                         </div>
                         <div className="space-y-2">
                           {editing!.items.map(function(item, idx) {
+                            var isComboMode = editing!.items.length > 1;
+                            var skuValid = isComboMode && item.refSku.trim() && skuMap[item.refSku.trim()];
+                            var skuCost = isComboMode && item.refSku.trim() ? cogsMap.get(item.refSku.trim()) : undefined;
                             return (
                               <div key={idx} className="flex items-center gap-2">
-                                <input
-                                  type="text"
-                                  value={item.product}
-                                  onChange={function(e) { handleItemChange(idx, 'product', e.target.value); }}
-                                  className="flex-1 px-3 py-1.5 bg-slate-800 border border-slate-600 rounded text-sm text-gray-200 focus:border-blue-500 outline-none"
-                                  placeholder="Tên sản phẩm"
-                                />
+                                {isComboMode ? (
+                                  <>
+                                    <input
+                                      type="text"
+                                      value={item.refSku}
+                                      onChange={function(e) { handleItemChange(idx, 'refSku', e.target.value.toUpperCase()); }}
+                                      className={'w-28 px-2 py-1.5 bg-slate-800 border rounded text-sm font-mono focus:outline-none ' + (item.refSku.trim() ? (skuValid ? 'border-emerald-600 text-emerald-300' : 'border-red-600 text-red-300') : 'border-slate-600 text-gray-200')}
+                                      placeholder="Mã SKU"
+                                    />
+                                    <span className={'text-xs truncate flex-1 ' + (skuValid ? 'text-gray-400' : 'text-gray-600')}>
+                                      {skuValid ? item.product : (item.refSku.trim() ? '?' : '')}
+                                      {skuCost !== undefined && skuCost > 0 && <span className="text-amber-400 ml-1">({fmt(skuCost)})</span>}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={item.product}
+                                    onChange={function(e) { handleItemChange(idx, 'product', e.target.value); }}
+                                    className="flex-1 px-3 py-1.5 bg-slate-800 border border-slate-600 rounded text-sm text-gray-200 focus:border-blue-500 outline-none"
+                                    placeholder="Tên sản phẩm"
+                                  />
+                                )}
                                 <div className="flex items-center gap-1">
                                   <span className="text-xs text-gray-500">x</span>
                                   <input
@@ -517,7 +578,7 @@ export default function AdminSkuPage() {
                               </div>
                             );
                           })}
-                          <button onClick={handleAddItem} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">+ Thêm SP (combo)</button>
+                          <button onClick={handleAddItem} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">+ Thêm thành phần (combo)</button>
                         </div>
                         <div className="flex items-center gap-3 flex-wrap">
                           {isAdmin && (
