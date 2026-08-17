@@ -3,7 +3,7 @@
 import { useState, useMemo, useRef } from 'react';
 import { useAppState } from '@/lib/store';
 import { toDateString, getDailyTarget, getTargetForDate, getDayType, formatCurrency, formatPercent } from '@/lib/utils';
-import { DailyReport, Shop } from '@/lib/types';
+import { DailyReport, Shop, PnlImport, PnlDailyData } from '@/lib/types';
 import * as XLSX from 'xlsx';
 import { aggregateProducts, getSkuProducts, ProductSummary } from '@/lib/sku';
 import { loadInventory, addSaleTransactions, type Warehouse } from '@/lib/inventory';
@@ -84,7 +84,7 @@ interface ParsedRow {
 }
 
 function FileUploadForm() {
-  const { currentUser, shops, reports, monthlyPlans, monthlyKPIs, config, getUserShops, addReport, updateReport, addSkuImport, addAnalytics } = useAppState();
+  const { currentUser, shops, reports, monthlyPlans, monthlyKPIs, config, getUserShops, addReport, updateReport, addSkuImport, addAnalytics, cogsEntries, pnlConfig, pnlImports, savePnlImports } = useAppState();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
   const [fileNames, setFileNames] = useState<string[]>([]);
@@ -107,6 +107,12 @@ function FileUploadForm() {
   const [collectedSkuByDateWh, setCollectedSkuByDateWh] = useState<Record<string, Record<string, string[]>>>({});
   const [collectedHourly, setCollectedHourly] = useState<Record<number, { revenue: number; orders: Set<string> }>>({});
   const [collectedProvince, setCollectedProvince] = useState<Record<string, { revenue: number; orders: Set<string> }>>({});
+
+  const cogsMap = useMemo(function() {
+    var m = new Map<string, number>();
+    cogsEntries.forEach(function(e) { m.set(e.sku, e.cost); });
+    return m;
+  }, [cogsEntries]);
 
   const userShops = useMemo(function() {
     if (!currentUser) return [];
@@ -632,6 +638,96 @@ function FileUploadForm() {
     }
   }
 
+  function buildPnlFromRawData(wsList: XLSX.WorkSheet[], platform: DetectedPlatform, shopId: string, adMap: Record<string, number>): PnlImport | null {
+    var shop = shops.find(function(s) { return s.id === shopId; });
+    if (!shop || !platform) return null;
+
+    var allData: Record<string, unknown>[] = [];
+    for (var i = 0; i < wsList.length; i++) {
+      allData = allData.concat(normalizeKeys(XLSX.utils.sheet_to_json(wsList[i], { defval: '' }) as Record<string, unknown>[]));
+    }
+
+    var dailyMap = new Map<string, { revenue: number; cogs: number; platformFee: number; adSpend: number; skuDetails: { sku: string; qty: number; revenue: number; cogs: number; fee: number }[] }>();
+
+    for (var ri = 0; ri < allData.length; ri++) {
+      var row = allData[ri];
+      var orderId: string;
+      var date: string | null;
+      var isCancelled: boolean;
+      var lineRevenue: number;
+      var lineFee: number;
+      var sku: string;
+      var qty: number;
+
+      if (platform === 'shopee') {
+        orderId = String(row['Mã đơn hàng'] || '').trim();
+        if (!orderId) continue;
+        date = extractDateShopee(String(row['Ngày đặt hàng'] || ''));
+        if (!date) continue;
+        var status = String(row['Trạng Thái Đơn Hàng'] || '').trim();
+        isCancelled = status.indexOf('hủy') >= 0 || status.indexOf('Hủy') >= 0;
+        if (isCancelled) continue;
+
+        lineRevenue = calcLineRevenue(row);
+        qty = parseNum(row['Số lượng']) || 1;
+        var phiCoDinh = parseNum(row['Phí cố định']);
+        var phiDichVu = parseNum(row['Phí Dịch Vụ']);
+        var phiXuLy = parseNum(row['Phí xử lý giao dịch']);
+        lineFee = phiCoDinh + phiDichVu + phiXuLy;
+        sku = String(row['SKU phân loại hàng'] || '').trim();
+      } else {
+        orderId = String(row['Order ID'] || '').trim();
+        if (!orderId) continue;
+        date = extractDateTikTok(String(row['Created Time'] || ''));
+        if (!date) continue;
+        var tiktokStatus = String(row['Order Status'] || '').trim().toLowerCase();
+        var cancelType = String(row['Cancelation/Return Type'] || '').trim();
+        isCancelled = tiktokStatus === 'canceled' || tiktokStatus.indexOf('hủy') >= 0 || cancelType === 'Cancel';
+        if (isCancelled) continue;
+
+        lineRevenue = parseNum(row['SKU Subtotal After Discount']) + parseNum(row['SKU Platform Discount']);
+        qty = parseNum(row['Quantity']) || 1;
+        sku = String(row['Seller SKU'] || '').trim();
+        var feeRate = pnlConfig.tiktokFeeRate / 100;
+        lineFee = Math.round(lineRevenue * feeRate);
+      }
+
+      var dayData = dailyMap.get(date) || { revenue: 0, cogs: 0, platformFee: 0, adSpend: 0, skuDetails: [] };
+      dayData.revenue += lineRevenue;
+      dayData.platformFee += lineFee;
+
+      if (sku) {
+        var unitCost = cogsMap.get(sku) || 0;
+        var skuCogs = unitCost * qty;
+        dayData.cogs += skuCogs;
+        dayData.skuDetails.push({ sku: sku, qty: qty, revenue: lineRevenue, cogs: skuCogs, fee: lineFee });
+      }
+
+      dailyMap.set(date, dayData);
+    }
+
+    var dailyDataArr: PnlDailyData[] = [];
+    var dates = Array.from(dailyMap.keys()).sort();
+    dates.forEach(function(d) {
+      var dd = dailyMap.get(d)!;
+      dd.adSpend = adMap[d] || 0;
+      dailyDataArr.push({ date: d, revenue: dd.revenue, cogs: dd.cogs, platformFee: dd.platformFee, adSpend: dd.adSpend, skuDetails: dd.skuDetails });
+    });
+
+    if (dailyDataArr.length === 0) return null;
+
+    return {
+      id: 'pnl-' + shopId + '-' + dates[0] + '-' + Date.now(),
+      shopId: shopId,
+      shopName: shop.name,
+      channel: shop.channel,
+      dateFrom: dates[0],
+      dateTo: dates[dates.length - 1],
+      dailyData: dailyDataArr,
+      importedAt: new Date().toISOString(),
+    };
+  }
+
   function handleImport() {
     if (!currentUser) return;
     setImporting(true);
@@ -790,6 +886,30 @@ function FileUploadForm() {
       } catch (_) {}
     }
 
+    // Auto-generate PnL data
+    var pnlGenerated = false;
+    if (rawDataList.length > 0 && detectedPlatform && selectedShopId && validRows.length > 0) {
+      var adMapForPnl: Record<string, number> = {};
+      var effectiveMkt = resolveMktMap(mktDataMap, validRows.map(function(r) { return r.date; }));
+      validRows.forEach(function(r) {
+        if (r.adSpend > 0) adMapForPnl[r.date] = r.adSpend;
+        else if (effectiveMkt[r.date]) adMapForPnl[r.date] = effectiveMkt[r.date];
+      });
+      // Also pull existing report ads for dates without new ads
+      reports.filter(function(r) { return r.shopId === selectedShopId && r.adSpend > 0; }).forEach(function(r) {
+        if (!adMapForPnl[r.date]) adMapForPnl[r.date] = r.adSpend;
+      });
+
+      var newPnlImport = buildPnlFromRawData(rawDataList, detectedPlatform, selectedShopId, adMapForPnl);
+      if (newPnlImport) {
+        var existingPnl = pnlImports.filter(function(imp) {
+          return !(imp.shopId === newPnlImport!.shopId && !(newPnlImport!.dateTo < imp.dateFrom || newPnlImport!.dateFrom > imp.dateTo));
+        });
+        savePnlImports(existingPnl.concat([newPnlImport]));
+        pnlGenerated = true;
+      }
+    }
+
     const mktTotal = Object.values(mktDataMap).reduce(function(a, b) { return a + b; }, 0);
     const parts: string[] = [];
     if (added > 0) parts.push(added + ' báo cáo mới');
@@ -805,6 +925,7 @@ function FileUploadForm() {
         parts.push('trừ kho ' + inventoryDeducted + ' SP');
       }
     }
+    if (pnlGenerated) parts.push('PnL tự động');
     setSuccess('Đã import: ' + parts.join(', '));
 
     setParsedRows([]);
