@@ -319,12 +319,10 @@ export default function AdminSkuPage() {
         </div>
       )}
 
-      {/* Edit/Add form */}
-      {editing && (
+      {/* Add new form (only for new SKU, not edit) */}
+      {editing && editing.isNew && (
         <div className="mb-6 bg-slate-900 border border-blue-500/30 rounded-xl p-5">
-          <h2 className="font-semibold text-gray-100 mb-4">
-            {editing.isNew ? 'Thêm SKU mới' : 'Sửa SKU: ' + editing.originalCode}
-          </h2>
+          <h2 className="font-semibold text-gray-100 mb-4">Thêm SKU mới</h2>
           <div className="space-y-4">
             <div>
               <label className="block text-xs text-gray-400 mb-1">Mã SKU</label>
@@ -472,7 +470,71 @@ export default function AdminSkuPage() {
             <tbody className="divide-y divide-slate-800">
               {entries.map(function(entry) {
                 var isCombo = entry.items.length > 1;
-                return (
+                var isEditingThis = editing && !editing.isNew && editing.originalCode === entry.code;
+                return isEditingThis ? (
+                  <tr key={entry.code + '-edit'} className="bg-blue-950/30 border-l-2 border-l-blue-500">
+                    <td colSpan={isAdmin ? 6 : 5} className="px-4 py-4">
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <code className="px-2 py-0.5 bg-slate-800 rounded text-blue-300 text-xs font-mono">{editing!.skuCode}</code>
+                          <span className="text-xs text-gray-500">đang sửa</span>
+                        </div>
+                        <div className="space-y-2">
+                          {editing!.items.map(function(item, idx) {
+                            return (
+                              <div key={idx} className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={item.product}
+                                  onChange={function(e) { handleItemChange(idx, 'product', e.target.value); }}
+                                  className="flex-1 px-3 py-1.5 bg-slate-800 border border-slate-600 rounded text-sm text-gray-200 focus:border-blue-500 outline-none"
+                                  placeholder="Tên sản phẩm"
+                                />
+                                <div className="flex items-center gap-1">
+                                  <span className="text-xs text-gray-500">x</span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    value={item.quantity}
+                                    onChange={function(e) { handleItemChange(idx, 'quantity', parseInt(e.target.value) || 1); }}
+                                    className="w-14 px-2 py-1.5 bg-slate-800 border border-slate-600 rounded text-sm text-gray-200 text-center focus:border-blue-500 outline-none"
+                                  />
+                                </div>
+                                {editing!.items.length > 1 && (
+                                  <button onClick={function() { handleRemoveItem(idx); }} className="p-1 text-gray-500 hover:text-red-400 rounded transition-colors">
+                                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                          <button onClick={handleAddItem} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">+ Thêm SP (combo)</button>
+                        </div>
+                        <div className="flex items-center gap-3 flex-wrap">
+                          {isAdmin && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-400">Giá vốn:</span>
+                              <input
+                                type="number"
+                                value={editing!.cost}
+                                onChange={function(e) { setEditing(Object.assign({}, editing, { cost: e.target.value })); }}
+                                className="w-28 px-2 py-1.5 bg-slate-800 border border-slate-600 rounded text-sm text-amber-300 font-mono focus:border-amber-500 outline-none"
+                                placeholder="VD: 25000"
+                              />
+                              {editing!.items.length > 1 && calcComboCost(editing!.items) > 0 && (
+                                <span className="text-xs text-amber-400">Combo: {fmt(calcComboCost(editing!.items))}</span>
+                              )}
+                            </div>
+                          )}
+                          <div className="flex items-center gap-2 ml-auto">
+                            <button onClick={handleSave} className="px-4 py-1.5 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-500 transition-colors">Lưu</button>
+                            <button onClick={function() { setEditing(null); }} className="px-4 py-1.5 text-gray-400 hover:text-gray-200 border border-slate-600 rounded text-xs hover:bg-slate-800 transition-colors">Hủy</button>
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
                   <tr key={entry.code} className="hover:bg-slate-800/50">
                     <td className="px-4 py-3">
                       <code className="px-2 py-0.5 bg-slate-800 rounded text-blue-300 text-xs font-mono">{entry.code}</code>
