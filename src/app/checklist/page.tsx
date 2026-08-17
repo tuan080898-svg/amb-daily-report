@@ -132,8 +132,9 @@ export default function ChecklistPage() {
     if (!newTitle.trim()) return;
     var taskList = [...allTasks];
     if (editTask) {
+      var editId = editTask.id;
       taskList = taskList.map(function(t) {
-        if (t.id !== editTask.id) return t;
+        if (t.id !== editId) return t;
         return { ...t, title: newTitle, description: newDesc, category: newCategory, deadline: newDeadline, priority: newPriority };
       });
     } else {
