@@ -143,11 +143,20 @@ export default function AdminSkuPage() {
 
   var productCostMap = useMemo(function() {
     var m = new Map<string, number>();
-    cogsEntries.forEach(function(e) {
-      if (e.name && e.cost > 0) m.set(e.name, e.cost);
+    var allEntries = Object.entries(skuMap);
+    allEntries.forEach(function(entry) {
+      var code = entry[0];
+      var items = entry[1];
+      if (items.length === 1 && cogsMap.has(code)) {
+        var unitCost = Math.round(cogsMap.get(code)! / (items[0].quantity || 1));
+        var existing = m.get(items[0].product);
+        if (!existing || unitCost < existing) {
+          m.set(items[0].product, unitCost);
+        }
+      }
     });
     return m;
-  }, [cogsEntries]);
+  }, [skuMap, cogsMap]);
 
   function calcComboCost(items: SkuItem[]): number {
     var total = 0;
