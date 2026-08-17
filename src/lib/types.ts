@@ -145,6 +145,26 @@ export interface PnlImport {
   importedAt: string;
 }
 
+export interface ChecklistTask {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  deadline: string;
+  priority: 'high' | 'medium' | 'low';
+  isActive: boolean;
+  order: number;
+}
+
+export interface ChecklistEntry {
+  date: string;
+  taskId: string;
+  userId: string;
+  completed: boolean;
+  completedAt: string;
+  note: string;
+}
+
 export interface CskhIssue {
   id: string;
   date: string;

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, ReactNode } from 'react';
 import { AppContext, createInitialState } from '@/lib/store';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport } from '@/lib/types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry } from '@/lib/types';
 import { IS_SUPABASE_CONFIGURED } from '@/lib/supabase';
 import {
   dbGetUsers, dbAddUser, dbUpdateUser,
@@ -17,6 +17,8 @@ import {
   dbGetCskhIssues, dbAddCskhIssue, dbUpdateCskhIssue,
   dbGetCogs, dbSaveCogs, dbGetPnlConfig, dbSavePnlConfig,
   dbGetPnlImports, dbSavePnlImports,
+  dbGetChecklistTasks, dbSaveChecklistTasks,
+  dbGetChecklistEntries, dbSaveChecklistEntries,
 } from '@/lib/db';
 
 const IS_SUPABASE = IS_SUPABASE_CONFIGURED;
@@ -44,9 +46,10 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss, cogsData, pnlCfg, pnlImps] = await Promise.all([
+        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss, cogsData, pnlCfg, pnlImps, clTasks, clEntries] = await Promise.all([
           dbGetUsers(), dbGetShops(), dbGetReports(), dbGetKPIs(), dbGetPlans(), dbGetConfig(), dbGetSkuImports(), dbGetAnalytics(),
           dbGetCskhReviews(), dbGetCskhIssues(), dbGetCogs(), dbGetPnlConfig(), dbGetPnlImports(),
+          dbGetChecklistTasks(), dbGetChecklistEntries(),
         ]);
         if (cancelled) return;
         let savedUser = null;
@@ -102,6 +105,8 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           cogsEntries: cogsData,
           pnlConfig: pnlCfg,
           pnlImports: pnlImps,
+          checklistTasks: clTasks,
+          checklistEntries: clEntries,
           config,
           currentUser: savedUser,
         }));
@@ -302,6 +307,16 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     if (IS_SUPABASE) dbSavePnlImports(imports).catch(function(err) { console.error(err); alert('Lỗi lưu PnL: ' + err.message); });
   }, []);
 
+  const saveChecklistTasksCb = useCallback(function(tasks: ChecklistTask[]) {
+    setState(function(s) { return { ...s, checklistTasks: tasks }; });
+    if (IS_SUPABASE) dbSaveChecklistTasks(tasks).catch(function(err) { console.error(err); alert('Lỗi lưu checklist: ' + err.message); });
+  }, []);
+
+  const saveChecklistEntriesCb = useCallback(function(entries: ChecklistEntry[]) {
+    setState(function(s) { return { ...s, checklistEntries: entries }; });
+    if (IS_SUPABASE) dbSaveChecklistEntries(entries).catch(function(err) { console.error(err); alert('Lỗi lưu checklist: ' + err.message); });
+  }, []);
+
   const getUserShops = useCallback((userId: string): Shop[] => {
     const user = state.users.find(u => u.id === userId);
     if (!user) return [];
@@ -332,6 +347,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       addCskhReview: addCskhReviewCb, updateCskhReview: updateCskhReviewCb,
       addCskhIssue: addCskhIssueCb, updateCskhIssue: updateCskhIssueCb,
       saveCogs: saveCogsCb, savePnlConfig: savePnlConfigCb, savePnlImports: savePnlImportsCb,
+      saveChecklistTasks: saveChecklistTasksCb, saveChecklistEntries: saveChecklistEntriesCb,
     }}>
       {children}
     </AppContext.Provider>

@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { href: '/reports/analytics', label: 'Phân tích', icon: '📈', roles: ['admin', 'employee'] },
   { href: '/cskh', label: 'CSKH Dashboard', icon: '🛡️', roles: ['admin', 'employee'] },
   { href: '/cskh/report', label: 'Báo cáo CSKH', icon: '📞', roles: ['admin', 'employee'] },
+  { href: '/checklist', label: 'Checklist', icon: '✅', roles: ['admin', 'employee'] },
   { href: '/admin/pnl', label: 'Lãi lỗ (PnL)', icon: '💹', roles: ['admin'] },
   { href: '/admin/sku', label: 'Quản lý SKU', icon: '🏷️', roles: ['admin'] },
   { href: '/admin/inventory', label: 'Quản lý Kho', icon: '📦', roles: ['admin'] },

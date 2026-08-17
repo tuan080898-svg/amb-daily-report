@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport } from './types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry } from './types';
 import { DEFAULT_CONFIG } from './utils';
 
 function db() {
@@ -503,4 +503,46 @@ export async function dbSavePnlImports(list: PnlImport[]): Promise<void> {
   const blob = new Blob([json], { type: 'application/json' });
   const { error } = await db().storage.from(PNL_BUCKET).upload(PNL_IMPORTS_FILE, blob, { upsert: true });
   if (error) throw new Error('Lưu PnL imports thất bại: ' + error.message);
+}
+
+// ==================== Checklist (Supabase Storage) ====================
+
+const CHECKLIST_BUCKET = 'pnl-data';
+const CHECKLIST_TASKS_FILE = 'checklist-tasks.json';
+const CHECKLIST_ENTRIES_FILE = 'checklist-entries.json';
+
+export async function dbGetChecklistTasks(): Promise<ChecklistTask[]> {
+  try {
+    const { data, error } = await db().storage.from(CHECKLIST_BUCKET).download(CHECKLIST_TASKS_FILE);
+    if (error || !data) return [];
+    const text = await data.text();
+    return JSON.parse(text) as ChecklistTask[];
+  } catch {
+    return [];
+  }
+}
+
+export async function dbSaveChecklistTasks(list: ChecklistTask[]): Promise<void> {
+  const json = JSON.stringify(list);
+  const blob = new Blob([json], { type: 'application/json' });
+  const { error } = await db().storage.from(CHECKLIST_BUCKET).upload(CHECKLIST_TASKS_FILE, blob, { upsert: true });
+  if (error) throw new Error('Lưu checklist tasks thất bại: ' + error.message);
+}
+
+export async function dbGetChecklistEntries(): Promise<ChecklistEntry[]> {
+  try {
+    const { data, error } = await db().storage.from(CHECKLIST_BUCKET).download(CHECKLIST_ENTRIES_FILE);
+    if (error || !data) return [];
+    const text = await data.text();
+    return JSON.parse(text) as ChecklistEntry[];
+  } catch {
+    return [];
+  }
+}
+
+export async function dbSaveChecklistEntries(list: ChecklistEntry[]): Promise<void> {
+  const json = JSON.stringify(list);
+  const blob = new Blob([json], { type: 'application/json' });
+  const { error } = await db().storage.from(CHECKLIST_BUCKET).upload(CHECKLIST_ENTRIES_FILE, blob, { upsert: true });
+  if (error) throw new Error('Lưu checklist entries thất bại: ' + error.message);
 }

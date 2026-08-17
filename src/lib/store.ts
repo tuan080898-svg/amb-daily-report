@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext } from 'react';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport } from './types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry } from './types';
 import { DEFAULT_CONFIG } from './utils';
 import { MOCK_SHOPS, MOCK_USERS, MOCK_REPORTS, MOCK_KPIS, MOCK_PLANS } from './mock-data';
 
@@ -19,6 +19,8 @@ export interface AppState {
   cogsEntries: CogsEntry[];
   pnlConfig: PnlConfig;
   pnlImports: PnlImport[];
+  checklistTasks: ChecklistTask[];
+  checklistEntries: ChecklistEntry[];
   config: AppConfig;
   login: (email: string, password: string) => boolean;
   logout: () => void;
@@ -44,9 +46,11 @@ export interface AppState {
   saveCogs: (entries: CogsEntry[]) => void;
   savePnlConfig: (config: PnlConfig) => void;
   savePnlImports: (imports: PnlImport[]) => void;
+  saveChecklistTasks: (tasks: ChecklistTask[]) => void;
+  saveChecklistEntries: (entries: ChecklistEntry[]) => void;
 }
 
-export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addReport' | 'updateReport' | 'addShop' | 'updateShop' | 'deleteShop' | 'updateKPI' | 'updatePlan' | 'updateConfig' | 'addUser' | 'updateUser' | 'getUserShops' | 'addSkuImport' | 'deleteSkuImport' | 'addAnalytics' | 'deleteAnalytics' | 'addCskhReview' | 'updateCskhReview' | 'addCskhIssue' | 'updateCskhIssue' | 'saveCogs' | 'savePnlConfig' | 'savePnlImports'> {
+export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addReport' | 'updateReport' | 'addShop' | 'updateShop' | 'deleteShop' | 'updateKPI' | 'updatePlan' | 'updateConfig' | 'addUser' | 'updateUser' | 'getUserShops' | 'addSkuImport' | 'deleteSkuImport' | 'addAnalytics' | 'deleteAnalytics' | 'addCskhReview' | 'updateCskhReview' | 'addCskhIssue' | 'updateCskhIssue' | 'saveCogs' | 'savePnlConfig' | 'savePnlImports' | 'saveChecklistTasks' | 'saveChecklistEntries'> {
   return {
     currentUser: null,
     users: [...MOCK_USERS],
@@ -61,6 +65,8 @@ export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addRe
     cogsEntries: [],
     pnlConfig: { shopeeFeeRate: 34, tiktokFeeRate: 34, opexRate: 16 },
     pnlImports: [],
+    checklistTasks: [],
+    checklistEntries: [],
     config: { ...DEFAULT_CONFIG },
   };
 }
