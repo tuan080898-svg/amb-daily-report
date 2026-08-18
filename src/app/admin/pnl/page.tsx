@@ -772,6 +772,78 @@ export default function PnlPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Shop Summary Table */}
+              {shopSummary.length > 0 && (
+                <div className="bg-slate-900 border border-slate-700/50 rounded-2xl overflow-hidden">
+                  <div className="px-6 py-4 border-b border-slate-700/50">
+                    <p className="text-xs font-bold text-gray-400 tracking-wider">BÁO CÁO THEO SHOP</p>
+                    <p className="text-xs text-gray-600 mt-1">Chi tiết doanh thu - chi phí - lợi nhuận từng shop</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-slate-800/60 border-b border-slate-700/50">
+                          <th className="text-left px-4 py-3 font-medium text-gray-400">Shop</th>
+                          <th className="text-left px-4 py-3 font-medium text-gray-400">Kênh</th>
+                          <th className="text-right px-4 py-3 font-medium text-gray-400">Doanh thu</th>
+                          <th className="text-right px-4 py-3 font-medium text-gray-400">Giá vốn</th>
+                          <th className="text-right px-4 py-3 font-medium text-gray-400">% GV</th>
+                          <th className="text-right px-4 py-3 font-medium text-gray-400">Phí sàn</th>
+                          <th className="text-right px-4 py-3 font-medium text-gray-400">% Phí sàn</th>
+                          <th className="text-right px-4 py-3 font-medium text-gray-400">QC (+VAT)</th>
+                          <th className="text-right px-4 py-3 font-medium text-gray-400">% QC</th>
+                          <th className="text-right px-4 py-3 font-medium text-gray-400">Vận hành</th>
+                          <th className="text-right px-4 py-3 font-medium text-gray-400">Lợi nhuận</th>
+                          <th className="text-right px-4 py-3 font-medium text-gray-400">Biên LN</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {shopSummary.map(function(entry) {
+                          var id = entry[0]; var d = entry[1];
+                          var margin = d.revenue > 0 ? (d.profit / d.revenue * 100) : 0;
+                          var cogsPct = d.revenue > 0 ? (d.cogs / d.revenue * 100) : 0;
+                          var feePct = d.revenue > 0 ? (d.platformFee / d.revenue * 100) : 0;
+                          var adPct = d.revenue > 0 ? (d.adSpend / d.revenue * 100) : 0;
+                          return (
+                            <tr key={id} className="hover:bg-slate-800/50">
+                              <td className="px-4 py-3 font-medium text-gray-200">{d.shopName}</td>
+                              <td className="px-4 py-3">
+                                <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + (d.channel === 'TikTok' ? 'bg-pink-500/15 text-pink-400' : 'bg-orange-500/15 text-orange-400')}>{d.channel}</span>
+                              </td>
+                              <td className="px-4 py-3 text-right text-blue-300">{fmt(d.revenue)}</td>
+                              <td className="px-4 py-3 text-right text-amber-300">{fmt(d.cogs)}</td>
+                              <td className="px-4 py-3 text-right text-xs text-amber-500">{pct(cogsPct)}</td>
+                              <td className="px-4 py-3 text-right text-orange-300">{fmt(d.platformFee)}</td>
+                              <td className="px-4 py-3 text-right text-xs text-orange-500">{pct(feePct)}</td>
+                              <td className="px-4 py-3 text-right text-pink-300">{fmt(d.adSpend)}</td>
+                              <td className="px-4 py-3 text-right text-xs text-pink-500">{pct(adPct)}</td>
+                              <td className="px-4 py-3 text-right text-violet-300">{fmt(d.opex)}</td>
+                              <td className={'px-4 py-3 text-right font-semibold ' + (d.profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>{fmt(d.profit)}</td>
+                              <td className={'px-4 py-3 text-right text-xs ' + (margin >= 0 ? 'text-emerald-500' : 'text-red-500')}>{pct(margin)}</td>
+                            </tr>
+                          );
+                        })}
+                        {shopSummary.length > 1 && (
+                          <tr className="bg-slate-800/50 font-semibold">
+                            <td className="px-4 py-3 text-gray-200" colSpan={2}>Tổng</td>
+                            <td className="px-4 py-3 text-right text-blue-300">{fmt(totals.revenue)}</td>
+                            <td className="px-4 py-3 text-right text-amber-300">{fmt(totals.cogs)}</td>
+                            <td className="px-4 py-3 text-right text-xs text-amber-500">{pct(totals.revenue > 0 ? totals.cogs / totals.revenue * 100 : 0)}</td>
+                            <td className="px-4 py-3 text-right text-orange-300">{fmt(totals.platformFee)}</td>
+                            <td className="px-4 py-3 text-right text-xs text-orange-500">{pct(totals.revenue > 0 ? totals.platformFee / totals.revenue * 100 : 0)}</td>
+                            <td className="px-4 py-3 text-right text-pink-300">{fmt(totals.adSpend)}</td>
+                            <td className="px-4 py-3 text-right text-xs text-pink-500">{pct(totals.revenue > 0 ? totals.adSpend / totals.revenue * 100 : 0)}</td>
+                            <td className="px-4 py-3 text-right text-violet-300">{fmt(totals.opex)}</td>
+                            <td className={'px-4 py-3 text-right ' + (totals.profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>{fmt(totals.profit)}</td>
+                            <td className={'px-4 py-3 text-right text-xs ' + (profitMargin >= 0 ? 'text-emerald-500' : 'text-red-500')}>{pct(profitMargin)}</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
