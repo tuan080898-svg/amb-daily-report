@@ -77,7 +77,7 @@ export default function PnlPage() {
   var [shopeeRate, setShopeeRate] = useState(String(pnlConfig.shopeeFeeRate));
   var [tiktokRate, setTiktokRate] = useState(String(pnlConfig.tiktokFeeRate));
   var [opexRate, setOpexRate] = useState(String(pnlConfig.opexRate));
-  var [activeTab, setActiveTab] = useState<'summary' | 'daily' | 'cogs'>('summary');
+  var [activeTab, setActiveTab] = useState<'ceo' | 'summary' | 'daily' | 'cogs'>('ceo');
 
   var cogsMap = useMemo(function() {
     var m = new Map<string, number>();
@@ -552,6 +552,9 @@ export default function PnlPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-4 border-b border-slate-700/50">
+        <button onClick={function() { setActiveTab('ceo'); }}
+          className={'px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ' + (activeTab === 'ceo' ? 'border-emerald-500 text-emerald-400' : 'border-transparent text-gray-500 hover:text-gray-300')}>
+          Tổng hợp</button>
         <button onClick={function() { setActiveTab('summary'); }}
           className={'px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ' + (activeTab === 'summary' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-300')}>
           Theo shop</button>
@@ -562,6 +565,217 @@ export default function PnlPage() {
           className={'px-4 py-2.5 text-sm font-medium transition-colors border-b-2 ' + (activeTab === 'cogs' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-300')}>
           Giá vốn ({cogsEntries.length})</button>
       </div>
+
+      {/* Tab: CEO Dashboard */}
+      {activeTab === 'ceo' && (
+        <div className="space-y-6">
+          {pnlRows.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">
+              <p className="text-lg mb-2">Chưa có dữ liệu PnL</p>
+              <p className="text-sm">Tải file giá vốn + file đơn hàng lên để xem báo cáo CEO</p>
+            </div>
+          ) : (
+            <>
+              {/* Report Header */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs text-gray-500 tracking-widest font-bold mb-1">BÁO CÁO LỢI NHUẬN TỔNG HỢP</p>
+                  <p className="text-xs text-gray-600">Kỳ đối soát: {dateFrom} → {dateTo}</p>
+                </div>
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700/30">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                  <span className="text-xs text-gray-400">Phép tính đã kiểm tra</span>
+                </div>
+              </div>
+
+              {/* Two Main Cards: Net Profit + CEO Insight */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Net Profit Card */}
+                <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <p className="text-xs font-bold text-gray-400 tracking-wider">LỢI NHUẬN RÒNG CUỐI CÙNG</p>
+                    <span className={'inline-flex px-3 py-1 rounded-full text-xs font-bold ' + (profitMargin >= 0 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30')}>{pct(Math.abs(profitMargin))}</span>
+                  </div>
+                  <p className={'text-4xl font-extrabold tracking-tight mb-4 ' + (totals.profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>{fmt(totals.profit)}</p>
+                  <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800/80 border border-slate-700/30">
+                    <span className={'text-lg font-bold ' + (profitMargin >= 0 ? 'text-emerald-400' : 'text-red-400')}>{pct(Math.abs(profitMargin))}</span>
+                    <span className="text-sm text-gray-500">biên lợi nhuận ròng</span>
+                  </div>
+                </div>
+
+                {/* CEO Insight Card */}
+                <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
+                  <p className="text-xs font-bold text-gray-400 tracking-wider mb-4">CEO CẦN NHÌN CON SỐ CUỐI CÙNG</p>
+                  <div className="space-y-3 mb-4">
+                    {profitMargin >= 15 && <p className="text-sm text-gray-300 leading-relaxed">Biên lợi nhuận ròng đang ở mức tốt. Doanh nghiệp có dư địa để đầu tư mở rộng quy mô.</p>}
+                    {profitMargin >= 5 && profitMargin < 15 && <p className="text-sm text-gray-300 leading-relaxed">Doanh thu cao chưa chắc lợi nhuận cao.</p>}
+                    {profitMargin >= 5 && profitMargin < 15 && <p className="text-sm text-gray-300 leading-relaxed">Chỉ cần bỏ sót 3% chi phí, lợi nhuận có thể sai lệch gần một phần ba.</p>}
+                    {profitMargin >= 0 && profitMargin < 5 && <p className="text-sm text-gray-300 leading-relaxed">Biên lợi nhuận rất mỏng. Mỗi phần trăm chi phí tăng thêm đều ảnh hưởng trực tiếp đến lãi ròng.</p>}
+                    {profitMargin < 0 && <p className="text-sm text-gray-300 leading-relaxed">Đang kinh doanh LỖ. Chi phí vượt quá doanh thu, cần rà soát ngay từng khoản mục chi phí.</p>}
+                  </div>
+                  <div className="px-4 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30">
+                    <p className="text-xs font-bold text-amber-400 tracking-wider">
+                      {'QUYẾT ĐỊNH: ' + (profitMargin < 0 ? 'CẮT GIẢM CHI PHÍ NGAY' : profitMargin < 10 ? 'GOM ĐỦ CHI PHÍ TRƯỚC KHI SCALE' : adRatio > 15 ? 'TỐI ƯU QC TRƯỚC KHI SCALE' : 'ĐỦ ĐIỀU KIỆN ĐỂ SCALE')}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 4 KPI Cards */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="w-8 h-8 rounded-lg bg-blue-500/15 flex items-center justify-center text-blue-400 text-lg font-bold">$</span>
+                    <p className="text-[10px] font-bold text-gray-400 tracking-wider leading-tight">TỔNG DOANH THU</p>
+                  </div>
+                  <p className="text-xl lg:text-2xl font-bold text-blue-400 mb-1">{fmt(totals.revenue)}</p>
+                  <p className="text-xs text-gray-500">100% doanh thu</p>
+                </div>
+                <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="w-8 h-8 rounded-lg bg-orange-500/15 flex items-center justify-center text-orange-400 text-lg font-bold">−</span>
+                    <p className="text-[10px] font-bold text-gray-400 tracking-wider leading-tight">PHÍ SÀN</p>
+                  </div>
+                  <p className="text-xl lg:text-2xl font-bold text-orange-400 mb-1">{fmt(totals.platformFee)}</p>
+                  <p className="text-xs text-gray-500">{pct(feeRatio)} doanh thu</p>
+                </div>
+                <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="w-8 h-8 rounded-lg bg-amber-500/15 flex items-center justify-center text-amber-400 text-lg font-bold">●</span>
+                    <p className="text-[10px] font-bold text-gray-400 tracking-wider leading-tight">GIÁ VỐN HÀNG HÓA</p>
+                  </div>
+                  <p className="text-xl lg:text-2xl font-bold text-amber-400 mb-1">{fmt(totals.cogs)}</p>
+                  <p className="text-xs text-gray-500">{pct(cogsRatio)} doanh thu</p>
+                </div>
+                <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="w-8 h-8 rounded-lg bg-violet-500/15 flex items-center justify-center text-violet-400 text-lg font-bold">◻</span>
+                    <p className="text-[10px] font-bold text-gray-400 tracking-wider leading-tight">CHI PHÍ VẬN HÀNH</p>
+                  </div>
+                  <p className="text-xl lg:text-2xl font-bold text-violet-400 mb-1">{fmt(totals.opex + totals.adSpend)}</p>
+                  <p className="text-xs text-gray-500">{pct(opexRatio + adRatio)} doanh thu</p>
+                </div>
+              </div>
+
+              {/* Profit Formula Bar */}
+              <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-5">
+                <p className="text-xs font-bold text-gray-400 tracking-wider mb-4">CÔNG THỨC LỢI NHUẬN RÒNG</p>
+                <div className="flex flex-wrap items-center gap-2 lg:gap-3 text-sm">
+                  <span className="text-blue-400 font-semibold">{fmt(totals.revenue)}</span>
+                  <span className="text-gray-600 font-bold">−</span>
+                  <span className="text-orange-400 font-semibold">{fmt(totals.platformFee)}</span>
+                  <span className="text-gray-600 font-bold">−</span>
+                  <span className="text-pink-400 font-semibold">{fmt(totals.adSpend)}</span>
+                  <span className="text-gray-600 font-bold">−</span>
+                  <span className="text-amber-400 font-semibold">{fmt(totals.cogs)}</span>
+                  <span className="text-gray-600 font-bold">−</span>
+                  <span className="text-violet-400 font-semibold">{fmt(totals.opex)}</span>
+                  <span className="text-gray-600 font-bold">=</span>
+                  <span className={'px-4 py-1.5 rounded-lg border-2 font-bold text-base ' + (totals.profit >= 0 ? 'text-emerald-400 border-emerald-500/40 bg-emerald-500/5' : 'text-red-400 border-red-500/40 bg-red-500/5')}>{fmt(totals.profit)}</span>
+                </div>
+              </div>
+
+              {/* Bottom: Cost Breakdown + Donut Chart */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Cost Breakdown with Bars */}
+                <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-6">
+                  <div className="mb-5">
+                    <p className="text-xs font-bold text-gray-400 tracking-wider">CHI TIẾT CÁC KHOẢN CHI PHÍ</p>
+                    <p className="text-xs text-gray-600 mt-1">Nhìn rõ khoản nào đang ăn vào lợi nhuận</p>
+                  </div>
+                  {(function() {
+                    var costItems = [
+                      { label: 'Giá vốn hàng hóa', value: totals.cogs, color: 'bg-amber-500' },
+                      { label: 'Phí sàn', value: totals.platformFee, color: 'bg-orange-500' },
+                      { label: 'Quảng cáo (đã VAT)', value: totals.adSpend, color: 'bg-pink-500' },
+                      { label: 'Vận hành • ' + pnlConfig.opexRate + '% DT', value: totals.opex, color: 'bg-violet-500' },
+                    ];
+                    var maxCost = Math.max.apply(null, costItems.map(function(x) { return x.value; }));
+                    var totalCost = costItems.reduce(function(s, x) { return s + x.value; }, 0);
+                    return (
+                      <div className="space-y-5">
+                        {costItems.map(function(item, i) {
+                          var barW = maxCost > 0 ? Math.max(2, item.value / maxCost * 100) : 0;
+                          return (
+                            <div key={i}>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <span className="text-sm font-medium text-gray-300">{item.label}</span>
+                                <span className="text-sm font-semibold text-gray-200">{fmt(item.value)}</span>
+                              </div>
+                              <div className="w-full h-2 rounded-full bg-slate-800 overflow-hidden">
+                                <div className={'h-full rounded-full transition-all ' + item.color} style={{ width: barW + '%' }}></div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                        <div className="pt-4 border-t border-slate-700/50">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-gray-500 italic">Tổng các khoản trên</span>
+                            <span className="text-sm font-bold text-gray-300">= {fmt(totalCost)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* Donut Chart - Revenue Structure */}
+                <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-6">
+                  <p className="text-xs font-bold text-gray-400 tracking-wider mb-5">CƠ CẤU 100% DOANH THU</p>
+                  <div className="flex flex-col items-center">
+                    {(function() {
+                      var R = 70;
+                      var C = 2 * Math.PI * R;
+                      var rawSegs = [
+                        { label: 'Phí sàn', pctVal: feeRatio, color: '#f97316' },
+                        { label: 'Giá vốn', pctVal: cogsRatio, color: '#f59e0b' },
+                        { label: 'Vận hành', pctVal: opexRatio, color: '#8b5cf6' },
+                        { label: 'QC', pctVal: adRatio, color: '#ec4899' },
+                      ];
+                      if (profitMargin > 0) rawSegs.push({ label: 'Lợi nhuận', pctVal: profitMargin, color: '#22c55e' });
+                      var rawTotal = rawSegs.reduce(function(s, x) { return s + x.pctVal; }, 0);
+                      if (rawTotal === 0) return <p className="text-sm text-gray-500">Chưa có dữ liệu</p>;
+                      var gap = 100 - rawTotal;
+                      if (gap > 0.5) rawSegs.push({ label: 'Điều chỉnh', pctVal: gap, color: '#ef4444' });
+                      var finalTotal = rawSegs.reduce(function(s, x) { return s + x.pctVal; }, 0);
+                      var segs = Math.abs(finalTotal - 100) > 1 ? rawSegs.map(function(s) { return { label: s.label, pctVal: s.pctVal / finalTotal * 100, color: s.color }; }) : rawSegs;
+                      var offset = 0;
+                      return (
+                        <div className="flex flex-col items-center">
+                          <svg viewBox="0 0 200 200" className="w-48 h-48 mb-5">
+                            {segs.map(function(seg, i) {
+                              var arc = seg.pctVal / 100 * C;
+                              var dashArr = arc + ' ' + (C - arc);
+                              var curOffset = offset;
+                              offset += arc;
+                              return <circle key={i} cx="100" cy="100" r={R} fill="none" stroke={seg.color} strokeWidth="28" strokeDasharray={dashArr} strokeDashoffset={-curOffset} style={{ transform: 'rotate(-90deg)', transformOrigin: '100px 100px' }} />;
+                            })}
+                            <text x="100" y="90" textAnchor="middle" fill="#94a3b8" fontSize="11" fontWeight="600">LỢI NHUẬN</text>
+                            <text x="100" y="118" textAnchor="middle" fill={profitMargin >= 0 ? '#22c55e' : '#ef4444'} fontSize="26" fontWeight="700">{pct(Math.abs(profitMargin))}</text>
+                          </svg>
+                          <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+                            {segs.map(function(seg, i) {
+                              return (
+                                <div key={i} className="flex items-center gap-2">
+                                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: seg.color }}></span>
+                                  <span className="text-xs text-gray-400">{seg.label + ' ' + seg.pctVal.toFixed(1) + '%'}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  <div className="mt-5 pt-3 border-t border-slate-700/50 text-center">
+                    <p className="text-[10px] font-bold text-gray-500 tracking-[0.2em]">MỘT MÀN HÌNH • MỘT QUYẾT ĐỊNH</p>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Tab: Shop Summary */}
       {activeTab === 'summary' && (
