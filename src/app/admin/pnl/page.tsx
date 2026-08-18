@@ -786,9 +786,6 @@ export default function PnlPage() {
                       );
                     })()}
                   </div>
-                  <div className="mt-5 pt-3 border-t border-slate-700/50 text-center">
-                    <p className="text-[10px] font-bold text-gray-500 tracking-[0.2em]">MỘT MÀN HÌNH • MỘT QUYẾT ĐỊNH</p>
-                  </div>
                 </div>
               </div>
 
