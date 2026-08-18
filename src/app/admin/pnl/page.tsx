@@ -96,22 +96,41 @@ export default function PnlPage() {
   }, [pnlImports, filterShop, filterChannel, dateFrom, dateTo]);
 
   var pnlRows = useMemo(function() {
+    var adLookup = new Map<string, number>();
+    reports.forEach(function(r) {
+      adLookup.set(r.shopId + '|' + r.date, r.adSpend);
+    });
+
     var rows: { date: string; shopId: string; shopName: string; channel: string; revenue: number; cogs: number; platformFee: number; adSpend: number; opex: number; profit: number }[] = [];
     filteredImports.forEach(function(imp) {
       imp.dailyData.forEach(function(dd) {
         if (dateFrom && dd.date < dateFrom) return;
         if (dateTo && dd.date > dateTo) return;
+
+        var dynamicCogs = 0;
+        if (dd.skuDetails && dd.skuDetails.length > 0) {
+          dd.skuDetails.forEach(function(sd) {
+            var unitCost = cogsMap.get(sd.sku) || 0;
+            dynamicCogs += unitCost * sd.qty;
+          });
+        } else {
+          dynamicCogs = dd.cogs;
+        }
+
+        var latestAdSpend = adLookup.get(imp.shopId + '|' + dd.date);
+        var rawAdSpend = latestAdSpend !== undefined ? latestAdSpend : dd.adSpend;
+
         var vatRate = imp.channel === 'TikTok' ? 1.10 : 1.08;
-        var adSpendWithVat = Math.round(dd.adSpend * vatRate);
+        var adSpendWithVat = Math.round(rawAdSpend * vatRate);
         var opex = Math.round(dd.revenue * pnlConfig.opexRate / 100);
-        var profit = dd.revenue - dd.cogs - dd.platformFee - adSpendWithVat - opex;
+        var profit = dd.revenue - dynamicCogs - dd.platformFee - adSpendWithVat - opex;
         rows.push({
           date: dd.date,
           shopId: imp.shopId,
           shopName: imp.shopName,
           channel: imp.channel,
           revenue: dd.revenue,
-          cogs: dd.cogs,
+          cogs: dynamicCogs,
           platformFee: dd.platformFee,
           adSpend: adSpendWithVat,
           opex: opex,
@@ -121,7 +140,7 @@ export default function PnlPage() {
     });
     rows.sort(function(a, b) { return a.date.localeCompare(b.date) || a.shopName.localeCompare(b.shopName); });
     return rows;
-  }, [filteredImports, dateFrom, dateTo, pnlConfig.opexRate]);
+  }, [filteredImports, dateFrom, dateTo, pnlConfig.opexRate, reports, cogsMap]);
 
   var totals = useMemo(function() {
     var t = { revenue: 0, cogs: 0, platformFee: 0, adSpend: 0, opex: 0, profit: 0 };
