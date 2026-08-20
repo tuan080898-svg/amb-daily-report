@@ -89,7 +89,6 @@ async function listMonthlyTables(token: string): Promise<string[]> {
   if (json.code !== 0) throw new Error('Lark list tables error: ' + json.msg);
 
   return (json.data.items || [])
-    .filter((t: { name: string }) => t.name.startsWith('Tháng'))
     .map((t: { table_id: string }) => t.table_id);
 }
 
