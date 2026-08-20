@@ -440,109 +440,211 @@ export async function dbUpdateCskhIssue(issue: CskhIssue): Promise<void> {
   if (error) throw new Error('Cập nhật vấn đề CSKH thất bại: ' + error.message);
 }
 
-// ==================== PnL / COGS (Supabase Storage) ====================
-
-const PNL_BUCKET = 'pnl-data';
-const COGS_FILE = 'cogs.json';
-const PNL_CONFIG_FILE = 'config.json';
+// ==================== COGS (PostgreSQL) ====================
 
 export async function dbGetCogs(): Promise<CogsEntry[]> {
-  try {
-    const { data, error } = await db().storage.from(PNL_BUCKET).download(COGS_FILE);
-    if (error || !data) return [];
-    const text = await data.text();
-    return JSON.parse(text) as CogsEntry[];
-  } catch {
-    return [];
+  const { data } = await db().from('cogs_entries').select('*');
+  if (data && data.length > 0) {
+    return data.map(function(r: Record<string, unknown>) {
+      return { sku: r.sku as string, name: r.name as string, cost: r.cost as number };
+    });
   }
+  try {
+    const res = await db().storage.from('pnl-data').download('cogs.json');
+    if (!res.error && res.data) {
+      const list = JSON.parse(await res.data.text()) as CogsEntry[];
+      if (list.length > 0) { await dbSaveCogs(list); return list; }
+    }
+  } catch {}
+  return [];
 }
 
 export async function dbSaveCogs(list: CogsEntry[]): Promise<void> {
-  const json = JSON.stringify(list);
-  const blob = new Blob([json], { type: 'application/json' });
-  const { error } = await db().storage.from(PNL_BUCKET).upload(COGS_FILE, blob, { upsert: true });
-  if (error) throw new Error('Lưu giá vốn thất bại: ' + error.message);
+  if (list.length > 0) {
+    const rows = list.map(function(e) { return { sku: e.sku, name: e.name, cost: e.cost }; });
+    const BATCH = 500;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const { error } = await db().from('cogs_entries').upsert(rows.slice(i, i + BATCH));
+      if (error) throw new Error('Lưu giá vốn thất bại: ' + error.message);
+    }
+  }
+  const newSkus = new Set(list.map(function(e) { return e.sku; }));
+  const { data: existing } = await db().from('cogs_entries').select('sku');
+  const toDelete = (existing || []).filter(function(r: Record<string, unknown>) { return !newSkus.has(r.sku as string); });
+  for (const row of toDelete) {
+    await db().from('cogs_entries').delete().eq('sku', row.sku as string);
+  }
 }
 
+// ==================== PnL Config (PostgreSQL) ====================
+
 export async function dbGetPnlConfig(): Promise<PnlConfig> {
-  try {
-    const { data, error } = await db().storage.from(PNL_BUCKET).download(PNL_CONFIG_FILE);
-    if (error || !data) return { shopeeFeeRate: 34, tiktokFeeRate: 34, opexRate: 16 };
-    const text = await data.text();
-    var parsed = JSON.parse(text) as PnlConfig;
-    if (parsed.opexRate === undefined) parsed.opexRate = 16;
-    if (parsed.shopeeFeeRate <= 10) parsed.shopeeFeeRate = 34;
-    return parsed;
-  } catch {
-    return { shopeeFeeRate: 34, tiktokFeeRate: 34, opexRate: 16 };
+  const { data } = await db().from('pnl_config').select('*').eq('id', 1).single();
+  if (data) {
+    return {
+      shopeeFeeRate: Number(data.shopee_fee_rate) || 34,
+      tiktokFeeRate: Number(data.tiktok_fee_rate) || 34,
+      opexRate: Number(data.opex_rate) || 16,
+    };
   }
+  try {
+    const res = await db().storage.from('pnl-data').download('config.json');
+    if (!res.error && res.data) {
+      const parsed = JSON.parse(await res.data.text()) as PnlConfig;
+      if (parsed.opexRate === undefined) parsed.opexRate = 16;
+      if (parsed.shopeeFeeRate <= 10) parsed.shopeeFeeRate = 34;
+      await dbSavePnlConfig(parsed);
+      return parsed;
+    }
+  } catch {}
+  return { shopeeFeeRate: 34, tiktokFeeRate: 34, opexRate: 16 };
 }
 
 export async function dbSavePnlConfig(config: PnlConfig): Promise<void> {
-  const json = JSON.stringify(config);
-  const blob = new Blob([json], { type: 'application/json' });
-  const { error } = await db().storage.from(PNL_BUCKET).upload(PNL_CONFIG_FILE, blob, { upsert: true });
+  const { error } = await db().from('pnl_config').upsert({
+    id: 1,
+    shopee_fee_rate: config.shopeeFeeRate,
+    tiktok_fee_rate: config.tiktokFeeRate,
+    opex_rate: config.opexRate,
+  });
   if (error) throw new Error('Lưu cấu hình PnL thất bại: ' + error.message);
 }
 
-const PNL_IMPORTS_FILE = 'imports.json';
+// ==================== PnL Imports (PostgreSQL) ====================
 
 export async function dbGetPnlImports(): Promise<PnlImport[]> {
-  try {
-    const { data, error } = await db().storage.from(PNL_BUCKET).download(PNL_IMPORTS_FILE);
-    if (error || !data) return [];
-    const text = await data.text();
-    return JSON.parse(text) as PnlImport[];
-  } catch {
-    return [];
+  const { data } = await db().from('pnl_imports').select('*');
+  if (data && data.length > 0) {
+    return data.map(function(r: Record<string, unknown>) {
+      return {
+        id: r.id as string,
+        shopId: r.shop_id as string,
+        shopName: r.shop_name as string,
+        channel: r.channel as string,
+        dateFrom: r.date_from as string,
+        dateTo: r.date_to as string,
+        dailyData: (r.daily_data || []) as PnlImport['dailyData'],
+        importedAt: r.imported_at as string,
+      };
+    });
   }
+  try {
+    const res = await db().storage.from('pnl-data').download('imports.json');
+    if (!res.error && res.data) {
+      const list = JSON.parse(await res.data.text()) as PnlImport[];
+      if (list.length > 0) { await dbSavePnlImports(list); return list; }
+    }
+  } catch {}
+  return [];
 }
 
 export async function dbSavePnlImports(list: PnlImport[]): Promise<void> {
-  const json = JSON.stringify(list);
-  const blob = new Blob([json], { type: 'application/json' });
-  const { error } = await db().storage.from(PNL_BUCKET).upload(PNL_IMPORTS_FILE, blob, { upsert: true });
-  if (error) throw new Error('Lưu PnL imports thất bại: ' + error.message);
+  for (const imp of list) {
+    const { error } = await db().from('pnl_imports').upsert({
+      id: imp.id,
+      shop_id: imp.shopId,
+      shop_name: imp.shopName,
+      channel: imp.channel,
+      date_from: imp.dateFrom,
+      date_to: imp.dateTo,
+      daily_data: imp.dailyData,
+      imported_at: imp.importedAt,
+    });
+    if (error) throw new Error('Lưu PnL imports thất bại: ' + error.message);
+  }
+  const newIds = new Set(list.map(function(imp) { return imp.id; }));
+  const { data: existing } = await db().from('pnl_imports').select('id');
+  const toDelete = (existing || []).filter(function(r: Record<string, unknown>) { return !newIds.has(r.id as string); });
+  for (const row of toDelete) {
+    await db().from('pnl_imports').delete().eq('id', row.id as string);
+  }
 }
 
-// ==================== Checklist (Supabase Storage) ====================
-
-const CHECKLIST_BUCKET = 'pnl-data';
-const CHECKLIST_TASKS_FILE = 'checklist-tasks.json';
-const CHECKLIST_ENTRIES_FILE = 'checklist-entries.json';
+// ==================== Checklist Tasks (PostgreSQL) ====================
 
 export async function dbGetChecklistTasks(): Promise<ChecklistTask[]> {
-  try {
-    const { data, error } = await db().storage.from(CHECKLIST_BUCKET).download(CHECKLIST_TASKS_FILE);
-    if (error || !data) return [];
-    const text = await data.text();
-    return JSON.parse(text) as ChecklistTask[];
-  } catch {
-    return [];
+  const { data } = await db().from('checklist_tasks').select('*').order('sort_order');
+  if (data && data.length > 0) {
+    return data.map(function(r: Record<string, unknown>) {
+      return {
+        id: r.id as string,
+        title: r.title as string,
+        description: r.description as string,
+        category: r.category as string,
+        deadline: r.deadline as string,
+        priority: r.priority as ChecklistTask['priority'],
+        isActive: r.is_active as boolean,
+        order: r.sort_order as number,
+      };
+    });
   }
+  try {
+    const res = await db().storage.from('pnl-data').download('checklist-tasks.json');
+    if (!res.error && res.data) {
+      const list = JSON.parse(await res.data.text()) as ChecklistTask[];
+      if (list.length > 0) { await dbSaveChecklistTasks(list); return list; }
+    }
+  } catch {}
+  return [];
 }
 
 export async function dbSaveChecklistTasks(list: ChecklistTask[]): Promise<void> {
-  const json = JSON.stringify(list);
-  const blob = new Blob([json], { type: 'application/json' });
-  const { error } = await db().storage.from(CHECKLIST_BUCKET).upload(CHECKLIST_TASKS_FILE, blob, { upsert: true });
-  if (error) throw new Error('Lưu checklist tasks thất bại: ' + error.message);
-}
-
-export async function dbGetChecklistEntries(): Promise<ChecklistEntry[]> {
-  try {
-    const { data, error } = await db().storage.from(CHECKLIST_BUCKET).download(CHECKLIST_ENTRIES_FILE);
-    if (error || !data) return [];
-    const text = await data.text();
-    return JSON.parse(text) as ChecklistEntry[];
-  } catch {
-    return [];
+  if (list.length > 0) {
+    const rows = list.map(function(t) {
+      return {
+        id: t.id, title: t.title, description: t.description,
+        category: t.category, deadline: t.deadline, priority: t.priority,
+        is_active: t.isActive, sort_order: t.order,
+      };
+    });
+    const { error } = await db().from('checklist_tasks').upsert(rows);
+    if (error) throw new Error('Lưu checklist tasks thất bại: ' + error.message);
+  }
+  const newIds = new Set(list.map(function(t) { return t.id; }));
+  const { data: existing } = await db().from('checklist_tasks').select('id');
+  const toDelete = (existing || []).filter(function(r: Record<string, unknown>) { return !newIds.has(r.id as string); });
+  for (const row of toDelete) {
+    await db().from('checklist_tasks').delete().eq('id', row.id as string);
   }
 }
 
+// ==================== Checklist Entries (PostgreSQL) ====================
+
+export async function dbGetChecklistEntries(): Promise<ChecklistEntry[]> {
+  const { data } = await db().from('checklist_entries').select('*');
+  if (data && data.length > 0) {
+    return data.map(function(r: Record<string, unknown>) {
+      return {
+        date: r.date as string,
+        taskId: r.task_id as string,
+        userId: r.user_id as string,
+        completed: r.completed as boolean,
+        completedAt: r.completed_at as string,
+        note: r.note as string,
+      };
+    });
+  }
+  try {
+    const res = await db().storage.from('pnl-data').download('checklist-entries.json');
+    if (!res.error && res.data) {
+      const list = JSON.parse(await res.data.text()) as ChecklistEntry[];
+      if (list.length > 0) { await dbSaveChecklistEntries(list); return list; }
+    }
+  } catch {}
+  return [];
+}
+
 export async function dbSaveChecklistEntries(list: ChecklistEntry[]): Promise<void> {
-  const json = JSON.stringify(list);
-  const blob = new Blob([json], { type: 'application/json' });
-  const { error } = await db().storage.from(CHECKLIST_BUCKET).upload(CHECKLIST_ENTRIES_FILE, blob, { upsert: true });
-  if (error) throw new Error('Lưu checklist entries thất bại: ' + error.message);
+  if (list.length === 0) return;
+  const rows = list.map(function(e) {
+    return {
+      date: e.date, task_id: e.taskId, user_id: e.userId,
+      completed: e.completed, completed_at: e.completedAt, note: e.note,
+    };
+  });
+  const BATCH = 500;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const { error } = await db().from('checklist_entries').upsert(rows.slice(i, i + BATCH));
+    if (error) throw new Error('Lưu checklist entries thất bại: ' + error.message);
+  }
 }
