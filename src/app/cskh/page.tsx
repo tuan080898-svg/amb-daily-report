@@ -202,7 +202,9 @@ export default function CskhPage() {
     return records.filter(function(r) {
       if (filterMonth && r.month !== filterMonth) return false;
       if (filterShop && r.shop !== filterShop) return false;
-      if (filterResult && r.processingResult !== filterResult) return false;
+      if (filterResult === '__pending__') {
+        if (r.processingResult !== 'Chưa xử lý' && r.processingResult !== 'Đang xử lý' && r.processingResult !== 'Chờ sửa') return false;
+      } else if (filterResult && r.processingResult !== filterResult) return false;
       if (filterReason && !r.badReviewReason.includes(filterReason)) return false;
       if (filterHandler && r.handler !== filterHandler) return false;
       if (filterDate && r.date !== filterDate) return false;
@@ -398,6 +400,7 @@ export default function CskhPage() {
         <select value={filterResult} onChange={function(e) { setFilterResult(e.target.value); setPage(0); }}
           className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5">
           <option value="">Tất cả kết quả</option>
+          <option value="__pending__">Tồn đọng (chưa/đang xử lý)</option>
           {resultOptions.map(function(r) { return <option key={r} value={r}>{r}</option>; })}
         </select>
         <select value={filterReason} onChange={function(e) { setFilterReason(e.target.value); setPage(0); }}
@@ -424,25 +427,31 @@ export default function CskhPage() {
         <div className="space-y-6">
           {/* KPI Cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
+            <div onClick={function() { setFilterResult(''); setActiveTab('data'); setPage(0); }}
+              className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50 cursor-pointer hover:border-slate-500 transition-colors">
               <p className="text-slate-400 text-xs mb-1">Tổng đánh giá xấu</p>
               <p className="text-2xl font-bold text-white">{stats.total.toLocaleString()}</p>
             </div>
-            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
+            <div onClick={function() { setFilterResult('Đã xử lý'); setActiveTab('data'); setPage(0); }}
+              className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50 cursor-pointer hover:border-emerald-500/50 transition-colors">
               <p className="text-slate-400 text-xs mb-1">Đã xử lý</p>
               <p className="text-2xl font-bold text-emerald-400">{stats.processed.toLocaleString()}</p>
               <p className="text-xs text-slate-500">{stats.total > 0 ? Math.round(stats.processed / stats.total * 100) : 0}%</p>
             </div>
-            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
+            <div onClick={function() { setFilterResult(''); setActiveTab('data'); setPage(0); }}
+              className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50 cursor-pointer hover:border-blue-500/50 transition-colors">
               <p className="text-slate-400 text-xs mb-1">Khách đã sửa sao</p>
               <p className="text-2xl font-bold text-blue-400">{stats.fixed.toLocaleString()}</p>
               <p className="text-xs text-slate-500">{stats.total > 0 ? Math.round(stats.fixed / stats.total * 100) : 0}% thành công</p>
             </div>
-            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
+            <div onClick={function() { setFilterResult('__pending__'); setActiveTab('data'); setPage(0); }}
+              className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50 cursor-pointer hover:border-amber-500/50 transition-colors">
               <p className="text-slate-400 text-xs mb-1">Tồn đọng</p>
               <p className="text-2xl font-bold text-amber-400">{stats.pending.toLocaleString()}</p>
+              <p className="text-xs text-slate-500">Bấm để xem chi tiết</p>
             </div>
-            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
+            <div onClick={function() { setFilterResult(''); setActiveTab('data'); setPage(0); }}
+              className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50 cursor-pointer hover:border-rose-500/50 transition-colors">
               <p className="text-slate-400 text-xs mb-1">Tổng hoàn tiền</p>
               <p className="text-2xl font-bold text-rose-400">{stats.totalRefund > 0 ? (stats.totalRefund / 1000).toFixed(0) + 'K' : '0'}</p>
               <p className="text-xs text-slate-500">{stats.totalRefund.toLocaleString()}đ</p>
