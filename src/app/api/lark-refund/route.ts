@@ -73,6 +73,10 @@ function toLarkFields(data: Record<string, unknown>): Record<string, unknown> {
   if (data.status !== undefined) fields['Trạng thái'] = data.status;
   if (data.handler !== undefined) fields['Người hoàn tiền'] = data.handler;
   if (data.date !== undefined) fields['Ngày'] = new Date(data.date as string).getTime();
+  if (data.imageTokens !== undefined) {
+    const tokens = data.imageTokens as string[];
+    if (tokens.length > 0) fields['Ảnh bill'] = tokens.map(t => ({ file_token: t }));
+  }
   return fields;
 }
 
@@ -169,16 +173,8 @@ export async function POST(req: NextRequest) {
     let targetTableId = tableId;
     if (!targetTableId) {
       const tables = await listTables(token);
-      const now = new Date();
-      const monthName = `Tháng ${now.getMonth() + 1}`;
-      const yearStr = String(now.getFullYear());
-      const match = tables.find(t => t.name.includes(monthName) && t.name.includes(yearStr));
-      if (match) {
-        targetTableId = match.table_id;
-      } else {
-        const monthTables = tables.filter(t => t.name.startsWith('Tháng'));
-        targetTableId = monthTables.length > 0 ? monthTables[monthTables.length - 1].table_id : tables[0]?.table_id;
-      }
+      const dataTong = tables.find(t => t.name === 'Data tổng');
+      targetTableId = dataTong ? dataTong.table_id : tables[0]?.table_id;
     }
 
     if (!targetTableId) {

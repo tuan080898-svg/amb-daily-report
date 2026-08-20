@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 
 interface RefundRecord {
   recordId: string;
@@ -145,6 +145,9 @@ export default function CskhPage() {
   var [editingRefund, setEditingRefund] = useState<RefundRecord | null>(null);
   var [isNewRefund, setIsNewRefund] = useState(false);
   var [saving, setSaving] = useState(false);
+  var [billImages, setBillImages] = useState<{ file: File; preview: string }[]>([]);
+  var [uploadingImage, setUploadingImage] = useState(false);
+  var fileInputRef = useRef<HTMLInputElement>(null);
 
   var emptyRefund: RefundRecord = {
     recordId: '', tableId: '', customerName: '', orderCode: '', phone: '',
@@ -155,67 +158,118 @@ export default function CskhPage() {
   function openNewRefund() {
     setEditingRefund({ ...emptyRefund });
     setIsNewRefund(true);
+    setBillImages([]);
   }
 
   function openEditRefund(r: RefundRecord) {
     setEditingRefund({ ...r });
     setIsNewRefund(false);
+    setBillImages([]);
   }
 
   function closeModal() {
     setEditingRefund(null);
     setIsNewRefund(false);
+    setBillImages([]);
   }
 
-  function saveRefund() {
+  function addImageFiles(files: FileList | File[]) {
+    var newImages = Array.from(files)
+      .filter(function(f) { return f.type.startsWith('image/'); })
+      .map(function(f) { return { file: f, preview: URL.createObjectURL(f) }; });
+    setBillImages(function(prev) { return prev.concat(newImages); });
+  }
+
+  function removeImage(index: number) {
+    setBillImages(function(prev) {
+      URL.revokeObjectURL(prev[index].preview);
+      return prev.filter(function(_, i) { return i !== index; });
+    });
+  }
+
+  var handlePaste = useCallback(function(e: ClipboardEvent) {
+    if (!editingRefund) return;
+    var items = e.clipboardData?.items;
+    if (!items) return;
+    var imageFiles: File[] = [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        var f = items[i].getAsFile();
+        if (f) imageFiles.push(f);
+      }
+    }
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      addImageFiles(imageFiles);
+    }
+  }, [editingRefund]);
+
+  useEffect(function() {
+    document.addEventListener('paste', handlePaste as EventListener);
+    return function() { document.removeEventListener('paste', handlePaste as EventListener); };
+  }, [handlePaste]);
+
+  async function uploadImages(): Promise<string[]> {
+    var tokens: string[] = [];
+    for (var img of billImages) {
+      var formData = new FormData();
+      formData.append('file', img.file, img.file.name || 'bill.png');
+      var res = await fetch('/api/lark-refund/upload', { method: 'POST', body: formData });
+      var json = await res.json();
+      if (json.file_token) tokens.push(json.file_token);
+    }
+    return tokens;
+  }
+
+  async function saveRefund() {
     if (!editingRefund) return;
     setSaving(true);
-    var isNew = isNewRefund;
-    var method = isNew ? 'POST' : 'PUT';
-    var payload = isNew
-      ? {
-          tableId: editingRefund.tableId || undefined,
-          customerName: editingRefund.customerName,
-          orderCode: editingRefund.orderCode,
-          phone: editingRefund.phone,
-          product: editingRefund.product,
-          shop: editingRefund.shop,
-          platform: editingRefund.platform,
-          refundAmount: editingRefund.refundAmount,
-          refundReason: editingRefund.refundReason,
-          status: editingRefund.status,
-          handler: editingRefund.handler,
-          date: editingRefund.date,
-        }
-      : {
-          recordId: editingRefund.recordId,
-          tableId: editingRefund.tableId,
-          customerName: editingRefund.customerName,
-          orderCode: editingRefund.orderCode,
-          phone: editingRefund.phone,
-          product: editingRefund.product,
-          shop: editingRefund.shop,
-          platform: editingRefund.platform,
-          refundAmount: editingRefund.refundAmount,
-          refundReason: editingRefund.refundReason,
-          status: editingRefund.status,
-          handler: editingRefund.handler,
-          date: editingRefund.date,
-        };
+    try {
+      var imageTokens: string[] = [];
+      if (billImages.length > 0) {
+        setUploadingImage(true);
+        imageTokens = await uploadImages();
+        setUploadingImage(false);
+      }
 
-    fetch('/api/lark-refund', {
-      method: method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-      .then(function(res) { return res.json(); })
-      .then(function(data) {
-        if (data.error) { alert('Lỗi: ' + data.error); return; }
-        closeModal();
-        fetchData();
-      })
-      .catch(function(e) { alert('Lỗi: ' + e.message); })
-      .finally(function() { setSaving(false); });
+      var isNew = isNewRefund;
+      var method = isNew ? 'POST' : 'PUT';
+      var base: Record<string, unknown> = {
+        customerName: editingRefund.customerName,
+        orderCode: editingRefund.orderCode,
+        phone: editingRefund.phone,
+        product: editingRefund.product,
+        shop: editingRefund.shop,
+        platform: editingRefund.platform,
+        refundAmount: editingRefund.refundAmount,
+        refundReason: editingRefund.refundReason,
+        status: editingRefund.status,
+        handler: editingRefund.handler,
+        date: editingRefund.date,
+      };
+      if (imageTokens.length > 0) base.imageTokens = imageTokens;
+      if (isNew) {
+        base.tableId = editingRefund.tableId || undefined;
+      } else {
+        base.recordId = editingRefund.recordId;
+        base.tableId = editingRefund.tableId;
+      }
+
+      var res = await fetch('/api/lark-refund', {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(base),
+      });
+      var data = await res.json();
+      if (data.error) { alert('Lỗi: ' + data.error); return; }
+      closeModal();
+      fetchData();
+    } catch (e: unknown) {
+      alert('Lỗi: ' + (e instanceof Error ? e.message : 'Unknown'));
+    } finally {
+      setSaving(false);
+      setUploadingImage(false);
+    }
   }
 
   function updateEditField(field: keyof RefundRecord, value: string | number) {
@@ -1091,13 +1145,46 @@ export default function CskhPage() {
                   })}
                 </select>
               </div>
+              <div className="md:col-span-2">
+                <label className="text-xs text-slate-400 block mb-1">Ảnh bill chuyển khoản</label>
+                <input type="file" ref={fileInputRef} accept="image/*" multiple className="hidden"
+                  onChange={function(e) { if (e.target.files) addImageFiles(e.target.files); e.target.value = ''; }} />
+                <div
+                  className="border-2 border-dashed border-slate-600 rounded-lg p-4 text-center cursor-pointer hover:border-blue-500/50 transition-colors"
+                  onClick={function() { fileInputRef.current?.click(); }}
+                  onDragOver={function(e) { e.preventDefault(); e.stopPropagation(); }}
+                  onDrop={function(e) { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer.files) addImageFiles(e.dataTransfer.files); }}>
+                  {billImages.length === 0 ? (
+                    <div>
+                      <svg className="w-8 h-8 mx-auto text-slate-500 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      <p className="text-xs text-slate-400">Bấm để chọn ảnh, kéo thả, hoặc <span className="text-blue-400">Ctrl+V</span> để dán</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap gap-2 justify-center">
+                      {billImages.map(function(img, idx) {
+                        return (
+                          <div key={idx} className="relative group">
+                            <img src={img.preview} alt="bill" className="h-20 rounded border border-slate-600 object-cover" />
+                            <button onClick={function(e) { e.stopPropagation(); removeImage(idx); }}
+                              className="absolute -top-1 -right-1 w-5 h-5 bg-red-600 text-white rounded-full text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">&times;</button>
+                          </div>
+                        );
+                      })}
+                      <div className="h-20 w-20 border border-dashed border-slate-600 rounded flex items-center justify-center text-slate-500 text-2xl">+</div>
+                    </div>
+                  )}
+                </div>
+                {uploadingImage && <p className="text-xs text-blue-400 mt-1">Đang tải ảnh lên Lark...</p>}
+              </div>
             </div>
             <div className="flex justify-end gap-2 p-4 border-t border-slate-700">
               <button onClick={closeModal} className="px-4 py-2 text-sm text-slate-400 hover:text-white rounded-lg hover:bg-slate-800">Huỷ</button>
               <button onClick={saveRefund} disabled={saving}
                 className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 flex items-center gap-2">
                 {saving && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-                {isNewRefund ? 'Tạo mới' : 'Lưu thay đổi'}
+                {uploadingImage ? 'Đang tải ảnh...' : (isNewRefund ? 'Tạo mới' : 'Lưu thay đổi')}
               </button>
             </div>
           </div>
