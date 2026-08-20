@@ -50,7 +50,7 @@ function processRecord(recordId: string, fields: Record<string, unknown>): Refun
     product: (fields['Sản phẩm'] as string) || '',
     shop: (fields['Shop'] as string) || '',
     platform: (fields['Sàn'] as string) || '',
-    refundAmount: parseFloat(String(fields['Số tiền hoàn'] || '0')) || 0,
+    refundAmount: (parseFloat(String(fields['Số tiền hoàn'] || '0')) || 0) * 1000,
     refundReason: (fields['Lý do hoàn'] as string) || '',
     status: (fields['Trạng thái'] as string) || '',
     handler: (fields['Người hoàn tiền'] as string) || '',
