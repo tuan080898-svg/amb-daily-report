@@ -1,6 +1,21 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 
+interface RefundRecord {
+  recordId: string;
+  customerName: string;
+  orderCode: string;
+  phone: string;
+  product: string;
+  shop: string;
+  platform: string;
+  refundAmount: number;
+  refundReason: string;
+  status: string;
+  handler: string;
+  date: string;
+}
+
 interface CskhRecord {
   recordId: string;
   customerName: string;
@@ -111,9 +126,10 @@ function DonutChart({ items }: { items: { label: string; value: number; color: s
 
 export default function CskhPage() {
   var [records, setRecords] = useState<CskhRecord[]>([]);
+  var [refundRecords, setRefundRecords] = useState<RefundRecord[]>([]);
   var [loading, setLoading] = useState(true);
   var [error, setError] = useState('');
-  var [activeTab, setActiveTab] = useState<'data' | 'dashboard'>('dashboard');
+  var [activeTab, setActiveTab] = useState<'data' | 'dashboard' | 'refund'>('dashboard');
   var [filterDateFrom, setFilterDateFrom] = useState('');
   var [filterDateTo, setFilterDateTo] = useState('');
   var [filterShop, setFilterShop] = useState('');
@@ -131,11 +147,16 @@ export default function CskhPage() {
   function fetchData() {
     setLoading(true);
     setError('');
-    fetch('/api/lark-cskh')
-      .then(function(res) { return res.json(); })
-      .then(function(data) {
-        if (data.error) { setError(data.error); return; }
-        setRecords(data.records || []);
+    Promise.all([
+      fetch('/api/lark-cskh').then(function(res) { return res.json(); }),
+      fetch('/api/lark-refund').then(function(res) { return res.json(); })
+    ])
+      .then(function(results) {
+        var cskhData = results[0];
+        var refundData = results[1];
+        if (cskhData.error) { setError(cskhData.error); return; }
+        setRecords(cskhData.records || []);
+        setRefundRecords(refundData.records || []);
       })
       .catch(function(e) { setError(e.message); })
       .finally(function() { setLoading(false); });
@@ -188,11 +209,29 @@ export default function CskhPage() {
     });
   }, [records, filterDateFrom, filterDateTo, filterShop, filterResult, filterReason, filterHandler, search]);
 
-  var paged = useMemo(function() {
-    return filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  }, [filtered, page]);
+  var filteredRefund = useMemo(function() {
+    return refundRecords.filter(function(r) {
+      if (filterDateFrom && r.date && r.date < filterDateFrom) return false;
+      if (filterDateFrom && !r.date) return false;
+      if (filterDateTo && r.date && r.date > filterDateTo) return false;
+      if (filterDateTo && !r.date) return false;
+      if (filterShop && r.shop !== filterShop) return false;
+      if (filterHandler && r.handler !== filterHandler) return false;
+      if (search) {
+        var q = search.toLowerCase();
+        if (!(r.customerName.toLowerCase().includes(q) || r.orderCode.toLowerCase().includes(q) ||
+          r.product.toLowerCase().includes(q) || r.phone.includes(q))) return false;
+      }
+      return true;
+    });
+  }, [refundRecords, filterDateFrom, filterDateTo, filterShop, filterHandler, search]);
 
-  var totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  var activeList = activeTab === 'refund' ? filteredRefund : filtered;
+  var paged = useMemo(function() {
+    return activeList.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  }, [activeList, page]);
+
+  var totalPages = Math.ceil(activeList.length / PAGE_SIZE);
 
   var stats = useMemo(function() {
     var total = filtered.length;
@@ -318,6 +357,7 @@ export default function CskhPage() {
         {[
           { key: 'dashboard' as const, label: 'Dashboard' },
           { key: 'data' as const, label: 'Dữ liệu' },
+          { key: 'refund' as const, label: 'Trả hàng hoàn tiền (' + refundRecords.length + ')' },
         ].map(function(tab) {
           return (
             <button key={tab.key} onClick={function() { setActiveTab(tab.key); setPage(0); }}
@@ -536,7 +576,90 @@ export default function CskhPage() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between mt-4">
               <p className="text-xs text-slate-500">
-                Trang {page + 1}/{totalPages} — {filtered.length.toLocaleString()} bản ghi
+                Trang {page + 1}/{totalPages} — {activeList.length.toLocaleString()} bản ghi
+              </p>
+              <div className="flex gap-1">
+                <button onClick={function() { setPage(Math.max(0, page - 1)); }} disabled={page === 0}
+                  className="px-3 py-1 bg-slate-800 text-slate-300 rounded text-xs hover:bg-slate-700 disabled:opacity-30">Trước</button>
+                <button onClick={function() { setPage(Math.min(totalPages - 1, page + 1)); }} disabled={page >= totalPages - 1}
+                  className="px-3 py-1 bg-slate-800 text-slate-300 rounded text-xs hover:bg-slate-700 disabled:opacity-30">Sau</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Refund Tab */}
+      {activeTab === 'refund' && (
+        <div>
+          {/* Refund summary cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
+              <p className="text-slate-400 text-xs mb-1">Tổng đơn trả hàng</p>
+              <p className="text-2xl font-bold text-white">{filteredRefund.length}</p>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
+              <p className="text-slate-400 text-xs mb-1">Đã hoàn tiền</p>
+              <p className="text-2xl font-bold text-emerald-400">{filteredRefund.filter(function(r) { return r.status === 'Đã hoàn tiền'; }).length}</p>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
+              <p className="text-slate-400 text-xs mb-1">Chưa hoàn</p>
+              <p className="text-2xl font-bold text-amber-400">{filteredRefund.filter(function(r) { return r.status !== 'Đã hoàn tiền'; }).length}</p>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
+              <p className="text-slate-400 text-xs mb-1">Tổng tiền hoàn</p>
+              <p className="text-2xl font-bold text-rose-400">{(filteredRefund.reduce(function(s, r) { return s + r.refundAmount; }, 0) / 1000).toFixed(0)}K</p>
+              <p className="text-xs text-slate-500">{filteredRefund.reduce(function(s, r) { return s + r.refundAmount; }, 0).toLocaleString()}đ</p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-slate-700/50">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-800/80 text-slate-400 text-xs">
+                  <th className="px-3 py-2 text-left">Ngày</th>
+                  <th className="px-3 py-2 text-left">Shop</th>
+                  <th className="px-3 py-2 text-left">Sàn</th>
+                  <th className="px-3 py-2 text-left">Khách hàng</th>
+                  <th className="px-3 py-2 text-left">SĐT</th>
+                  <th className="px-3 py-2 text-left">Mã đơn</th>
+                  <th className="px-3 py-2 text-left">Sản phẩm</th>
+                  <th className="px-3 py-2 text-right">Tiền hoàn</th>
+                  <th className="px-3 py-2 text-left">Lý do</th>
+                  <th className="px-3 py-2 text-left">Trạng thái</th>
+                  <th className="px-3 py-2 text-left">Người hoàn</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paged.length === 0 ? (
+                  <tr><td colSpan={11} className="text-center py-8 text-slate-500">Không có dữ liệu</td></tr>
+                ) : (paged as RefundRecord[]).map(function(r, i) {
+                  var statusColor = r.status === 'Đã hoàn tiền' ? 'bg-emerald-900/50 text-emerald-400' : 'bg-amber-900/50 text-amber-400';
+                  return (
+                    <tr key={r.recordId + '-' + i} className="border-t border-slate-800 hover:bg-slate-800/40">
+                      <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{r.date}</td>
+                      <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{r.shop}</td>
+                      <td className="px-3 py-2 text-slate-400">{r.platform}</td>
+                      <td className="px-3 py-2 text-white max-w-[120px] truncate" title={r.customerName}>{r.customerName}</td>
+                      <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{r.phone}</td>
+                      <td className="px-3 py-2 text-slate-400 max-w-[120px] truncate" title={r.orderCode}>{r.orderCode}</td>
+                      <td className="px-3 py-2 text-slate-300 max-w-[150px] truncate" title={r.product}>{r.product}</td>
+                      <td className="px-3 py-2 text-rose-400 text-right whitespace-nowrap">{r.refundAmount > 0 ? r.refundAmount.toLocaleString() + 'đ' : '—'}</td>
+                      <td className="px-3 py-2 text-slate-400 max-w-[200px]" title={r.refundReason}>
+                        <span className="line-clamp-2 text-xs">{r.refundReason}</span>
+                      </td>
+                      <td className="px-3 py-2"><span className={'px-2 py-0.5 rounded text-xs font-medium ' + statusColor}>{r.status || '—'}</span></td>
+                      <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{r.handler}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4">
+              <p className="text-xs text-slate-500">
+                Trang {page + 1}/{totalPages} — {activeList.length.toLocaleString()} bản ghi
               </p>
               <div className="flex gap-1">
                 <button onClick={function() { setPage(Math.max(0, page - 1)); }} disabled={page === 0}
