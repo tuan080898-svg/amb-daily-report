@@ -350,7 +350,7 @@ export default function CskhPage() {
         )}
         {(filterMonth || filterShop || filterResult || filterReason || search) && (
           <button onClick={function() { setFilterMonth(0); setFilterShop(''); setFilterResult(''); setFilterReason(''); setSearch(''); setPage(0); }}
-            className="text-xs text-slate-400 hover:text-white px-2">Xoa bo loc</button>
+            className="text-xs text-slate-400 hover:text-white px-2">Xoá bộ lọc</button>
         )}
         {filtered.length !== records.length && (
           <span className="text-xs text-slate-500 self-center ml-2">{filtered.length.toLocaleString()} / {records.length.toLocaleString()}</span>
@@ -363,38 +363,38 @@ export default function CskhPage() {
           {/* KPI Cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
             <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
-              <p className="text-slate-400 text-xs mb-1">Tong danh gia xau</p>
+              <p className="text-slate-400 text-xs mb-1">Tổng đánh giá xấu</p>
               <p className="text-2xl font-bold text-white">{stats.total.toLocaleString()}</p>
             </div>
             <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
-              <p className="text-slate-400 text-xs mb-1">Da xu ly</p>
+              <p className="text-slate-400 text-xs mb-1">Đã xử lý</p>
               <p className="text-2xl font-bold text-emerald-400">{stats.processed.toLocaleString()}</p>
               <p className="text-xs text-slate-500">{stats.total > 0 ? Math.round(stats.processed / stats.total * 100) : 0}%</p>
             </div>
             <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
-              <p className="text-slate-400 text-xs mb-1">Khach da sua sao</p>
+              <p className="text-slate-400 text-xs mb-1">Khách đã sửa sao</p>
               <p className="text-2xl font-bold text-blue-400">{stats.fixed.toLocaleString()}</p>
-              <p className="text-xs text-slate-500">{stats.total > 0 ? Math.round(stats.fixed / stats.total * 100) : 0}% thanh cong</p>
+              <p className="text-xs text-slate-500">{stats.total > 0 ? Math.round(stats.fixed / stats.total * 100) : 0}% thành công</p>
             </div>
             <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
-              <p className="text-slate-400 text-xs mb-1">Ton dong</p>
+              <p className="text-slate-400 text-xs mb-1">Tồn đọng</p>
               <p className="text-2xl font-bold text-amber-400">{stats.pending.toLocaleString()}</p>
             </div>
             <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
-              <p className="text-slate-400 text-xs mb-1">Tong hoan tien</p>
+              <p className="text-slate-400 text-xs mb-1">Tổng hoàn tiền</p>
               <p className="text-2xl font-bold text-rose-400">{stats.totalRefund > 0 ? (stats.totalRefund / 1000).toFixed(0) + 'K' : '0'}</p>
-              <p className="text-xs text-slate-500">{stats.totalRefund.toLocaleString()}d</p>
+              <p className="text-xs text-slate-500">{stats.totalRefund.toLocaleString()}đ</p>
             </div>
           </div>
 
           {/* Charts Row 1 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-700/30">
-              <h3 className="text-sm font-semibold text-slate-300 mb-3">Danh gia xau theo Shop</h3>
+              <h3 className="text-sm font-semibold text-slate-300 mb-3">Đánh giá xấu theo Shop</h3>
               <HBar items={shopBreakdown} />
             </div>
             <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-700/30">
-              <h3 className="text-sm font-semibold text-slate-300 mb-3">Ly do danh gia xau</h3>
+              <h3 className="text-sm font-semibold text-slate-300 mb-3">Lý do đánh giá xấu</h3>
               <DonutChart items={reasonBreakdown} />
             </div>
           </div>
@@ -402,11 +402,11 @@ export default function CskhPage() {
           {/* Charts Row 2 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-700/30">
-              <h3 className="text-sm font-semibold text-slate-300 mb-3">Top san pham bi review xau</h3>
+              <h3 className="text-sm font-semibold text-slate-300 mb-3">Top sản phẩm bị review xấu</h3>
               <HBar items={productBreakdown} colorFn={function() { return 'bg-rose-500'; }} />
             </div>
             <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-700/30">
-              <h3 className="text-sm font-semibold text-slate-300 mb-3">Nhan vien xu ly</h3>
+              <h3 className="text-sm font-semibold text-slate-300 mb-3">Nhân viên xử lý</h3>
               {handlerBreakdown.length > 0 ? (
                 <div className="space-y-2">
                   {handlerBreakdown.map(function(h) {
@@ -422,18 +422,18 @@ export default function CskhPage() {
                     );
                   })}
                   <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
-                    <span className="w-3 h-3 bg-emerald-600 rounded-sm inline-block" /> Da sua sao
-                    <span className="w-3 h-3 bg-slate-600 rounded-sm inline-block ml-2" /> Chua sua
+                    <span className="w-3 h-3 bg-emerald-600 rounded-sm inline-block" /> Đã sửa sao
+                    <span className="w-3 h-3 bg-slate-600 rounded-sm inline-block ml-2" /> Chưa sửa
                   </div>
                 </div>
-              ) : <p className="text-slate-500 text-sm">Khong co du lieu</p>}
+              ) : <p className="text-slate-500 text-sm">Không có dữ liệu</p>}
             </div>
           </div>
 
           {/* Monthly Trend */}
           {monthlyTrend.length > 1 && (
             <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-700/30">
-              <h3 className="text-sm font-semibold text-slate-300 mb-3">Xu huong theo thang</h3>
+              <h3 className="text-sm font-semibold text-slate-300 mb-3">Xu hướng theo tháng</h3>
               <div className="flex items-end gap-2 h-32">
                 {(function() {
                   var maxVal = Math.max(...monthlyTrend.map(function(d) { return d.total; }));
@@ -455,8 +455,8 @@ export default function CskhPage() {
                 })()}
               </div>
               <div className="flex items-center gap-4 text-xs text-slate-500 mt-2 justify-center">
-                <span><span className="inline-block w-3 h-3 bg-blue-600/30 rounded-sm mr-1" /> Tong review xau</span>
-                <span><span className="inline-block w-3 h-3 bg-emerald-500/60 rounded-sm mr-1" /> Da sua sao</span>
+                <span><span className="inline-block w-3 h-3 bg-blue-600/30 rounded-sm mr-1" /> Tổng review xấu</span>
+                <span><span className="inline-block w-3 h-3 bg-emerald-500/60 rounded-sm mr-1" /> Đã sửa sao</span>
               </div>
             </div>
           )}
@@ -470,21 +470,21 @@ export default function CskhPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-slate-800/80 text-slate-400 text-xs">
-                  <th className="px-3 py-2 text-left">Ngay</th>
+                  <th className="px-3 py-2 text-left">Ngày</th>
                   <th className="px-3 py-2 text-left">Shop</th>
-                  <th className="px-3 py-2 text-left">Khach hang</th>
-                  <th className="px-3 py-2 text-left">SDT</th>
-                  <th className="px-3 py-2 text-left">San pham</th>
+                  <th className="px-3 py-2 text-left">Khách hàng</th>
+                  <th className="px-3 py-2 text-left">SĐT</th>
+                  <th className="px-3 py-2 text-left">Sản phẩm</th>
                   <th className="px-3 py-2 text-center">Sao</th>
-                  <th className="px-3 py-2 text-left">Ly do</th>
-                  <th className="px-3 py-2 text-left">Ket qua</th>
-                  <th className="px-3 py-2 text-left">Trang thai</th>
-                  <th className="px-3 py-2 text-left">NV xu ly</th>
+                  <th className="px-3 py-2 text-left">Lý do</th>
+                  <th className="px-3 py-2 text-left">Kết quả</th>
+                  <th className="px-3 py-2 text-left">Trạng thái</th>
+                  <th className="px-3 py-2 text-left">NV xử lý</th>
                 </tr>
               </thead>
               <tbody>
                 {paged.length === 0 ? (
-                  <tr><td colSpan={10} className="text-center py-8 text-slate-500">Khong co du lieu</td></tr>
+                  <tr><td colSpan={10} className="text-center py-8 text-slate-500">Không có dữ liệu</td></tr>
                 ) : paged.map(function(r, i) {
                   return (
                     <tr key={r.recordId + '-' + i} className="border-t border-slate-800 hover:bg-slate-800/40">
@@ -512,11 +512,11 @@ export default function CskhPage() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between mt-4">
               <p className="text-xs text-slate-500">
-                Trang {page + 1}/{totalPages} — {filtered.length.toLocaleString()} ban ghi
+                Trang {page + 1}/{totalPages} — {filtered.length.toLocaleString()} bản ghi
               </p>
               <div className="flex gap-1">
                 <button onClick={function() { setPage(Math.max(0, page - 1)); }} disabled={page === 0}
-                  className="px-3 py-1 bg-slate-800 text-slate-300 rounded text-xs hover:bg-slate-700 disabled:opacity-30">Truoc</button>
+                  className="px-3 py-1 bg-slate-800 text-slate-300 rounded text-xs hover:bg-slate-700 disabled:opacity-30">Trước</button>
                 <button onClick={function() { setPage(Math.min(totalPages - 1, page + 1)); }} disabled={page >= totalPages - 1}
                   className="px-3 py-1 bg-slate-800 text-slate-300 rounded text-xs hover:bg-slate-700 disabled:opacity-30">Sau</button>
               </div>
