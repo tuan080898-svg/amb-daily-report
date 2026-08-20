@@ -114,13 +114,12 @@ export default function CskhPage() {
   var [loading, setLoading] = useState(true);
   var [error, setError] = useState('');
   var [activeTab, setActiveTab] = useState<'data' | 'dashboard'>('dashboard');
-  var [filterMonth, setFilterMonth] = useState<number>(0);
+  var [filterDateFrom, setFilterDateFrom] = useState('');
+  var [filterDateTo, setFilterDateTo] = useState('');
   var [filterShop, setFilterShop] = useState('');
   var [filterResult, setFilterResult] = useState('');
   var [filterReason, setFilterReason] = useState('');
   var [filterHandler, setFilterHandler] = useState('');
-  var [filterDate, setFilterDate] = useState('');
-  var [filterWeek, setFilterWeek] = useState('');
   var [search, setSearch] = useState('');
   var [page, setPage] = useState(0);
   var PAGE_SIZE = 50;
@@ -148,12 +147,6 @@ export default function CskhPage() {
     return Array.from(s).sort();
   }, [records]);
 
-  var months = useMemo(function() {
-    var s = new Set<number>();
-    records.forEach(function(r) { if (r.month) s.add(r.month); });
-    return Array.from(s).sort(function(a, b) { return a - b; });
-  }, [records]);
-
   var reasons = useMemo(function() {
     var s = new Set<string>();
     records.forEach(function(r) {
@@ -174,50 +167,18 @@ export default function CskhPage() {
     return Array.from(s).sort();
   }, [records]);
 
-  var weekOptions = useMemo(function() {
-    var weeks = new Map<string, { start: string; end: string }>();
-    records.forEach(function(r) {
-      if (!r.date) return;
-      var d = new Date(r.date);
-      var day = d.getDay();
-      var mondayOffset = day === 0 ? -6 : 1 - day;
-      var monday = new Date(d);
-      monday.setDate(d.getDate() + mondayOffset);
-      var sunday = new Date(monday);
-      sunday.setDate(monday.getDate() + 6);
-      var key = monday.toISOString().split('T')[0];
-      if (!weeks.has(key)) {
-        weeks.set(key, {
-          start: monday.toISOString().split('T')[0],
-          end: sunday.toISOString().split('T')[0]
-        });
-      }
-    });
-    return Array.from(weeks.entries())
-      .sort(function(a, b) { return b[0].localeCompare(a[0]); })
-      .map(function(e) { return { key: e[0], start: e[1].start, end: e[1].end }; });
-  }, [records]);
-
   var filtered = useMemo(function() {
     return records.filter(function(r) {
-      if (filterMonth && r.month !== filterMonth) return false;
+      if (filterDateFrom && r.date && r.date < filterDateFrom) return false;
+      if (filterDateFrom && !r.date) return false;
+      if (filterDateTo && r.date && r.date > filterDateTo) return false;
+      if (filterDateTo && !r.date) return false;
       if (filterShop && r.shop !== filterShop) return false;
       if (filterResult === '__pending__') {
         if (r.processingResult !== 'Chưa xử lý' && r.processingResult !== 'Đang xử lý' && r.processingResult !== 'Chờ sửa') return false;
       } else if (filterResult && r.processingResult !== filterResult) return false;
       if (filterReason && !r.badReviewReason.includes(filterReason)) return false;
       if (filterHandler && r.handler !== filterHandler) return false;
-      if (filterDate && r.date !== filterDate) return false;
-      if (filterWeek && r.date) {
-        var d = new Date(r.date);
-        var day = d.getDay();
-        var mondayOffset = day === 0 ? -6 : 1 - day;
-        var monday = new Date(d);
-        monday.setDate(d.getDate() + mondayOffset);
-        if (monday.toISOString().split('T')[0] !== filterWeek) return false;
-      } else if (filterWeek && !r.date) {
-        return false;
-      }
       if (search) {
         var q = search.toLowerCase();
         if (!(r.customerName.toLowerCase().includes(q) || r.orderCode.toLowerCase().includes(q) ||
@@ -225,7 +186,7 @@ export default function CskhPage() {
       }
       return true;
     });
-  }, [records, filterMonth, filterShop, filterResult, filterReason, filterHandler, filterDate, filterWeek, search]);
+  }, [records, filterDateFrom, filterDateTo, filterShop, filterResult, filterReason, filterHandler, search]);
 
   var paged = useMemo(function() {
     return filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -369,24 +330,16 @@ export default function CskhPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-2 mb-4">
-        <input type="date" value={filterDate}
-          onChange={function(e) { setFilterDate(e.target.value); setFilterWeek(''); setFilterMonth(0); setPage(0); }}
-          className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5" />
-        <select value={filterWeek} onChange={function(e) { setFilterWeek(e.target.value); setFilterDate(''); setFilterMonth(0); setPage(0); }}
-          className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5">
-          <option value="">Tất cả tuần</option>
-          {weekOptions.map(function(w) {
-            var s = w.start.slice(5).replace('-', '/');
-            var e = w.end.slice(5).replace('-', '/');
-            return <option key={w.key} value={w.key}>{s} - {e}</option>;
-          })}
-        </select>
-        <select value={filterMonth} onChange={function(e) { setFilterMonth(Number(e.target.value)); setFilterDate(''); setFilterWeek(''); setPage(0); }}
-          className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5">
-          <option value={0}>Tất cả tháng</option>
-          {months.map(function(m) { return <option key={m} value={m}>Tháng {m}</option>; })}
-        </select>
+      <div className="flex flex-wrap gap-2 mb-4 items-center">
+        <div className="flex items-center gap-1">
+          <input type="date" value={filterDateFrom}
+            onChange={function(e) { setFilterDateFrom(e.target.value); setPage(0); }}
+            className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5" />
+          <span className="text-slate-500 text-xs">đến</span>
+          <input type="date" value={filterDateTo}
+            onChange={function(e) { setFilterDateTo(e.target.value); setPage(0); }}
+            className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5" />
+        </div>
         <select value={filterShop} onChange={function(e) { setFilterShop(e.target.value); setPage(0); }}
           className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5">
           <option value="">Tất cả shop</option>
@@ -413,8 +366,8 @@ export default function CskhPage() {
             value={search} onChange={function(e) { setSearch(e.target.value); setPage(0); }}
             className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5 w-64" />
         )}
-        {(filterMonth || filterShop || filterResult || filterReason || filterHandler || filterDate || filterWeek || search) && (
-          <button onClick={function() { setFilterMonth(0); setFilterShop(''); setFilterResult(''); setFilterReason(''); setFilterHandler(''); setFilterDate(''); setFilterWeek(''); setSearch(''); setPage(0); }}
+        {(filterDateFrom || filterDateTo || filterShop || filterResult || filterReason || filterHandler || search) && (
+          <button onClick={function() { setFilterDateFrom(''); setFilterDateTo(''); setFilterShop(''); setFilterResult(''); setFilterReason(''); setFilterHandler(''); setSearch(''); setPage(0); }}
             className="text-xs text-slate-400 hover:text-white px-2">Xoá bộ lọc</button>
         )}
         {filtered.length !== records.length && (
