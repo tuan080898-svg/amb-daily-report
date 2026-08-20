@@ -61,7 +61,7 @@ function processRecord(recordId: string, tableId: string, fields: Record<string,
   };
 }
 
-function toLarkFields(data: Record<string, unknown>): Record<string, unknown> {
+function toLarkFields(data: Record<string, unknown>, includeAttachments = true): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
   if (data.customerName) fields['Tên khách hàng'] = String(data.customerName);
   if (data.orderCode) fields['Mã đơn hàng'] = String(data.orderCode);
@@ -80,7 +80,7 @@ function toLarkFields(data: Record<string, unknown>): Record<string, unknown> {
     const ts = new Date(String(data.date)).getTime();
     if (!isNaN(ts)) fields['Ngày'] = ts;
   }
-  if (data.imageTokens !== undefined) {
+  if (includeAttachments && data.imageTokens !== undefined) {
     const tokens = data.imageTokens as string[];
     if (tokens.length > 0) fields['Ảnh bill'] = tokens.map(t => ({ file_token: t }));
   }
@@ -199,7 +199,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No target table found' }, { status: 400 });
     }
 
-    const fields = toLarkFields(data);
+    let fields = toLarkFields(data);
     console.log('POST lark-refund payload:', JSON.stringify({ fields, targetTableId }));
 
     const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${REFUND_BASE_TOKEN}/tables/${targetTableId}/records`;
@@ -220,9 +220,23 @@ export async function POST(req: NextRequest) {
       json = await res.json();
     }
 
+    if (json.code !== 0 && fields['Ảnh bill']) {
+      console.log('Retrying without Ảnh bill...');
+      fields = toLarkFields(data, false);
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields }),
+      });
+      const json2 = await res.json();
+      if (json2.code === 0) {
+        return NextResponse.json({ success: true, recordId: json2.data?.record?.record_id, warning: 'Tạo thành công nhưng chưa gắn được ảnh bill (cột Ảnh bill có thể chưa tồn tại trong Lark)' });
+      }
+      json = json2;
+    }
+
     if (json.code !== 0) {
       console.error('Lark create response:', JSON.stringify(json));
-      console.error('Sent fields:', JSON.stringify(fields));
       return NextResponse.json({
         error: 'Lark create error (code ' + json.code + '): ' + (json.msg || 'Unknown'),
         debug: { sentFields: fields, larkResponse: json }

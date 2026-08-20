@@ -266,6 +266,7 @@ export default function CskhPage() {
         alert('Lỗi: ' + data.error + debugInfo);
         return;
       }
+      if (data.warning) alert(data.warning);
       closeModal();
       fetchData();
     } catch (e: unknown) {
