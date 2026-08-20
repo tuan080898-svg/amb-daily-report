@@ -263,6 +263,7 @@ export default function CskhPage() {
       var data = await res.json();
       if (data.error) {
         var debugInfo = data.debug ? '\n\nFields gửi:\n' + JSON.stringify(data.debug.sentFields, null, 2) : '';
+        if (data.debug?.tableColumns) debugInfo += '\n\nCột trong bảng Lark:\n' + JSON.stringify(data.debug.tableColumns, null, 2);
         alert('Lỗi: ' + data.error + debugInfo);
         return;
       }

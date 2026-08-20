@@ -119,6 +119,14 @@ async function listTables(token: string): Promise<{ table_id: string; name: stri
   return json.data.items || [];
 }
 
+async function listFields(token: string, tableId: string): Promise<{ field_name: string; type: number }[]> {
+  const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${REFUND_BASE_TOKEN}/tables/${tableId}/fields`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const json = await res.json();
+  if (json.code !== 0) return [];
+  return (json.data.items || []).map((f: Record<string, unknown>) => ({ field_name: f.field_name, type: f.type }));
+}
+
 export async function GET() {
   try {
     if (!LARK_APP_ID || !LARK_APP_SECRET || !REFUND_BASE_TOKEN) {
@@ -237,9 +245,10 @@ export async function POST(req: NextRequest) {
 
     if (json.code !== 0) {
       console.error('Lark create response:', JSON.stringify(json));
+      const tableFields = await listFields(token, targetTableId);
       return NextResponse.json({
         error: 'Lark create error (code ' + json.code + '): ' + (json.msg || 'Unknown'),
-        debug: { sentFields: fields, larkResponse: json }
+        debug: { sentFields: fields, tableColumns: tableFields }
       }, { status: 500 });
     }
 
