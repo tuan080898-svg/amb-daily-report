@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 
 const LARK_APP_ID = process.env.LARK_APP_ID || '';
 const LARK_APP_SECRET = process.env.LARK_APP_SECRET || '';
@@ -89,6 +89,25 @@ function processRecord(recordId: string, fields: Record<string, unknown>): LarkC
   };
 }
 
+function toLarkFields(data: Record<string, unknown>): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  if (data.customerName !== undefined) fields['Tên khách hàng'] = data.customerName;
+  if (data.orderCode !== undefined) fields['Mã đơn hàng'] = data.orderCode;
+  if (data.phone !== undefined) fields['Số điện thoại'] = data.phone;
+  if (data.product !== undefined) fields['Sản phẩm'] = data.product;
+  if (data.initialStars !== undefined) fields['Số sao ban đầu'] = String(data.initialStars);
+  if (data.fixedStars !== undefined) fields['Số sao đã sửa'] = String(data.fixedStars);
+  if (data.shop !== undefined) fields['SHOP'] = data.shop;
+  if (data.handler !== undefined) fields['Người xử lý'] = data.handler;
+  if (data.processingResult !== undefined) fields['Kết quả xử lý'] = data.processingResult;
+  if (data.customerStatus !== undefined) fields['Trạng thái khách'] = data.customerStatus;
+  if (data.note !== undefined) fields['ghi chú'] = data.note;
+  if (data.refundAmount !== undefined) fields['Số tiền hoàn'] = String(data.refundAmount);
+  if (data.quantity !== undefined) fields['Số lượng'] = String(data.quantity);
+  if (data.date !== undefined) fields['Ngày xử lý'] = new Date(data.date as string).getTime();
+  return fields;
+}
+
 async function fetchAllRecords(token: string): Promise<LarkCskhRecord[]> {
   const records: LarkCskhRecord[] = [];
   let pageToken: string | undefined;
@@ -121,6 +140,55 @@ export async function GET() {
     const token = await getTenantToken();
     const records = await fetchAllRecords(token);
     return NextResponse.json({ records, total: records.length });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Unknown error';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { recordId, ...data } = body;
+    if (!recordId) {
+      return NextResponse.json({ error: 'recordId required' }, { status: 400 });
+    }
+
+    const token = await getTenantToken();
+    const fields = toLarkFields(data);
+
+    const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${LARK_BASE_TOKEN}/tables/${LARK_TABLE_ID}/records/${recordId}`;
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields }),
+    });
+    const json = await res.json();
+    if (json.code !== 0) throw new Error('Lark update error: ' + json.msg);
+
+    return NextResponse.json({ success: true });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Unknown error';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const token = await getTenantToken();
+    const fields = toLarkFields(body);
+
+    const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${LARK_BASE_TOKEN}/tables/${LARK_TABLE_ID}/records`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields }),
+    });
+    const json = await res.json();
+    if (json.code !== 0) throw new Error('Lark create error: ' + json.msg);
+
+    return NextResponse.json({ success: true, recordId: json.data?.record?.record_id });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: msg }, { status: 500 });
