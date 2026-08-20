@@ -136,6 +136,8 @@ export default function CskhPage() {
   var [filterResult, setFilterResult] = useState('');
   var [filterReason, setFilterReason] = useState('');
   var [filterHandler, setFilterHandler] = useState('');
+  var [filterRefundReason, setFilterRefundReason] = useState('');
+  var [filterRefundStatus, setFilterRefundStatus] = useState('');
   var [search, setSearch] = useState('');
   var [page, setPage] = useState(0);
   var PAGE_SIZE = 50;
@@ -184,9 +186,22 @@ export default function CskhPage() {
 
   var handlers = useMemo(function() {
     var s = new Set<string>();
-    records.forEach(function(r) { if (r.handler) s.add(r.handler); });
+    var source = activeTab === 'refund' ? refundRecords : records;
+    source.forEach(function(r) { if (r.handler) s.add(r.handler); });
     return Array.from(s).sort();
-  }, [records]);
+  }, [records, refundRecords, activeTab]);
+
+  var refundReasons = useMemo(function() {
+    var s = new Set<string>();
+    refundRecords.forEach(function(r) { if (r.refundReason) s.add(r.refundReason.trim()); });
+    return Array.from(s).sort();
+  }, [refundRecords]);
+
+  var refundStatuses = useMemo(function() {
+    var s = new Set<string>();
+    refundRecords.forEach(function(r) { if (r.status) s.add(r.status); });
+    return Array.from(s).sort();
+  }, [refundRecords]);
 
   var filtered = useMemo(function() {
     return records.filter(function(r) {
@@ -217,6 +232,8 @@ export default function CskhPage() {
       if (filterDateTo && !r.date) return false;
       if (filterShop && r.shop !== filterShop) return false;
       if (filterHandler && r.handler !== filterHandler) return false;
+      if (filterRefundReason && !r.refundReason.includes(filterRefundReason)) return false;
+      if (filterRefundStatus && r.status !== filterRefundStatus) return false;
       if (search) {
         var q = search.toLowerCase();
         if (!(r.customerName.toLowerCase().includes(q) || r.orderCode.toLowerCase().includes(q) ||
@@ -224,7 +241,7 @@ export default function CskhPage() {
       }
       return true;
     });
-  }, [refundRecords, filterDateFrom, filterDateTo, filterShop, filterHandler, search]);
+  }, [refundRecords, filterDateFrom, filterDateTo, filterShop, filterHandler, filterRefundReason, filterRefundStatus, search]);
 
   var pagedCskh = useMemo(function() {
     return filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -394,28 +411,49 @@ export default function CskhPage() {
           <option value="">Tất cả nhân sự</option>
           {handlers.map(function(h) { return <option key={h} value={h}>{h}</option>; })}
         </select>
-        <select value={filterResult} onChange={function(e) { setFilterResult(e.target.value); setPage(0); }}
-          className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5">
-          <option value="">Tất cả kết quả</option>
-          <option value="__pending__">Tồn đọng (chưa/đang xử lý)</option>
-          {resultOptions.map(function(r) { return <option key={r} value={r}>{r}</option>; })}
-        </select>
-        <select value={filterReason} onChange={function(e) { setFilterReason(e.target.value); setPage(0); }}
-          className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5">
-          <option value="">Tất cả lý do</option>
-          {reasons.map(function(r) { return <option key={r} value={r}>{r}</option>; })}
-        </select>
-        {activeTab === 'data' && (
+        {activeTab !== 'refund' && (
+          <select value={filterResult} onChange={function(e) { setFilterResult(e.target.value); setPage(0); }}
+            className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5">
+            <option value="">Tất cả kết quả</option>
+            <option value="__pending__">Tồn đọng (chưa/đang xử lý)</option>
+            {resultOptions.map(function(r) { return <option key={r} value={r}>{r}</option>; })}
+          </select>
+        )}
+        {activeTab !== 'refund' && (
+          <select value={filterReason} onChange={function(e) { setFilterReason(e.target.value); setPage(0); }}
+            className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5">
+            <option value="">Tất cả lý do</option>
+            {reasons.map(function(r) { return <option key={r} value={r}>{r}</option>; })}
+          </select>
+        )}
+        {activeTab === 'refund' && (
+          <select value={filterRefundReason} onChange={function(e) { setFilterRefundReason(e.target.value); setPage(0); }}
+            className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5">
+            <option value="">Tất cả lý do hoàn</option>
+            {refundReasons.map(function(r) { return <option key={r} value={r}>{r}</option>; })}
+          </select>
+        )}
+        {activeTab === 'refund' && (
+          <select value={filterRefundStatus} onChange={function(e) { setFilterRefundStatus(e.target.value); setPage(0); }}
+            className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5">
+            <option value="">Tất cả trạng thái</option>
+            {refundStatuses.map(function(r) { return <option key={r} value={r}>{r}</option>; })}
+          </select>
+        )}
+        {(activeTab === 'data' || activeTab === 'refund') && (
           <input type="text" placeholder="Tìm khách / mã đơn / sản phẩm..."
             value={search} onChange={function(e) { setSearch(e.target.value); setPage(0); }}
             className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5 w-64" />
         )}
-        {(filterDateFrom || filterDateTo || filterShop || filterResult || filterReason || filterHandler || search) && (
-          <button onClick={function() { setFilterDateFrom(''); setFilterDateTo(''); setFilterShop(''); setFilterResult(''); setFilterReason(''); setFilterHandler(''); setSearch(''); setPage(0); }}
+        {(filterDateFrom || filterDateTo || filterShop || filterResult || filterReason || filterHandler || filterRefundReason || filterRefundStatus || search) && (
+          <button onClick={function() { setFilterDateFrom(''); setFilterDateTo(''); setFilterShop(''); setFilterResult(''); setFilterReason(''); setFilterHandler(''); setFilterRefundReason(''); setFilterRefundStatus(''); setSearch(''); setPage(0); }}
             className="text-xs text-slate-400 hover:text-white px-2">Xoá bộ lọc</button>
         )}
-        {filtered.length !== records.length && (
+        {activeTab !== 'refund' && filtered.length !== records.length && (
           <span className="text-xs text-slate-500 self-center ml-2">{filtered.length.toLocaleString()} / {records.length.toLocaleString()}</span>
+        )}
+        {activeTab === 'refund' && filteredRefund.length !== refundRecords.length && (
+          <span className="text-xs text-slate-500 self-center ml-2">{filteredRefund.length.toLocaleString()} / {refundRecords.length.toLocaleString()}</span>
         )}
       </div>
 
