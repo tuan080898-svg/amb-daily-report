@@ -261,7 +261,11 @@ export default function CskhPage() {
         body: JSON.stringify(base),
       });
       var data = await res.json();
-      if (data.error) { alert('Lỗi: ' + data.error); return; }
+      if (data.error) {
+        var debugInfo = data.debug ? '\n\nFields gửi:\n' + JSON.stringify(data.debug.sentFields, null, 2) : '';
+        alert('Lỗi: ' + data.error + debugInfo);
+        return;
+      }
       closeModal();
       fetchData();
     } catch (e: unknown) {

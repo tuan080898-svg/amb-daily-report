@@ -222,7 +222,11 @@ export async function POST(req: NextRequest) {
 
     if (json.code !== 0) {
       console.error('Lark create response:', JSON.stringify(json));
-      throw new Error('Lark create error (code ' + json.code + '): ' + (json.msg || JSON.stringify(json)));
+      console.error('Sent fields:', JSON.stringify(fields));
+      return NextResponse.json({
+        error: 'Lark create error (code ' + json.code + '): ' + (json.msg || 'Unknown'),
+        debug: { sentFields: fields, larkResponse: json }
+      }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, recordId: json.data?.record?.record_id });
