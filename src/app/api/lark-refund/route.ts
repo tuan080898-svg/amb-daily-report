@@ -6,10 +6,11 @@ const REFUND_BASE_TOKEN = process.env.LARK_REFUND_BASE_TOKEN || '';
 
 let cachedToken = { token: '', expiresAt: 0 };
 
-async function getTenantToken(): Promise<string> {
-  if (cachedToken.token && Date.now() < cachedToken.expiresAt) {
+async function getTenantToken(forceRefresh = false): Promise<string> {
+  if (!forceRefresh && cachedToken.token && Date.now() < cachedToken.expiresAt) {
     return cachedToken.token;
   }
+  cachedToken = { token: '', expiresAt: 0 };
   const res = await fetch('https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -148,13 +149,24 @@ export async function PUT(req: NextRequest) {
     const fields = toLarkFields(data);
 
     const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${REFUND_BASE_TOKEN}/tables/${tableId}/records/${recordId}`;
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       method: 'PUT',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ fields }),
     });
-    const json = await res.json();
-    if (json.code !== 0) throw new Error('Lark update error: ' + json.msg);
+    let json = await res.json();
+
+    if (res.status === 403 || json.code === 403) {
+      const freshToken = await getTenantToken(true);
+      res = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${freshToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields }),
+      });
+      json = await res.json();
+    }
+
+    if (json.code !== 0) throw new Error('Lark update error (code ' + json.code + '): ' + (json.msg || JSON.stringify(json)));
 
     return NextResponse.json({ success: true });
   } catch (error: unknown) {
@@ -184,17 +196,29 @@ export async function POST(req: NextRequest) {
     const fields = toLarkFields(data);
 
     const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${REFUND_BASE_TOKEN}/tables/${targetTableId}/records`;
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ fields }),
     });
-    const json = await res.json();
-    if (json.code !== 0) throw new Error('Lark create error: ' + json.msg);
+    let json = await res.json();
+
+    if (res.status === 403 || json.code === 403) {
+      const freshToken = await getTenantToken(true);
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${freshToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fields }),
+      });
+      json = await res.json();
+    }
+
+    if (json.code !== 0) throw new Error('Lark create error (code ' + json.code + '): ' + (json.msg || JSON.stringify(json)));
 
     return NextResponse.json({ success: true, recordId: json.data?.record?.record_id });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
+    console.error('POST /api/lark-refund error:', msg);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
