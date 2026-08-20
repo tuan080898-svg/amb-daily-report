@@ -63,23 +63,22 @@ function processRecord(recordId: string, tableId: string, fields: Record<string,
 
 function toLarkFields(data: Record<string, unknown>): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
-  const setIfNotEmpty = (key: string, val: unknown) => {
-    if (val !== undefined && val !== null && val !== '') fields[key] = val;
-  };
-  setIfNotEmpty('Tên khách hàng', data.customerName);
-  setIfNotEmpty('Mã đơn hàng', data.orderCode);
-  setIfNotEmpty('Số điện thoại', data.phone);
-  setIfNotEmpty('Sản phẩm', data.product);
-  setIfNotEmpty('Shop', data.shop);
-  setIfNotEmpty('Sàn', data.platform);
-  if (data.refundAmount !== undefined && data.refundAmount !== '' && Number(data.refundAmount) !== 0) {
-    fields['Số tiền hoàn'] = Math.round(Number(data.refundAmount) / 1000);
+  if (data.customerName) fields['Tên khách hàng'] = String(data.customerName);
+  if (data.orderCode) fields['Mã đơn hàng'] = String(data.orderCode);
+  if (data.phone) fields['Số điện thoại'] = String(data.phone);
+  if (data.product) fields['Sản phẩm'] = String(data.product);
+  if (data.shop) fields['Shop'] = String(data.shop);
+  if (data.platform) fields['Sàn'] = String(data.platform);
+  if (data.refundAmount !== undefined) {
+    const amt = Number(data.refundAmount) || 0;
+    fields['Số tiền hoàn'] = String(Math.round(amt / 1000));
   }
-  setIfNotEmpty('Lý do hoàn', data.refundReason);
-  setIfNotEmpty('Trạng thái', data.status);
-  setIfNotEmpty('Người hoàn tiền', data.handler);
-  if (data.date && String(data.date).length >= 10) {
-    fields['Ngày'] = new Date(String(data.date)).getTime();
+  if (data.refundReason) fields['Lý do hoàn'] = String(data.refundReason);
+  if (data.status) fields['Trạng thái'] = String(data.status);
+  if (data.handler) fields['Người hoàn tiền'] = String(data.handler);
+  if (data.date) {
+    const ts = new Date(String(data.date)).getTime();
+    if (!isNaN(ts)) fields['Ngày'] = ts;
   }
   if (data.imageTokens !== undefined) {
     const tokens = data.imageTokens as string[];
