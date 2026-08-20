@@ -1,497 +1,529 @@
 'use client';
+import { useState, useEffect, useMemo } from 'react';
 
-import { useState, useMemo } from 'react';
-import { useAppState } from '@/lib/store';
-import { toDateString } from '@/lib/utils';
-import { CskhReview, CskhIssue } from '@/lib/types';
-
-const REVIEW_STATUSES = ['Đã xử lý', 'Đang chờ KH phản hồi', 'Không liên hệ được'];
-const REVIEW_RESULTS = ['Đã sửa lên 4-5 sao', 'Giữ nguyên', 'Từ chối sửa'];
-const REVIEW_METHODS = ['Nhắn tin', 'Gọi điện', 'Tặng quà', 'Hoàn tiền', 'Đổi hàng', 'Khác'];
-const ISSUE_STATUSES = ['Đã xong', 'Đang xử lý', 'Tồn đọng'];
-const ISSUE_URGENCIES = ['Thấp', 'Trung bình', 'Cao'];
-
-function getQuickDates() {
-  const today = new Date();
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const sevenDaysAgo = new Date(today);
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-  return {
-    today: toDateString(today),
-    yesterday: toDateString(yesterday),
-    sevenDaysAgo: toDateString(sevenDaysAgo),
-    monthStart: toDateString(monthStart),
-  };
+interface CskhRecord {
+  recordId: string;
+  customerName: string;
+  orderCode: string;
+  phone: string;
+  product: string;
+  productType: string;
+  initialStars: number;
+  fixedStars: number;
+  reason: string;
+  badReviewReason: string;
+  date: string;
+  month: number;
+  customerStatus: string;
+  shop: string;
+  shopManager: string;
+  handler: string;
+  processingResult: string;
+  note: string;
+  refundAmount: number;
+  quantity: number;
 }
 
-function StarDisplay({ stars }: { stars: number }) {
+function StarDisplay({ count }: { count: number }) {
   return (
-    <span className="inline-flex gap-0.5">
-      {[1, 2, 3, 4, 5].map(function(i) {
-        return (
-          <span key={i} className={i <= stars ? 'text-yellow-400' : 'text-gray-600'}>
-            ★
-          </span>
-        );
-      })}
+    <span className="text-yellow-400">
+      {'★'.repeat(Math.max(0, Math.min(5, count)))}
+      {'☆'.repeat(Math.max(0, 5 - Math.min(5, count)))}
     </span>
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  let cls = 'bg-gray-700 text-gray-300';
-  if (status === 'Đã xử lý' || status === 'Đã xong') cls = 'bg-emerald-500/20 text-emerald-400';
-  else if (status === 'Đang chờ KH phản hồi' || status === 'Đang xử lý') cls = 'bg-amber-500/20 text-amber-400';
-  else if (status === 'Không liên hệ được' || status === 'Tồn đọng') cls = 'bg-red-500/20 text-red-400';
-  return <span className={'px-2 py-0.5 rounded-full text-xs font-medium ' + cls}>{status}</span>;
-}
-
-function UrgencyBadge({ urgency }: { urgency: string }) {
-  let cls = 'bg-gray-700 text-gray-300';
-  if (urgency === 'Cao') cls = 'bg-red-500/20 text-red-400';
-  else if (urgency === 'Trung bình') cls = 'bg-amber-500/20 text-amber-400';
-  else if (urgency === 'Thấp') cls = 'bg-emerald-500/20 text-emerald-400';
-  return <span className={'px-2 py-0.5 rounded-full text-xs font-medium ' + cls}>{urgency}</span>;
-}
-
 function ResultBadge({ result }: { result: string }) {
-  let cls = 'bg-gray-700 text-gray-300';
-  if (result === 'Đã sửa lên 4-5 sao') cls = 'bg-emerald-500/20 text-emerald-400';
-  else if (result === 'Giữ nguyên') cls = 'bg-amber-500/20 text-amber-400';
-  else if (result === 'Từ chối sửa') cls = 'bg-red-500/20 text-red-400';
-  return result ? <span className={'px-2 py-0.5 rounded-full text-xs font-medium ' + cls}>{result}</span> : null;
+  if (!result) return <span className="text-slate-500 text-xs">—</span>;
+  var color = 'bg-slate-700 text-slate-300';
+  if (result.includes('Đã xử lý')) color = 'bg-emerald-900/50 text-emerald-400';
+  else if (result.includes('Đang xử lý') || result.includes('Chờ sửa')) color = 'bg-yellow-900/50 text-yellow-400';
+  else if (result.includes('Chưa xử lý')) color = 'bg-red-900/50 text-red-400';
+  else if (result.includes('Không thể')) color = 'bg-slate-800 text-slate-400';
+  return <span className={'px-2 py-0.5 rounded text-xs font-medium ' + color}>{result}</span>;
 }
 
-export default function CskhDashboardPage() {
-  const { currentUser, shops, users, cskhReviews, cskhIssues, getUserShops, updateCskhReview, updateCskhIssue } = useAppState();
+function StatusBadge({ status }: { status: string }) {
+  if (!status) return <span className="text-slate-500 text-xs">—</span>;
+  var color = 'text-slate-400';
+  if (status.includes('sửa đánh giá')) color = 'text-emerald-400';
+  else if (status.includes('không sửa') || status.includes('từ chối')) color = 'text-red-400';
+  return <span className={'text-xs font-medium ' + color}>{status}</span>;
+}
 
-  const quickDates = getQuickDates();
-  const [dateFrom, setDateFrom] = useState(quickDates.today);
-  const [dateTo, setDateTo] = useState(quickDates.today);
-  const [shopFilter, setShopFilter] = useState('all');
-  const [employeeFilter, setEmployeeFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [activeTab, setActiveTab] = useState<'reviews' | 'issues'>('reviews');
-  const [editingReviewId, setEditingReviewId] = useState<string | null>(null);
-  const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
+function HBar({ items, colorFn }: { items: { label: string; value: number }[]; colorFn?: (i: number) => string }) {
+  if (items.length === 0) return <p className="text-slate-500 text-sm">Không có dữ liệu</p>;
+  var max = Math.max(...items.map(function(d) { return d.value; }));
+  var colors = ['bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-violet-500', 'bg-cyan-500', 'bg-pink-500', 'bg-lime-500', 'bg-orange-500', 'bg-teal-500'];
+  return (
+    <div className="space-y-2">
+      {items.map(function(d, i) {
+        var pct = max > 0 ? (d.value / max) * 100 : 0;
+        var c = colorFn ? colorFn(i) : colors[i % colors.length];
+        return (
+          <div key={d.label} className="flex items-center gap-2">
+            <div className="w-28 text-xs text-slate-400 truncate text-right" title={d.label}>{d.label}</div>
+            <div className="flex-1 h-5 bg-slate-800 rounded overflow-hidden">
+              <div className={c + ' h-full rounded transition-all'} style={{ width: pct + '%' }} />
+            </div>
+            <div className="w-10 text-xs text-slate-300 text-right">{d.value}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
-  // Edit state for inline updates
-  const [editReviewStatus, setEditReviewStatus] = useState('');
-  const [editReviewResult, setEditReviewResult] = useState('');
-  const [editReviewMethod, setEditReviewMethod] = useState('');
-  const [editReviewNote, setEditReviewNote] = useState('');
-  const [editIssueStatus, setEditIssueStatus] = useState('');
-  const [editIssueUrgency, setEditIssueUrgency] = useState('');
-  const [editIssueResolution, setEditIssueResolution] = useState('');
-  const [editIssueIntervention, setEditIssueIntervention] = useState(false);
-  const [editIssueInterventionNote, setEditIssueInterventionNote] = useState('');
+function DonutChart({ items }: { items: { label: string; value: number; color: string }[] }) {
+  var total = items.reduce(function(s, d) { return s + d.value; }, 0);
+  if (total === 0) return <p className="text-slate-500 text-sm">Không có dữ liệu</p>;
+  var R = 80, CX = 100, CY = 100, CIRC = 2 * Math.PI * R;
+  var offset = 0;
+  return (
+    <div className="flex items-center gap-6">
+      <svg viewBox="0 0 200 200" width="160" height="160" style={{ transform: 'rotate(-90deg)', transformOrigin: '100px 100px' }}>
+        {items.map(function(d, i) {
+          var pct = d.value / total;
+          var dash = pct * CIRC;
+          var el = (
+            <circle key={i} cx={CX} cy={CY} r={R} fill="none" stroke={d.color} strokeWidth="24"
+              strokeDasharray={dash + ' ' + (CIRC - dash)} strokeDashoffset={-offset} />
+          );
+          offset += dash;
+          return el;
+        })}
+      </svg>
+      <div className="space-y-1 text-xs">
+        {items.map(function(d) {
+          var pct = total > 0 ? Math.round(d.value / total * 100) : 0;
+          return (
+            <div key={d.label} className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-sm inline-block flex-shrink-0" style={{ backgroundColor: d.color }} />
+              <span className="text-slate-300 truncate max-w-[140px]" title={d.label}>{d.label}</span>
+              <span className="text-slate-500">({d.value} - {pct}%)</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
-  const userShops = useMemo(function() {
-    if (!currentUser) return [];
-    return getUserShops(currentUser.id);
-  }, [currentUser, getUserShops]);
+export default function CskhPage() {
+  var [records, setRecords] = useState<CskhRecord[]>([]);
+  var [loading, setLoading] = useState(true);
+  var [error, setError] = useState('');
+  var [activeTab, setActiveTab] = useState<'data' | 'dashboard'>('dashboard');
+  var [filterMonth, setFilterMonth] = useState<number>(0);
+  var [filterShop, setFilterShop] = useState('');
+  var [filterResult, setFilterResult] = useState('');
+  var [filterReason, setFilterReason] = useState('');
+  var [search, setSearch] = useState('');
+  var [page, setPage] = useState(0);
+  var PAGE_SIZE = 50;
 
-  const employees = useMemo(function() {
-    return users.filter(function(u) { return u.role === 'employee'; });
-  }, [users]);
+  useEffect(function() {
+    fetchData();
+  }, []);
 
-  const shopMap = useMemo(function() {
-    const m: Record<string, string> = {};
-    shops.forEach(function(s) { m[s.id] = s.name; });
-    return m;
-  }, [shops]);
+  function fetchData() {
+    setLoading(true);
+    setError('');
+    fetch('/api/lark-cskh')
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.error) { setError(data.error); return; }
+        setRecords(data.records || []);
+      })
+      .catch(function(e) { setError(e.message); })
+      .finally(function() { setLoading(false); });
+  }
 
-  const userMap = useMemo(function() {
-    const m: Record<string, string> = {};
-    users.forEach(function(u) { m[u.id] = u.name; });
-    return m;
-  }, [users]);
+  var shops = useMemo(function() {
+    var s = new Set<string>();
+    records.forEach(function(r) { if (r.shop) s.add(r.shop); });
+    return Array.from(s).sort();
+  }, [records]);
 
-  const userShopIds = useMemo(function() {
-    return new Set(userShops.map(function(s) { return s.id; }));
-  }, [userShops]);
+  var months = useMemo(function() {
+    var s = new Set<number>();
+    records.forEach(function(r) { if (r.month) s.add(r.month); });
+    return Array.from(s).sort(function(a, b) { return a - b; });
+  }, [records]);
 
-  // Filter reviews
-  const filteredReviews = useMemo(function() {
-    return cskhReviews.filter(function(r) {
-      if (!userShopIds.has(r.shopId)) return false;
-      if (r.date < dateFrom || r.date > dateTo) return false;
-      if (shopFilter !== 'all' && r.shopId !== shopFilter) return false;
-      if (employeeFilter !== 'all' && r.reporterId !== employeeFilter) return false;
-      if (statusFilter !== 'all' && r.status !== statusFilter) return false;
+  var reasons = useMemo(function() {
+    var s = new Set<string>();
+    records.forEach(function(r) {
+      if (r.badReviewReason) r.badReviewReason.split(', ').forEach(function(x) { s.add(x); });
+    });
+    return Array.from(s).sort();
+  }, [records]);
+
+  var resultOptions = useMemo(function() {
+    var s = new Set<string>();
+    records.forEach(function(r) { if (r.processingResult) s.add(r.processingResult); });
+    return Array.from(s).sort();
+  }, [records]);
+
+  var filtered = useMemo(function() {
+    return records.filter(function(r) {
+      if (filterMonth && r.month !== filterMonth) return false;
+      if (filterShop && r.shop !== filterShop) return false;
+      if (filterResult && r.processingResult !== filterResult) return false;
+      if (filterReason && !r.badReviewReason.includes(filterReason)) return false;
+      if (search) {
+        var q = search.toLowerCase();
+        if (!(r.customerName.toLowerCase().includes(q) || r.orderCode.toLowerCase().includes(q) ||
+          r.product.toLowerCase().includes(q) || r.phone.includes(q))) return false;
+      }
       return true;
     });
-  }, [cskhReviews, userShopIds, dateFrom, dateTo, shopFilter, employeeFilter, statusFilter]);
+  }, [records, filterMonth, filterShop, filterResult, filterReason, search]);
 
-  // Filter issues
-  const filteredIssues = useMemo(function() {
-    return cskhIssues.filter(function(r) {
-      if (!userShopIds.has(r.shopId)) return false;
-      if (r.date < dateFrom || r.date > dateTo) return false;
-      if (shopFilter !== 'all' && r.shopId !== shopFilter) return false;
-      if (employeeFilter !== 'all' && r.reporterId !== employeeFilter) return false;
-      if (statusFilter !== 'all' && r.status !== statusFilter) return false;
-      return true;
-    });
-  }, [cskhIssues, userShopIds, dateFrom, dateTo, shopFilter, employeeFilter, statusFilter]);
+  var paged = useMemo(function() {
+    return filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  }, [filtered, page]);
 
-  // Urgent cases: intervention needed + not done, across ALL dates
-  const urgentCases = useMemo(function() {
-    return cskhIssues.filter(function(i) {
-      return i.needsIntervention && i.status !== 'Đã xong' && userShopIds.has(i.shopId);
-    });
-  }, [cskhIssues, userShopIds]);
+  var totalPages = Math.ceil(filtered.length / PAGE_SIZE);
 
-  // Stats for today (based on filter date range)
-  const stats = useMemo(function() {
-    const todayReviews = filteredReviews;
-    const todayIssues = filteredIssues;
-    const totalBadReviews = todayReviews.length;
-    const doneReviews = todayReviews.filter(function(r) { return r.status === 'Đã xử lý'; }).length;
-    const fixedReviews = todayReviews.filter(function(r) { return r.result === 'Đã sửa lên 4-5 sao'; }).length;
-    const successRate = doneReviews > 0 ? Math.round((fixedReviews / doneReviews) * 100) : 0;
-    const totalIssues = todayIssues.length;
-    // Backlog: across ALL dates, not just filtered
-    const backlog = cskhIssues.filter(function(i) {
-      return userShopIds.has(i.shopId) && (i.status === 'Tồn đọng' || i.status === 'Đang xử lý');
-    }).length + cskhReviews.filter(function(r) {
-      return userShopIds.has(r.shopId) && r.status === 'Đang chờ KH phản hồi';
+  var stats = useMemo(function() {
+    var total = filtered.length;
+    var processed = filtered.filter(function(r) { return r.processingResult === 'Đã xử lý'; }).length;
+    var fixed = filtered.filter(function(r) { return r.customerStatus.includes('sửa đánh giá'); }).length;
+    var pending = filtered.filter(function(r) {
+      return r.processingResult === 'Chưa xử lý' || r.processingResult === 'Đang xử lý' || r.processingResult === 'Chờ sửa';
     }).length;
-    return { totalBadReviews, doneReviews, fixedReviews, successRate, totalIssues, backlog };
-  }, [filteredReviews, filteredIssues, cskhIssues, cskhReviews, userShopIds]);
+    var totalRefund = filtered.reduce(function(s, r) { return s + r.refundAmount; }, 0);
+    return { total, processed, fixed, pending, totalRefund };
+  }, [filtered]);
 
-  function handleQuickDate(from: string, to: string) {
-    setDateFrom(from);
-    setDateTo(to);
-  }
+  var shopBreakdown = useMemo(function() {
+    var map = new Map<string, number>();
+    filtered.forEach(function(r) { if (r.shop) map.set(r.shop, (map.get(r.shop) || 0) + 1); });
+    return Array.from(map.entries())
+      .map(function(e) { return { label: e[0], value: e[1] }; })
+      .sort(function(a, b) { return b.value - a.value; })
+      .slice(0, 10);
+  }, [filtered]);
 
-  function startEditReview(r: CskhReview) {
-    setEditingReviewId(r.id);
-    setEditReviewStatus(r.status);
-    setEditReviewResult(r.result);
-    setEditReviewMethod(r.resolutionMethod);
-    setEditReviewNote(r.note);
-  }
-
-  function saveEditReview(r: CskhReview) {
-    updateCskhReview({
-      ...r,
-      status: editReviewStatus,
-      result: editReviewResult,
-      resolutionMethod: editReviewMethod,
-      note: editReviewNote,
+  var reasonBreakdown = useMemo(function() {
+    var map = new Map<string, number>();
+    filtered.forEach(function(r) {
+      if (r.badReviewReason) {
+        r.badReviewReason.split(', ').forEach(function(x) { map.set(x, (map.get(x) || 0) + 1); });
+      }
     });
-    setEditingReviewId(null);
-  }
+    var items = Array.from(map.entries())
+      .map(function(e) { return { label: e[0], value: e[1] }; })
+      .sort(function(a, b) { return b.value - a.value; })
+      .slice(0, 8);
+    var colors = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+    return items.map(function(d, i) { return { ...d, color: colors[i % colors.length] }; });
+  }, [filtered]);
 
-  function startEditIssue(i: CskhIssue) {
-    setEditingIssueId(i.id);
-    setEditIssueStatus(i.status);
-    setEditIssueUrgency(i.urgency);
-    setEditIssueResolution(i.resolution);
-    setEditIssueIntervention(i.needsIntervention);
-    setEditIssueInterventionNote(i.interventionNote);
-  }
-
-  function saveEditIssue(i: CskhIssue) {
-    updateCskhIssue({
-      ...i,
-      status: editIssueStatus,
-      urgency: editIssueUrgency,
-      resolution: editIssueResolution,
-      needsIntervention: editIssueIntervention,
-      interventionNote: editIssueInterventionNote,
+  var productBreakdown = useMemo(function() {
+    var map = new Map<string, number>();
+    filtered.forEach(function(r) {
+      if (r.productType) {
+        r.productType.split(', ').forEach(function(x) { map.set(x, (map.get(x) || 0) + 1); });
+      }
     });
-    setEditingIssueId(null);
+    return Array.from(map.entries())
+      .map(function(e) { return { label: e[0], value: e[1] }; })
+      .sort(function(a, b) { return b.value - a.value; })
+      .slice(0, 10);
+  }, [filtered]);
+
+  var handlerBreakdown = useMemo(function() {
+    var map = new Map<string, { total: number; fixed: number }>();
+    filtered.forEach(function(r) {
+      if (r.handler) {
+        var cur = map.get(r.handler) || { total: 0, fixed: 0 };
+        cur.total++;
+        if (r.customerStatus.includes('sửa đánh giá')) cur.fixed++;
+        map.set(r.handler, cur);
+      }
+    });
+    return Array.from(map.entries())
+      .map(function(e) { return { name: e[0], total: e[1].total, fixed: e[1].fixed, rate: e[1].total > 0 ? Math.round(e[1].fixed / e[1].total * 100) : 0 }; })
+      .sort(function(a, b) { return b.total - a.total; });
+  }, [filtered]);
+
+  var monthlyTrend = useMemo(function() {
+    var map = new Map<number, { total: number; fixed: number }>();
+    filtered.forEach(function(r) {
+      if (r.month) {
+        var cur = map.get(r.month) || { total: 0, fixed: 0 };
+        cur.total++;
+        if (r.customerStatus.includes('sửa đánh giá')) cur.fixed++;
+        map.set(r.month, cur);
+      }
+    });
+    return Array.from(map.entries())
+      .sort(function(a, b) { return a[0] - b[0]; })
+      .map(function(e) { return { month: e[0], total: e[1].total, fixed: e[1].fixed }; });
+  }, [filtered]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-slate-400">Đang tải dữ liệu từ Lark Base...</p>
+          <p className="text-slate-600 text-sm mt-1">4,000+ bản ghi</p>
+        </div>
+      </div>
+    );
   }
 
-  if (!currentUser) return null;
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-center bg-red-900/20 border border-red-800 rounded-lg p-6 max-w-md">
+          <p className="text-red-400 font-medium mb-2">Lỗi kết nối Lark Base</p>
+          <p className="text-red-300/70 text-sm mb-4">{error}</p>
+          <button onClick={fetchData} className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-500 text-sm">Thử lại</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-100">CSKH Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-1">Theo dõi đánh giá xấu & vấn đề phát sinh CSKH</p>
+    <div className="p-4 md:p-6 max-w-[1400px] mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Chăm sóc khách hàng</h1>
+          <p className="text-slate-400 text-sm mt-1">{records.length.toLocaleString()} đánh giá từ Lark Base</p>
+        </div>
+        <button onClick={fetchData} disabled={loading}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 text-sm flex items-center gap-2">
+          <svg className={'w-4 h-4' + (loading ? ' animate-spin' : '')} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          Đồng bộ
+        </button>
       </div>
 
-      {/* Urgent Cases */}
-      {urgentCases.length > 0 && (
-        <div className="mb-6">
-          <h2 className="text-sm font-semibold text-red-400 mb-3 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            Case cần can thiệp ({urgentCases.length})
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {urgentCases.map(function(c) {
-              return (
-                <div key={c.id} className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-mono text-red-300">{c.orderCode}</span>
-                    <UrgencyBadge urgency={c.urgency} />
-                  </div>
-                  <p className="text-sm text-gray-300 font-medium mb-1">{shopMap[c.shopId] || c.shopId}</p>
-                  <p className="text-xs text-gray-400 mb-2">{c.issueType}</p>
-                  <p className="text-xs text-gray-400 line-clamp-2">{c.description}</p>
-                  {c.interventionNote && (
-                    <p className="text-xs text-orange-400 mt-2 italic">{c.interventionNote}</p>
-                  )}
-                  <div className="flex items-center justify-between mt-3">
-                    <StatusBadge status={c.status} />
-                    <span className="text-xs text-gray-500">{c.date}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Summary Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-        <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4">
-          <p className="text-xs text-gray-500 mb-1">Đánh giá xấu</p>
-          <p className="text-2xl font-bold text-gray-100">{stats.totalBadReviews}</p>
-        </div>
-        <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4">
-          <p className="text-xs text-gray-500 mb-1">Đã xử lý xong</p>
-          <p className="text-2xl font-bold text-emerald-400">{stats.doneReviews}</p>
-        </div>
-        <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4">
-          <p className="text-xs text-gray-500 mb-1">Sửa lên 4-5 sao</p>
-          <p className="text-2xl font-bold text-blue-400">{stats.fixedReviews} <span className="text-sm text-gray-500">({stats.successRate}%)</span></p>
-        </div>
-        <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4">
-          <p className="text-xs text-gray-500 mb-1">Vấn đề phát sinh</p>
-          <p className="text-2xl font-bold text-gray-100">{stats.totalIssues}</p>
-        </div>
-        <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4 col-span-2 md:col-span-1">
-          <p className="text-xs text-gray-500 mb-1">Case tồn đọng</p>
-          <p className="text-2xl font-bold text-red-400">{stats.backlog}</p>
-        </div>
+      {/* Tab bar */}
+      <div className="flex gap-1 mb-4 bg-slate-800/50 p-1 rounded-lg w-fit">
+        {[
+          { key: 'dashboard' as const, label: 'Dashboard' },
+          { key: 'data' as const, label: 'Dữ liệu' },
+        ].map(function(tab) {
+          return (
+            <button key={tab.key} onClick={function() { setActiveTab(tab.key); setPage(0); }}
+              className={'px-4 py-2 rounded-md text-sm font-medium transition-colors ' +
+                (activeTab === tab.key ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white')}>
+              {tab.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Filters */}
-      <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4 mb-6">
-        <div className="flex flex-wrap items-center gap-3 mb-3">
-          <div className="flex gap-2">
-            <button onClick={function() { handleQuickDate(quickDates.today, quickDates.today); }} className={'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ' + (dateFrom === quickDates.today && dateTo === quickDates.today ? 'bg-blue-500/20 text-blue-400' : 'bg-slate-800 text-gray-400 hover:bg-slate-700')}>Hôm nay</button>
-            <button onClick={function() { handleQuickDate(quickDates.yesterday, quickDates.yesterday); }} className={'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ' + (dateFrom === quickDates.yesterday && dateTo === quickDates.yesterday ? 'bg-blue-500/20 text-blue-400' : 'bg-slate-800 text-gray-400 hover:bg-slate-700')}>Hôm qua</button>
-            <button onClick={function() { handleQuickDate(quickDates.sevenDaysAgo, quickDates.today); }} className={'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ' + (dateFrom === quickDates.sevenDaysAgo && dateTo === quickDates.today ? 'bg-blue-500/20 text-blue-400' : 'bg-slate-800 text-gray-400 hover:bg-slate-700')}>7 ngày</button>
-            <button onClick={function() { handleQuickDate(quickDates.monthStart, quickDates.today); }} className={'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ' + (dateFrom === quickDates.monthStart && dateTo === quickDates.today ? 'bg-blue-500/20 text-blue-400' : 'bg-slate-800 text-gray-400 hover:bg-slate-700')}>Tháng này</button>
+      <div className="flex flex-wrap gap-2 mb-4">
+        <select value={filterMonth} onChange={function(e) { setFilterMonth(Number(e.target.value)); setPage(0); }}
+          className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5">
+          <option value={0}>Tất cả tháng</option>
+          {months.map(function(m) { return <option key={m} value={m}>Tháng {m}</option>; })}
+        </select>
+        <select value={filterShop} onChange={function(e) { setFilterShop(e.target.value); setPage(0); }}
+          className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5">
+          <option value="">Tất cả shop</option>
+          {shops.map(function(s) { return <option key={s} value={s}>{s}</option>; })}
+        </select>
+        <select value={filterResult} onChange={function(e) { setFilterResult(e.target.value); setPage(0); }}
+          className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5">
+          <option value="">Tất cả kết quả</option>
+          {resultOptions.map(function(r) { return <option key={r} value={r}>{r}</option>; })}
+        </select>
+        <select value={filterReason} onChange={function(e) { setFilterReason(e.target.value); setPage(0); }}
+          className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5">
+          <option value="">Tất cả lý do</option>
+          {reasons.map(function(r) { return <option key={r} value={r}>{r}</option>; })}
+        </select>
+        {activeTab === 'data' && (
+          <input type="text" placeholder="Tìm khách / mã đơn / sản phẩm..."
+            value={search} onChange={function(e) { setSearch(e.target.value); setPage(0); }}
+            className="bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-1.5 w-64" />
+        )}
+        {(filterMonth || filterShop || filterResult || filterReason || search) && (
+          <button onClick={function() { setFilterMonth(0); setFilterShop(''); setFilterResult(''); setFilterReason(''); setSearch(''); setPage(0); }}
+            className="text-xs text-slate-400 hover:text-white px-2">Xoa bo loc</button>
+        )}
+        {filtered.length !== records.length && (
+          <span className="text-xs text-slate-500 self-center ml-2">{filtered.length.toLocaleString()} / {records.length.toLocaleString()}</span>
+        )}
+      </div>
+
+      {/* Dashboard Tab */}
+      {activeTab === 'dashboard' && (
+        <div className="space-y-6">
+          {/* KPI Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
+              <p className="text-slate-400 text-xs mb-1">Tong danh gia xau</p>
+              <p className="text-2xl font-bold text-white">{stats.total.toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
+              <p className="text-slate-400 text-xs mb-1">Da xu ly</p>
+              <p className="text-2xl font-bold text-emerald-400">{stats.processed.toLocaleString()}</p>
+              <p className="text-xs text-slate-500">{stats.total > 0 ? Math.round(stats.processed / stats.total * 100) : 0}%</p>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
+              <p className="text-slate-400 text-xs mb-1">Khach da sua sao</p>
+              <p className="text-2xl font-bold text-blue-400">{stats.fixed.toLocaleString()}</p>
+              <p className="text-xs text-slate-500">{stats.total > 0 ? Math.round(stats.fixed / stats.total * 100) : 0}% thanh cong</p>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
+              <p className="text-slate-400 text-xs mb-1">Ton dong</p>
+              <p className="text-2xl font-bold text-amber-400">{stats.pending.toLocaleString()}</p>
+            </div>
+            <div className="bg-slate-800/60 rounded-xl p-4 border border-slate-700/50">
+              <p className="text-slate-400 text-xs mb-1">Tong hoan tien</p>
+              <p className="text-2xl font-bold text-rose-400">{stats.totalRefund > 0 ? (stats.totalRefund / 1000).toFixed(0) + 'K' : '0'}</p>
+              <p className="text-xs text-slate-500">{stats.totalRefund.toLocaleString()}d</p>
+            </div>
           </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Từ ngày</label>
-            <input type="date" value={dateFrom} onChange={function(e) { setDateFrom(e.target.value); }} className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-gray-200" />
+
+          {/* Charts Row 1 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-700/30">
+              <h3 className="text-sm font-semibold text-slate-300 mb-3">Danh gia xau theo Shop</h3>
+              <HBar items={shopBreakdown} />
+            </div>
+            <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-700/30">
+              <h3 className="text-sm font-semibold text-slate-300 mb-3">Ly do danh gia xau</h3>
+              <DonutChart items={reasonBreakdown} />
+            </div>
           </div>
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Đến ngày</label>
-            <input type="date" value={dateTo} onChange={function(e) { setDateTo(e.target.value); }} className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-gray-200" />
+
+          {/* Charts Row 2 */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-700/30">
+              <h3 className="text-sm font-semibold text-slate-300 mb-3">Top san pham bi review xau</h3>
+              <HBar items={productBreakdown} colorFn={function() { return 'bg-rose-500'; }} />
+            </div>
+            <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-700/30">
+              <h3 className="text-sm font-semibold text-slate-300 mb-3">Nhan vien xu ly</h3>
+              {handlerBreakdown.length > 0 ? (
+                <div className="space-y-2">
+                  {handlerBreakdown.map(function(h) {
+                    return (
+                      <div key={h.name} className="flex items-center gap-2">
+                        <div className="w-24 text-xs text-slate-400 truncate text-right">{h.name}</div>
+                        <div className="flex-1 h-5 bg-slate-800 rounded overflow-hidden flex">
+                          <div className="bg-emerald-600 h-full" style={{ width: (h.total > 0 ? h.fixed / h.total * 100 : 0) + '%' }} />
+                          <div className="bg-slate-600 h-full flex-1" />
+                        </div>
+                        <div className="w-20 text-xs text-slate-300 text-right">{h.fixed}/{h.total} ({h.rate}%)</div>
+                      </div>
+                    );
+                  })}
+                  <div className="flex items-center gap-2 text-xs text-slate-500 mt-1">
+                    <span className="w-3 h-3 bg-emerald-600 rounded-sm inline-block" /> Da sua sao
+                    <span className="w-3 h-3 bg-slate-600 rounded-sm inline-block ml-2" /> Chua sua
+                  </div>
+                </div>
+              ) : <p className="text-slate-500 text-sm">Khong co du lieu</p>}
+            </div>
           </div>
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Shop</label>
-            <select value={shopFilter} onChange={function(e) { setShopFilter(e.target.value); }} className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-gray-200">
-              <option value="all">Tất cả shop</option>
-              {userShops.map(function(s) {
-                return <option key={s.id} value={s.id}>{s.name}</option>;
-              })}
-            </select>
-          </div>
-          {currentUser.role === 'admin' && (
-            <div>
-              <label className="text-xs text-gray-500 block mb-1">Nhân viên</label>
-              <select value={employeeFilter} onChange={function(e) { setEmployeeFilter(e.target.value); }} className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-gray-200">
-                <option value="all">Tất cả</option>
-                {employees.map(function(emp) {
-                  return <option key={emp.id} value={emp.id}>{emp.name}</option>;
-                })}
-              </select>
+
+          {/* Monthly Trend */}
+          {monthlyTrend.length > 1 && (
+            <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-700/30">
+              <h3 className="text-sm font-semibold text-slate-300 mb-3">Xu huong theo thang</h3>
+              <div className="flex items-end gap-2 h-32">
+                {(function() {
+                  var maxVal = Math.max(...monthlyTrend.map(function(d) { return d.total; }));
+                  return monthlyTrend.map(function(d) {
+                    var h = maxVal > 0 ? (d.total / maxVal) * 100 : 0;
+                    var fixedH = maxVal > 0 ? (d.fixed / maxVal) * 100 : 0;
+                    return (
+                      <div key={d.month} className="flex-1 flex flex-col items-center gap-1">
+                        <div className="text-xs text-slate-400">{d.total}</div>
+                        <div className="w-full flex flex-col justify-end" style={{ height: '80px' }}>
+                          <div className="w-full bg-blue-600/30 rounded-t relative" style={{ height: h + '%' }}>
+                            <div className="absolute bottom-0 w-full bg-emerald-500/60 rounded-t" style={{ height: (d.total > 0 ? fixedH / h * 100 : 0) + '%' }} />
+                          </div>
+                        </div>
+                        <div className="text-xs text-slate-500">T{d.month}</div>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+              <div className="flex items-center gap-4 text-xs text-slate-500 mt-2 justify-center">
+                <span><span className="inline-block w-3 h-3 bg-blue-600/30 rounded-sm mr-1" /> Tong review xau</span>
+                <span><span className="inline-block w-3 h-3 bg-emerald-500/60 rounded-sm mr-1" /> Da sua sao</span>
+              </div>
             </div>
           )}
-          <div>
-            <label className="text-xs text-gray-500 block mb-1">Trạng thái</label>
-            <select value={statusFilter} onChange={function(e) { setStatusFilter(e.target.value); }} className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-gray-200">
-              <option value="all">Tất cả</option>
-              {activeTab === 'reviews'
-                ? REVIEW_STATUSES.map(function(s) { return <option key={s} value={s}>{s}</option>; })
-                : ISSUE_STATUSES.map(function(s) { return <option key={s} value={s}>{s}</option>; })
-              }
-            </select>
-          </div>
         </div>
-      </div>
+      )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-4">
-        <button onClick={function() { setActiveTab('reviews'); setStatusFilter('all'); }} className={'px-4 py-2 rounded-t-lg text-sm font-medium transition-colors ' + (activeTab === 'reviews' ? 'bg-slate-900 text-blue-400 border border-slate-700/50 border-b-0' : 'bg-slate-800/50 text-gray-400 hover:text-gray-300')}>
-          Đánh giá xấu ({filteredReviews.length})
-        </button>
-        <button onClick={function() { setActiveTab('issues'); setStatusFilter('all'); }} className={'px-4 py-2 rounded-t-lg text-sm font-medium transition-colors ' + (activeTab === 'issues' ? 'bg-slate-900 text-blue-400 border border-slate-700/50 border-b-0' : 'bg-slate-800/50 text-gray-400 hover:text-gray-300')}>
-          Vấn đề phát sinh ({filteredIssues.length})
-        </button>
-      </div>
-
-      {/* Tab Content */}
-      <div className="bg-slate-900 border border-slate-700/50 rounded-xl rounded-tl-none overflow-hidden">
-        {activeTab === 'reviews' && (
-          <div className="overflow-x-auto">
-            {filteredReviews.length === 0 ? (
-              <div className="p-8 text-center text-gray-500 text-sm">Không có đánh giá xấu trong khoảng thời gian này</div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-700/50">
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Ngày</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Shop</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Mã đơn</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Sao</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Nội dung</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Cách xử lý</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Trạng thái</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Kết quả</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Người báo</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredReviews.map(function(r) {
-                    const isEditing = editingReviewId === r.id;
-                    return (
-                      <tr key={r.id} className="border-b border-slate-800 hover:bg-slate-800/50 transition-colors">
-                        <td className="px-4 py-3 text-gray-300 whitespace-nowrap">{r.date}</td>
-                        <td className="px-4 py-3 text-gray-300 whitespace-nowrap">{shopMap[r.shopId] || r.shopId}</td>
-                        <td className="px-4 py-3 text-gray-300 font-mono text-xs">{r.orderCode}</td>
-                        <td className="px-4 py-3"><StarDisplay stars={r.initialStars} /></td>
-                        <td className="px-4 py-3 text-gray-400 max-w-[200px] truncate" title={r.reviewContent}>{r.reviewContent}</td>
-                        <td className="px-4 py-3">
-                          {isEditing ? (
-                            <select value={editReviewMethod} onChange={function(e) { setEditReviewMethod(e.target.value); }} className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-gray-200 w-24">
-                              {REVIEW_METHODS.map(function(m) { return <option key={m} value={m}>{m}</option>; })}
-                            </select>
-                          ) : (
-                            <span className="text-gray-400 text-xs">{r.resolutionMethod}</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {isEditing ? (
-                            <select value={editReviewStatus} onChange={function(e) { setEditReviewStatus(e.target.value); }} className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-gray-200 w-full">
-                              {REVIEW_STATUSES.map(function(s) { return <option key={s} value={s}>{s}</option>; })}
-                            </select>
-                          ) : (
-                            <StatusBadge status={r.status} />
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {isEditing ? (
-                            <select value={editReviewResult} onChange={function(e) { setEditReviewResult(e.target.value); }} className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-gray-200 w-full">
-                              <option value="">--</option>
-                              {REVIEW_RESULTS.map(function(s) { return <option key={s} value={s}>{s}</option>; })}
-                            </select>
-                          ) : (
-                            <ResultBadge result={r.result} />
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{userMap[r.reporterId] || r.reporterId}</td>
-                        <td className="px-4 py-3">
-                          {isEditing ? (
-                            <div className="flex gap-1">
-                              <button onClick={function() { saveEditReview(r); }} className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs hover:bg-emerald-500/30">Lưu</button>
-                              <button onClick={function() { setEditingReviewId(null); }} className="px-2 py-1 bg-slate-700 text-gray-400 rounded text-xs hover:bg-slate-600">Huỷ</button>
-                            </div>
-                          ) : (
-                            <button onClick={function() { startEditReview(r); }} className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs hover:bg-blue-500/30">Cập nhật</button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
+      {/* Data Tab */}
+      {activeTab === 'data' && (
+        <div>
+          <div className="overflow-x-auto rounded-lg border border-slate-700/50">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-slate-800/80 text-slate-400 text-xs">
+                  <th className="px-3 py-2 text-left">Ngay</th>
+                  <th className="px-3 py-2 text-left">Shop</th>
+                  <th className="px-3 py-2 text-left">Khach hang</th>
+                  <th className="px-3 py-2 text-left">SDT</th>
+                  <th className="px-3 py-2 text-left">San pham</th>
+                  <th className="px-3 py-2 text-center">Sao</th>
+                  <th className="px-3 py-2 text-left">Ly do</th>
+                  <th className="px-3 py-2 text-left">Ket qua</th>
+                  <th className="px-3 py-2 text-left">Trang thai</th>
+                  <th className="px-3 py-2 text-left">NV xu ly</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paged.length === 0 ? (
+                  <tr><td colSpan={10} className="text-center py-8 text-slate-500">Khong co du lieu</td></tr>
+                ) : paged.map(function(r, i) {
+                  return (
+                    <tr key={r.recordId + '-' + i} className="border-t border-slate-800 hover:bg-slate-800/40">
+                      <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{r.date}</td>
+                      <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{r.shop}</td>
+                      <td className="px-3 py-2 text-white max-w-[120px] truncate" title={r.customerName}>{r.customerName}</td>
+                      <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{r.phone}</td>
+                      <td className="px-3 py-2 text-slate-300 max-w-[150px] truncate" title={r.product}>{r.product}</td>
+                      <td className="px-3 py-2 text-center whitespace-nowrap">
+                        <StarDisplay count={r.initialStars} />
+                        {r.fixedStars > 0 && <span className="text-slate-500 mx-1">&rarr;</span>}
+                        {r.fixedStars > 0 && <StarDisplay count={r.fixedStars} />}
+                      </td>
+                      <td className="px-3 py-2 text-slate-400 max-w-[150px] truncate" title={r.badReviewReason}>{r.badReviewReason}</td>
+                      <td className="px-3 py-2"><ResultBadge result={r.processingResult} /></td>
+                      <td className="px-3 py-2"><StatusBadge status={r.customerStatus} /></td>
+                      <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{r.handler}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        )}
-
-        {activeTab === 'issues' && (
-          <div className="overflow-x-auto">
-            {filteredIssues.length === 0 ? (
-              <div className="p-8 text-center text-gray-500 text-sm">Không có vấn đề phát sinh trong khoảng thời gian này</div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-700/50">
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Ngày</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Shop</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Mã đơn</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Loại</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Mô tả</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Độ khẩn</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Trạng thái</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Can thiệp</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500">Người báo</th>
-                    <th className="text-left px-4 py-3 text-xs font-medium text-gray-500"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredIssues.map(function(issue) {
-                    const isEditing = editingIssueId === issue.id;
-                    return (
-                      <tr key={issue.id} className={'border-b border-slate-800 hover:bg-slate-800/50 transition-colors' + (issue.needsIntervention && issue.status !== 'Đã xong' ? ' bg-red-500/5' : '')}>
-                        <td className="px-4 py-3 text-gray-300 whitespace-nowrap">{issue.date}</td>
-                        <td className="px-4 py-3 text-gray-300 whitespace-nowrap">{shopMap[issue.shopId] || issue.shopId}</td>
-                        <td className="px-4 py-3 text-gray-300 font-mono text-xs">{issue.orderCode}</td>
-                        <td className="px-4 py-3 text-gray-400 text-xs">{issue.issueType}</td>
-                        <td className="px-4 py-3 text-gray-400 max-w-[200px] truncate" title={issue.description}>{issue.description}</td>
-                        <td className="px-4 py-3">
-                          {isEditing ? (
-                            <select value={editIssueUrgency} onChange={function(e) { setEditIssueUrgency(e.target.value); }} className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-gray-200">
-                              {ISSUE_URGENCIES.map(function(u) { return <option key={u} value={u}>{u}</option>; })}
-                            </select>
-                          ) : (
-                            <UrgencyBadge urgency={issue.urgency} />
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {isEditing ? (
-                            <select value={editIssueStatus} onChange={function(e) { setEditIssueStatus(e.target.value); }} className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-xs text-gray-200">
-                              {ISSUE_STATUSES.map(function(s) { return <option key={s} value={s}>{s}</option>; })}
-                            </select>
-                          ) : (
-                            <StatusBadge status={issue.status} />
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {isEditing ? (
-                            <label className="flex items-center gap-1 text-xs text-gray-300">
-                              <input type="checkbox" checked={editIssueIntervention} onChange={function(e) { setEditIssueIntervention(e.target.checked); }} className="rounded" />
-                              Cần
-                            </label>
-                          ) : (
-                            issue.needsIntervention ? <span className="text-xs text-red-400 font-medium">Cần can thiệp</span> : <span className="text-xs text-gray-500">-</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">{userMap[issue.reporterId] || issue.reporterId}</td>
-                        <td className="px-4 py-3">
-                          {isEditing ? (
-                            <div className="flex gap-1">
-                              <button onClick={function() { saveEditIssue(issue); }} className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs hover:bg-emerald-500/30">Lưu</button>
-                              <button onClick={function() { setEditingIssueId(null); }} className="px-2 py-1 bg-slate-700 text-gray-400 rounded text-xs hover:bg-slate-600">Huỷ</button>
-                            </div>
-                          ) : (
-                            <button onClick={function() { startEditIssue(issue); }} className="px-2 py-1 bg-blue-500/20 text-blue-400 rounded text-xs hover:bg-blue-500/30">Cập nhật</button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
-      </div>
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4">
+              <p className="text-xs text-slate-500">
+                Trang {page + 1}/{totalPages} — {filtered.length.toLocaleString()} ban ghi
+              </p>
+              <div className="flex gap-1">
+                <button onClick={function() { setPage(Math.max(0, page - 1)); }} disabled={page === 0}
+                  className="px-3 py-1 bg-slate-800 text-slate-300 rounded text-xs hover:bg-slate-700 disabled:opacity-30">Truoc</button>
+                <button onClick={function() { setPage(Math.min(totalPages - 1, page + 1)); }} disabled={page >= totalPages - 1}
+                  className="px-3 py-1 bg-slate-800 text-slate-300 rounded text-xs hover:bg-slate-700 disabled:opacity-30">Sau</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
