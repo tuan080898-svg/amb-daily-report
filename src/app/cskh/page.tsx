@@ -226,12 +226,16 @@ export default function CskhPage() {
     });
   }, [refundRecords, filterDateFrom, filterDateTo, filterShop, filterHandler, search]);
 
-  var activeList = activeTab === 'refund' ? filteredRefund : filtered;
-  var paged = useMemo(function() {
-    return activeList.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  }, [activeList, page]);
+  var pagedCskh = useMemo(function() {
+    return filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  }, [filtered, page]);
 
-  var totalPages = Math.ceil(activeList.length / PAGE_SIZE);
+  var pagedRefund = useMemo(function() {
+    return filteredRefund.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  }, [filteredRefund, page]);
+
+  var activeCount = activeTab === 'refund' ? filteredRefund.length : filtered.length;
+  var totalPages = Math.ceil(activeCount / PAGE_SIZE);
 
   var stats = useMemo(function() {
     var total = filtered.length;
@@ -547,9 +551,9 @@ export default function CskhPage() {
                 </tr>
               </thead>
               <tbody>
-                {paged.length === 0 ? (
+                {pagedCskh.length === 0 ? (
                   <tr><td colSpan={10} className="text-center py-8 text-slate-500">Không có dữ liệu</td></tr>
-                ) : paged.map(function(r, i) {
+                ) : pagedCskh.map(function(r, i) {
                   return (
                     <tr key={r.recordId + '-' + i} className="border-t border-slate-800 hover:bg-slate-800/40">
                       <td className="px-3 py-2 text-slate-300 whitespace-nowrap">{r.date}</td>
@@ -576,7 +580,7 @@ export default function CskhPage() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between mt-4">
               <p className="text-xs text-slate-500">
-                Trang {page + 1}/{totalPages} — {activeList.length.toLocaleString()} bản ghi
+                Trang {page + 1}/{totalPages} — {activeCount.toLocaleString()} bản ghi
               </p>
               <div className="flex gap-1">
                 <button onClick={function() { setPage(Math.max(0, page - 1)); }} disabled={page === 0}
@@ -631,9 +635,9 @@ export default function CskhPage() {
                 </tr>
               </thead>
               <tbody>
-                {paged.length === 0 ? (
+                {pagedRefund.length === 0 ? (
                   <tr><td colSpan={11} className="text-center py-8 text-slate-500">Không có dữ liệu</td></tr>
-                ) : (paged as RefundRecord[]).map(function(r, i) {
+                ) : pagedRefund.map(function(r, i) {
                   var statusColor = r.status === 'Đã hoàn tiền' ? 'bg-emerald-900/50 text-emerald-400' : 'bg-amber-900/50 text-amber-400';
                   return (
                     <tr key={r.recordId + '-' + i} className="border-t border-slate-800 hover:bg-slate-800/40">
@@ -659,7 +663,7 @@ export default function CskhPage() {
           {totalPages > 1 && (
             <div className="flex items-center justify-between mt-4">
               <p className="text-xs text-slate-500">
-                Trang {page + 1}/{totalPages} — {activeList.length.toLocaleString()} bản ghi
+                Trang {page + 1}/{totalPages} — {activeCount.toLocaleString()} bản ghi
               </p>
               <div className="flex gap-1">
                 <button onClick={function() { setPage(Math.max(0, page - 1)); }} disabled={page === 0}
