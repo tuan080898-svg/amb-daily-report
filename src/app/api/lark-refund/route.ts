@@ -63,17 +63,24 @@ function processRecord(recordId: string, tableId: string, fields: Record<string,
 
 function toLarkFields(data: Record<string, unknown>): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
-  if (data.customerName !== undefined) fields['Tên khách hàng'] = data.customerName;
-  if (data.orderCode !== undefined) fields['Mã đơn hàng'] = data.orderCode;
-  if (data.phone !== undefined) fields['Số điện thoại'] = data.phone;
-  if (data.product !== undefined) fields['Sản phẩm'] = data.product;
-  if (data.shop !== undefined) fields['Shop'] = data.shop;
-  if (data.platform !== undefined) fields['Sàn'] = data.platform;
-  if (data.refundAmount !== undefined) fields['Số tiền hoàn'] = String(Math.round(Number(data.refundAmount) / 1000));
-  if (data.refundReason !== undefined) fields['Lý do hoàn'] = data.refundReason;
-  if (data.status !== undefined) fields['Trạng thái'] = data.status;
-  if (data.handler !== undefined) fields['Người hoàn tiền'] = data.handler;
-  if (data.date !== undefined) fields['Ngày'] = new Date(data.date as string).getTime();
+  const setIfNotEmpty = (key: string, val: unknown) => {
+    if (val !== undefined && val !== null && val !== '') fields[key] = val;
+  };
+  setIfNotEmpty('Tên khách hàng', data.customerName);
+  setIfNotEmpty('Mã đơn hàng', data.orderCode);
+  setIfNotEmpty('Số điện thoại', data.phone);
+  setIfNotEmpty('Sản phẩm', data.product);
+  setIfNotEmpty('Shop', data.shop);
+  setIfNotEmpty('Sàn', data.platform);
+  if (data.refundAmount !== undefined && data.refundAmount !== '' && Number(data.refundAmount) !== 0) {
+    fields['Số tiền hoàn'] = Math.round(Number(data.refundAmount) / 1000);
+  }
+  setIfNotEmpty('Lý do hoàn', data.refundReason);
+  setIfNotEmpty('Trạng thái', data.status);
+  setIfNotEmpty('Người hoàn tiền', data.handler);
+  if (data.date && String(data.date).length >= 10) {
+    fields['Ngày'] = new Date(String(data.date)).getTime();
+  }
   if (data.imageTokens !== undefined) {
     const tokens = data.imageTokens as string[];
     if (tokens.length > 0) fields['Ảnh bill'] = tokens.map(t => ({ file_token: t }));
@@ -194,6 +201,7 @@ export async function POST(req: NextRequest) {
     }
 
     const fields = toLarkFields(data);
+    console.log('POST lark-refund payload:', JSON.stringify({ fields, targetTableId }));
 
     const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${REFUND_BASE_TOKEN}/tables/${targetTableId}/records`;
     let res = await fetch(url, {
@@ -213,7 +221,10 @@ export async function POST(req: NextRequest) {
       json = await res.json();
     }
 
-    if (json.code !== 0) throw new Error('Lark create error (code ' + json.code + '): ' + (json.msg || JSON.stringify(json)));
+    if (json.code !== 0) {
+      console.error('Lark create response:', JSON.stringify(json));
+      throw new Error('Lark create error (code ' + json.code + '): ' + (json.msg || JSON.stringify(json)));
+    }
 
     return NextResponse.json({ success: true, recordId: json.data?.record?.record_id });
   } catch (error: unknown) {
