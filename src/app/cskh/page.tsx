@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from 'react';
 
 interface RefundRecord {
   recordId: string;
+  tableId: string;
   customerName: string;
   orderCode: string;
   phone: string;
@@ -141,6 +142,86 @@ export default function CskhPage() {
   var [search, setSearch] = useState('');
   var [page, setPage] = useState(0);
   var PAGE_SIZE = 50;
+  var [editingRefund, setEditingRefund] = useState<RefundRecord | null>(null);
+  var [isNewRefund, setIsNewRefund] = useState(false);
+  var [saving, setSaving] = useState(false);
+
+  var emptyRefund: RefundRecord = {
+    recordId: '', tableId: '', customerName: '', orderCode: '', phone: '',
+    product: '', shop: '', platform: '', refundAmount: 0, refundReason: '',
+    status: '', handler: '', date: new Date().toISOString().split('T')[0],
+  };
+
+  function openNewRefund() {
+    setEditingRefund({ ...emptyRefund });
+    setIsNewRefund(true);
+  }
+
+  function openEditRefund(r: RefundRecord) {
+    setEditingRefund({ ...r });
+    setIsNewRefund(false);
+  }
+
+  function closeModal() {
+    setEditingRefund(null);
+    setIsNewRefund(false);
+  }
+
+  function saveRefund() {
+    if (!editingRefund) return;
+    setSaving(true);
+    var isNew = isNewRefund;
+    var method = isNew ? 'POST' : 'PUT';
+    var payload = isNew
+      ? {
+          tableId: editingRefund.tableId || undefined,
+          customerName: editingRefund.customerName,
+          orderCode: editingRefund.orderCode,
+          phone: editingRefund.phone,
+          product: editingRefund.product,
+          shop: editingRefund.shop,
+          platform: editingRefund.platform,
+          refundAmount: editingRefund.refundAmount,
+          refundReason: editingRefund.refundReason,
+          status: editingRefund.status,
+          handler: editingRefund.handler,
+          date: editingRefund.date,
+        }
+      : {
+          recordId: editingRefund.recordId,
+          tableId: editingRefund.tableId,
+          customerName: editingRefund.customerName,
+          orderCode: editingRefund.orderCode,
+          phone: editingRefund.phone,
+          product: editingRefund.product,
+          shop: editingRefund.shop,
+          platform: editingRefund.platform,
+          refundAmount: editingRefund.refundAmount,
+          refundReason: editingRefund.refundReason,
+          status: editingRefund.status,
+          handler: editingRefund.handler,
+          date: editingRefund.date,
+        };
+
+    fetch('/api/lark-refund', {
+      method: method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.error) { alert('Lỗi: ' + data.error); return; }
+        closeModal();
+        fetchData();
+      })
+      .catch(function(e) { alert('Lỗi: ' + e.message); })
+      .finally(function() { setSaving(false); });
+  }
+
+  function updateEditField(field: keyof RefundRecord, value: string | number) {
+    if (!editingRefund) return;
+    setEditingRefund({ ...editingRefund, [field]: value });
+  }
 
   useEffect(function() {
     fetchData();
@@ -655,6 +736,14 @@ export default function CskhPage() {
             </div>
           </div>
 
+          <div className="flex justify-end mb-2">
+            <button onClick={openNewRefund}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 text-sm flex items-center gap-2">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+              Thêm mới
+            </button>
+          </div>
+
           <div className="overflow-x-auto rounded-lg border border-slate-700/50">
             <table className="w-full text-sm">
               <thead>
@@ -670,11 +759,12 @@ export default function CskhPage() {
                   <th className="px-3 py-2 text-left">Lý do</th>
                   <th className="px-3 py-2 text-left">Trạng thái</th>
                   <th className="px-3 py-2 text-left">Người hoàn</th>
+                  <th className="px-3 py-2 text-center w-16"></th>
                 </tr>
               </thead>
               <tbody>
                 {pagedRefund.length === 0 ? (
-                  <tr><td colSpan={11} className="text-center py-8 text-slate-500">Không có dữ liệu</td></tr>
+                  <tr><td colSpan={12} className="text-center py-8 text-slate-500">Không có dữ liệu</td></tr>
                 ) : pagedRefund.map(function(r, i) {
                   var statusColor = r.status === 'Đã hoàn tiền' ? 'bg-emerald-900/50 text-emerald-400' : 'bg-amber-900/50 text-amber-400';
                   return (
@@ -692,6 +782,10 @@ export default function CskhPage() {
                       </td>
                       <td className="px-3 py-2"><span className={'px-2 py-0.5 rounded text-xs font-medium ' + statusColor}>{r.status || '—'}</span></td>
                       <td className="px-3 py-2 text-slate-400 whitespace-nowrap">{r.handler}</td>
+                      <td className="px-3 py-2 text-center">
+                        <button onClick={function() { openEditRefund(r); }}
+                          className="text-blue-400 hover:text-blue-300 text-xs px-2 py-1 rounded hover:bg-slate-700/50">Sửa</button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -711,6 +805,101 @@ export default function CskhPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Edit/Create Refund Modal */}
+      {editingRefund && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={closeModal}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={function(e) { e.stopPropagation(); }}>
+            <div className="flex items-center justify-between p-4 border-b border-slate-700">
+              <h2 className="text-lg font-semibold text-white">{isNewRefund ? 'Thêm đơn trả hàng' : 'Sửa đơn trả hàng'}</h2>
+              <button onClick={closeModal} className="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+            </div>
+            <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Ngày</label>
+                <input type="date" value={editingRefund.date}
+                  onChange={function(e) { updateEditField('date', e.target.value); }}
+                  className="w-full bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-2" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Tên khách hàng</label>
+                <input type="text" value={editingRefund.customerName}
+                  onChange={function(e) { updateEditField('customerName', e.target.value); }}
+                  className="w-full bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-2" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Mã đơn hàng</label>
+                <input type="text" value={editingRefund.orderCode}
+                  onChange={function(e) { updateEditField('orderCode', e.target.value); }}
+                  className="w-full bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-2" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Số điện thoại</label>
+                <input type="text" value={editingRefund.phone}
+                  onChange={function(e) { updateEditField('phone', e.target.value); }}
+                  className="w-full bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-2" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-xs text-slate-400 block mb-1">Sản phẩm</label>
+                <input type="text" value={editingRefund.product}
+                  onChange={function(e) { updateEditField('product', e.target.value); }}
+                  className="w-full bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-2" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Shop</label>
+                <input type="text" value={editingRefund.shop}
+                  onChange={function(e) { updateEditField('shop', e.target.value); }}
+                  className="w-full bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-2" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Sàn</label>
+                <input type="text" value={editingRefund.platform}
+                  onChange={function(e) { updateEditField('platform', e.target.value); }}
+                  className="w-full bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-2" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Số tiền hoàn (đ)</label>
+                <input type="number" value={editingRefund.refundAmount}
+                  onChange={function(e) { updateEditField('refundAmount', Number(e.target.value)); }}
+                  className="w-full bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-2" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Người hoàn tiền</label>
+                <input type="text" value={editingRefund.handler}
+                  onChange={function(e) { updateEditField('handler', e.target.value); }}
+                  className="w-full bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-2" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="text-xs text-slate-400 block mb-1">Lý do hoàn</label>
+                <textarea value={editingRefund.refundReason} rows={2}
+                  onChange={function(e) { updateEditField('refundReason', e.target.value); }}
+                  className="w-full bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-2 resize-none" />
+              </div>
+              <div>
+                <label className="text-xs text-slate-400 block mb-1">Trạng thái</label>
+                <select value={editingRefund.status}
+                  onChange={function(e) { updateEditField('status', e.target.value); }}
+                  className="w-full bg-slate-800 border border-slate-700 text-sm text-slate-300 rounded px-3 py-2">
+                  <option value="">-- Chọn --</option>
+                  <option value="Đã hoàn tiền">Đã hoàn tiền</option>
+                  <option value="Chưa hoàn tiền">Chưa hoàn tiền</option>
+                  {refundStatuses.filter(function(s) { return s !== 'Đã hoàn tiền' && s !== 'Chưa hoàn tiền'; }).map(function(s) {
+                    return <option key={s} value={s}>{s}</option>;
+                  })}
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 p-4 border-t border-slate-700">
+              <button onClick={closeModal} className="px-4 py-2 text-sm text-slate-400 hover:text-white rounded-lg hover:bg-slate-800">Huỷ</button>
+              <button onClick={saveRefund} disabled={saving}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-500 disabled:opacity-50 flex items-center gap-2">
+                {saving && <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                {isNewRefund ? 'Tạo mới' : 'Lưu thay đổi'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

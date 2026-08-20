@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, NextRequest } from 'next/server';
 
 const LARK_APP_ID = process.env.LARK_APP_ID || '';
 const LARK_APP_SECRET = process.env.LARK_APP_SECRET || '';
@@ -23,6 +23,7 @@ async function getTenantToken(): Promise<string> {
 
 export interface RefundRecord {
   recordId: string;
+  tableId: string;
   customerName: string;
   orderCode: string;
   phone: string;
@@ -36,7 +37,7 @@ export interface RefundRecord {
   date: string;
 }
 
-function processRecord(recordId: string, fields: Record<string, unknown>): RefundRecord | null {
+function processRecord(recordId: string, tableId: string, fields: Record<string, unknown>): RefundRecord | null {
   const dateMs = fields['Ngày'] as number | undefined;
   const date = dateMs ? new Date(dateMs).toISOString().split('T')[0] : '';
   const customerName = (fields['Tên khách hàng'] as string) || '';
@@ -44,6 +45,7 @@ function processRecord(recordId: string, fields: Record<string, unknown>): Refun
 
   return {
     recordId,
+    tableId,
     customerName,
     orderCode: (fields['Mã đơn hàng'] as string) || '',
     phone: (fields['Số điện thoại'] as string) || '',
@@ -56,6 +58,22 @@ function processRecord(recordId: string, fields: Record<string, unknown>): Refun
     handler: (fields['Người hoàn tiền'] as string) || '',
     date,
   };
+}
+
+function toLarkFields(data: Record<string, unknown>): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  if (data.customerName !== undefined) fields['Tên khách hàng'] = data.customerName;
+  if (data.orderCode !== undefined) fields['Mã đơn hàng'] = data.orderCode;
+  if (data.phone !== undefined) fields['Số điện thoại'] = data.phone;
+  if (data.product !== undefined) fields['Sản phẩm'] = data.product;
+  if (data.shop !== undefined) fields['Shop'] = data.shop;
+  if (data.platform !== undefined) fields['Sàn'] = data.platform;
+  if (data.refundAmount !== undefined) fields['Số tiền hoàn'] = String(Math.round(Number(data.refundAmount) / 1000));
+  if (data.refundReason !== undefined) fields['Lý do hoàn'] = data.refundReason;
+  if (data.status !== undefined) fields['Trạng thái'] = data.status;
+  if (data.handler !== undefined) fields['Người hoàn tiền'] = data.handler;
+  if (data.date !== undefined) fields['Ngày'] = new Date(data.date as string).getTime();
+  return fields;
 }
 
 async function fetchTableRecords(token: string, tableId: string): Promise<RefundRecord[]> {
@@ -72,7 +90,7 @@ async function fetchTableRecords(token: string, tableId: string): Promise<Refund
     if (json.code !== 0) break;
 
     for (const item of (json.data.items || [])) {
-      const rec = processRecord(item.record_id, item.fields);
+      const rec = processRecord(item.record_id, tableId, item.fields);
       if (rec) records.push(rec);
     }
 
@@ -82,14 +100,12 @@ async function fetchTableRecords(token: string, tableId: string): Promise<Refund
   return records;
 }
 
-async function listMonthlyTables(token: string): Promise<string[]> {
+async function listTables(token: string): Promise<{ table_id: string; name: string }[]> {
   const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${REFUND_BASE_TOKEN}/tables`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   const json = await res.json();
   if (json.code !== 0) throw new Error('Lark list tables error: ' + json.msg);
-
-  return (json.data.items || [])
-    .map((t: { table_id: string }) => t.table_id);
+  return json.data.items || [];
 }
 
 export async function GET() {
@@ -98,7 +114,8 @@ export async function GET() {
       return NextResponse.json({ error: 'Lark refund credentials not configured' }, { status: 500 });
     }
     const token = await getTenantToken();
-    const tableIds = await listMonthlyTables(token);
+    const tables = await listTables(token);
+    const tableIds = tables.map(t => t.table_id);
     const allRecords: RefundRecord[] = [];
 
     for (const tableId of tableIds) {
@@ -109,6 +126,77 @@ export async function GET() {
     allRecords.sort(function(a, b) { return b.date.localeCompare(a.date); });
 
     return NextResponse.json({ records: allRecords, total: allRecords.length });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Unknown error';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function PUT(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { recordId, tableId, ...data } = body;
+    if (!recordId || !tableId) {
+      return NextResponse.json({ error: 'recordId and tableId required' }, { status: 400 });
+    }
+
+    const token = await getTenantToken();
+    const fields = toLarkFields(data);
+
+    const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${REFUND_BASE_TOKEN}/tables/${tableId}/records/${recordId}`;
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields }),
+    });
+    const json = await res.json();
+    if (json.code !== 0) throw new Error('Lark update error: ' + json.msg);
+
+    return NextResponse.json({ success: true });
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Unknown error';
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const { tableId, ...data } = body;
+
+    const token = await getTenantToken();
+
+    let targetTableId = tableId;
+    if (!targetTableId) {
+      const tables = await listTables(token);
+      const now = new Date();
+      const monthName = `Tháng ${now.getMonth() + 1}`;
+      const yearStr = String(now.getFullYear());
+      const match = tables.find(t => t.name.includes(monthName) && t.name.includes(yearStr));
+      if (match) {
+        targetTableId = match.table_id;
+      } else {
+        const monthTables = tables.filter(t => t.name.startsWith('Tháng'));
+        targetTableId = monthTables.length > 0 ? monthTables[monthTables.length - 1].table_id : tables[0]?.table_id;
+      }
+    }
+
+    if (!targetTableId) {
+      return NextResponse.json({ error: 'No target table found' }, { status: 400 });
+    }
+
+    const fields = toLarkFields(data);
+
+    const url = `https://open.larksuite.com/open-apis/bitable/v1/apps/${REFUND_BASE_TOKEN}/tables/${targetTableId}/records`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields }),
+    });
+    const json = await res.json();
+    if (json.code !== 0) throw new Error('Lark create error: ' + json.msg);
+
+    return NextResponse.json({ success: true, recordId: json.data?.record?.record_id });
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Unknown error';
     return NextResponse.json({ error: msg }, { status: 500 });
