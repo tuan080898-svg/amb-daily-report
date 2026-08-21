@@ -222,8 +222,8 @@ export default function AdminInventoryPage() {
         productKeys.forEach(function(k) { if (!foundProductKey && headers.some(function(h) { return h.toLowerCase() === k.toLowerCase(); })) foundProductKey = headers.find(function(h) { return h.toLowerCase() === k.toLowerCase(); }) || ''; });
         if (!foundProductKey) { alert('Không tìm thấy cột "Sản phẩm" trong file.\nCác cột có: ' + headers.join(', ')); return; }
 
-        var hcmKey = headers.find(function(h) { return h === 'Tồn HCM'; });
-        var hnKey = headers.find(function(h) { return h === 'Tồn HN'; });
+        var hcmKey: string | undefined = headers.find(function(h) { return h === 'Tồn HCM'; });
+        var hnKey: string | undefined = headers.find(function(h) { return h === 'Tồn HN'; });
         var isDual = !!(hcmKey && hnKey);
 
         if (!isDual) {
