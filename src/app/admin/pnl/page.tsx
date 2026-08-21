@@ -155,6 +155,31 @@ export default function PnlPage() {
     return t;
   }, [pnlRows]);
 
+  var dailyProfit = useMemo(function() {
+    var map = new Map<string, { date: string; revenue: number; profit: number; shops: Set<string> }>();
+    pnlRows.forEach(function(r) {
+      var existing = map.get(r.date);
+      if (existing) {
+        existing.revenue += r.revenue;
+        existing.profit += r.profit;
+        existing.shops.add(r.shopName);
+      } else {
+        var shops = new Set<string>();
+        shops.add(r.shopName);
+        map.set(r.date, { date: r.date, revenue: r.revenue, profit: r.profit, shops: shops });
+      }
+    });
+    return Array.from(map.values()).sort(function(a, b) { return a.date.localeCompare(b.date); });
+  }, [pnlRows]);
+
+  var dailyProfitStats = useMemo(function() {
+    if (dailyProfit.length === 0) return { avg: 0, stdDev: 0 };
+    var sum = dailyProfit.reduce(function(s, d) { return s + d.profit; }, 0);
+    var avg = sum / dailyProfit.length;
+    var variance = dailyProfit.reduce(function(s, d) { return s + Math.pow(d.profit - avg, 2); }, 0) / dailyProfit.length;
+    return { avg: avg, stdDev: Math.sqrt(variance) };
+  }, [dailyProfit]);
+
   var shopSummary = useMemo(function() {
     var map = new Map<string, { shopName: string; channel: string; revenue: number; cogs: number; platformFee: number; adSpend: number; opex: number; profit: number }>();
     pnlRows.forEach(function(r) {
@@ -788,6 +813,107 @@ export default function PnlPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Daily Profit Chart */}
+              {dailyProfit.length > 1 && (
+                <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-6">
+                  <div className="flex items-center justify-between mb-5">
+                    <div>
+                      <p className="text-xs font-bold text-gray-400 tracking-wider">BIỂU ĐỒ LỢI NHUẬN THEO NGÀY</p>
+                      <p className="text-xs text-gray-600 mt-1">Phát hiện nhanh ngày bất thường — cột đỏ = lỗ, cột vàng nhấp nháy = chênh lệch lớn so với TB</p>
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-gray-500">
+                      <span>TB: <span className={'font-medium ' + (dailyProfitStats.avg >= 0 ? 'text-emerald-400' : 'text-red-400')}>{fmt(Math.round(dailyProfitStats.avg))}</span>/ngày</span>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    {(function() {
+                      var days = dailyProfit;
+                      var maxAbs = Math.max.apply(null, days.map(function(d) { return Math.abs(d.profit); }).concat([1]));
+                      var chartH = 200;
+                      var barW = Math.max(16, Math.min(40, Math.floor(700 / days.length) - 4));
+                      var gap = Math.max(2, Math.min(6, Math.floor(barW * 0.15)));
+                      var totalW = days.length * (barW + gap);
+                      var zeroY = chartH / 2;
+                      var halfH = chartH / 2 - 10;
+                      var avg = dailyProfitStats.avg;
+                      var stdDev = dailyProfitStats.stdDev;
+
+                      return (
+                        <svg viewBox={'0 0 ' + Math.max(totalW + 60, 300) + ' ' + (chartH + 60)} className="w-full" style={{ minWidth: Math.max(totalW + 60, 300) + 'px' }}>
+                          {/* Zero line */}
+                          <line x1="40" y1={zeroY} x2={totalW + 50} y2={zeroY} stroke="#475569" strokeWidth="1" strokeDasharray="4,3" />
+                          <text x="36" y={zeroY + 4} textAnchor="end" fill="#64748b" fontSize="10">0</text>
+
+                          {/* Average line */}
+                          {days.length > 2 && (function() {
+                            var avgY = avg >= 0
+                              ? zeroY - (avg / maxAbs) * halfH
+                              : zeroY + (Math.abs(avg) / maxAbs) * halfH;
+                            return (
+                              <>
+                                <line x1="40" y1={avgY} x2={totalW + 50} y2={avgY} stroke={avg >= 0 ? '#22c55e' : '#ef4444'} strokeWidth="1" strokeDasharray="6,3" opacity="0.5" />
+                                <text x="36" y={avgY + 3} textAnchor="end" fill={avg >= 0 ? '#22c55e' : '#ef4444'} fontSize="9" opacity="0.7">TB</text>
+                              </>
+                            );
+                          })()}
+
+                          {/* Bars */}
+                          {days.map(function(d, i) {
+                            var x = 44 + i * (barW + gap);
+                            var isAnomaly = stdDev > 0 && Math.abs(d.profit - avg) > 1.5 * stdDev;
+                            var barH = Math.max(2, (Math.abs(d.profit) / maxAbs) * halfH);
+                            var y: number;
+                            var fillColor: string;
+                            if (d.profit >= 0) {
+                              y = zeroY - barH;
+                              fillColor = isAnomaly ? '#eab308' : '#22c55e';
+                            } else {
+                              y = zeroY;
+                              fillColor = '#ef4444';
+                            }
+                            var margin = d.revenue > 0 ? (d.profit / d.revenue * 100) : 0;
+                            var dateLabel = d.date.slice(5);
+                            return (
+                              <g key={d.date}>
+                                <rect x={x} y={y} width={barW} height={barH} rx="3" fill={fillColor} opacity={isAnomaly ? '1' : '0.8'}>
+                                  <title>{d.date + '\nLợi nhuận: ' + fmt(d.profit) + '\nDoanh thu: ' + fmt(d.revenue) + '\nBiên LN: ' + pct(margin) + '\nShop: ' + Array.from(d.shops).join(', ')}</title>
+                                </rect>
+                                {isAnomaly && (
+                                  <text x={x + barW / 2} y={d.profit >= 0 ? y - 4 : y + barH + 12} textAnchor="middle" fill={fillColor} fontSize="9" fontWeight="600">!</text>
+                                )}
+                                <text x={x + barW / 2} y={chartH + 14} textAnchor="middle" fill="#64748b" fontSize="9" transform={'rotate(0,' + (x + barW / 2) + ',' + (chartH + 14) + ')'}>{dateLabel}</text>
+                              </g>
+                            );
+                          })}
+                        </svg>
+                      );
+                    })()}
+                  </div>
+                  {/* Anomaly legend */}
+                  <div className="flex flex-wrap items-center gap-4 mt-4 pt-3 border-t border-slate-700/50">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded-sm bg-emerald-500 opacity-80"></span>
+                      <span className="text-xs text-gray-500">Lãi</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded-sm bg-red-500"></span>
+                      <span className="text-xs text-gray-500">Lỗ</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-3 h-3 rounded-sm bg-yellow-500"></span>
+                      <span className="text-xs text-gray-500">Bất thường (chênh &gt;1.5x độ lệch chuẩn)</span>
+                    </div>
+                    {dailyProfit.some(function(d) { return d.profit < 0; }) && (
+                      <div className="ml-auto px-3 py-1 rounded-lg bg-red-500/10 border border-red-500/30">
+                        <span className="text-xs text-red-400 font-medium">
+                          {dailyProfit.filter(function(d) { return d.profit < 0; }).length} ngày lỗ trong kỳ
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Shop Summary Table */}
               {shopSummary.length > 0 && (
