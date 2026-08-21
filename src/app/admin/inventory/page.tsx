@@ -32,6 +32,8 @@ export default function AdminInventoryPage() {
   const [opNote, setOpNote] = useState('');
   const [configThreshold, setConfigThreshold] = useState(10);
   const searchRef = useRef<HTMLDivElement>(null);
+  const excelInputRef = useRef<HTMLInputElement>(null);
+  const [excelPreview, setExcelPreview] = useState<Array<{ product: string; quantity: number; matched: boolean }> | null>(null);
 
   useEffect(function() { setInv(loadInventory()); }, []);
 
@@ -197,6 +199,70 @@ export default function AdminInventoryPage() {
   var historyTxs = historyProduct ? getProductTransactions(inv, historyProduct, selectedWh === 'ALL' ? undefined : selectedWh) : [];
   var historyStock = historyProduct ? getCurrentStock(inv, historyProduct, selectedWh === 'ALL' ? undefined : selectedWh) : 0;
 
+  function handleExcelFile(e: React.ChangeEvent<HTMLInputElement>) {
+    var file = e.target.files?.[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(evt) {
+      try {
+        var data = new Uint8Array(evt.target?.result as ArrayBuffer);
+        var wb = XLSX.read(data, { type: 'array' });
+        var ws = wb.Sheets[wb.SheetNames[0]];
+        var json = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws);
+        if (json.length === 0) { alert('File rỗng hoặc không đọc được'); return; }
+
+        var productSet = new Set(allProducts.map(function(p) { return p.toLowerCase(); }));
+        var productMap: Record<string, string> = {};
+        allProducts.forEach(function(p) { productMap[p.toLowerCase()] = p; });
+
+        var qtyKeys = ['Số lượng', 'SL nhập', 'SL', 'Quantity', 'Qty', 'Tồn hiện tại', 'Tồn HCM', 'Tồn HN', 'Tổng'];
+        var productKeys = ['Sản phẩm', 'Product', 'Tên sản phẩm', 'Tên SP'];
+
+        var foundProductKey = '';
+        var foundQtyKey = '';
+        var headers = Object.keys(json[0]);
+        productKeys.forEach(function(k) { if (!foundProductKey && headers.some(function(h) { return h.toLowerCase() === k.toLowerCase(); })) foundProductKey = headers.find(function(h) { return h.toLowerCase() === k.toLowerCase(); }) || ''; });
+        qtyKeys.forEach(function(k) { if (!foundQtyKey && headers.some(function(h) { return h.toLowerCase() === k.toLowerCase(); })) foundQtyKey = headers.find(function(h) { return h.toLowerCase() === k.toLowerCase(); }) || ''; });
+
+        if (!foundProductKey) { alert('Không tìm thấy cột "Sản phẩm" trong file.\nCác cột có: ' + headers.join(', ')); return; }
+        if (!foundQtyKey) { alert('Không tìm thấy cột số lượng trong file.\nCần có một trong: ' + qtyKeys.join(', ') + '\nCác cột có: ' + headers.join(', ')); return; }
+
+        var items = json.map(function(row) {
+          var name = String(row[foundProductKey] || '').trim();
+          var qty = Number(row[foundQtyKey]) || 0;
+          var matched = productSet.has(name.toLowerCase());
+          return { product: matched ? productMap[name.toLowerCase()] : name, quantity: Math.max(0, Math.round(qty)), matched: matched };
+        }).filter(function(item) { return item.product && item.quantity > 0; });
+
+        if (items.length === 0) { alert('Không có sản phẩm nào với số lượng > 0 trong file'); return; }
+        setExcelPreview(items);
+      } catch (err) {
+        alert('Lỗi đọc file: ' + (err instanceof Error ? err.message : 'Unknown'));
+      }
+    };
+    reader.readAsArrayBuffer(file);
+    e.target.value = '';
+  }
+
+  function confirmExcelImport() {
+    if (!excelPreview) return;
+    var matched = excelPreview.filter(function(item) { return item.matched; });
+    if (matched.length === 0) { alert('Không có sản phẩm nào khớp với danh sách'); return; }
+    var updated: InventoryData = { products: JSON.parse(JSON.stringify(inv.products)), transactions: inv.transactions.slice() };
+    matched.forEach(function(item) {
+      updated.transactions = updated.transactions.concat([{
+        id: 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+        date: new Date().toISOString().slice(0, 10),
+        product: item.product, quantity: item.quantity, type: 'import',
+        note: 'Nhập từ Excel', warehouse: opWh,
+      }]);
+    });
+    saveInventory(updated);
+    setInv(updated);
+    setExcelPreview(null);
+    showSuccess('Đã nhập kho ' + WAREHOUSE_LABELS[opWh] + ': ' + matched.length + ' sản phẩm từ Excel');
+  }
+
   function exportExcel() {
     var rows = productRows.map(function(row) {
       if (selectedWh === 'ALL') {
@@ -267,11 +333,19 @@ export default function AdminInventoryPage() {
             );
           })}
         </div>
-        <button onClick={exportExcel}
-          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-          Xuất Excel
-        </button>
+        <div className="flex items-center gap-2">
+          <input ref={excelInputRef} type="file" accept=".xlsx,.xls" onChange={handleExcelFile} className="hidden" />
+          <button onClick={function() { excelInputRef.current?.click(); }}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+            Nhập từ Excel
+          </button>
+          <button onClick={exportExcel}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            Xuất Excel
+          </button>
+        </div>
       </div>
 
       {successMsg && (
@@ -651,6 +725,58 @@ export default function AdminInventoryPage() {
           </div>
         )}
       </div>
+
+      {excelPreview && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+            <div className="px-6 py-4 border-b border-slate-700 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-100">Xác nhận nhập kho từ Excel</h3>
+                <p className="text-sm text-gray-400 mt-1">Nhập vào: <span className="text-blue-400 font-medium">{WAREHOUSE_LABELS[opWh]}</span> — {excelPreview.filter(function(i) { return i.matched; }).length}/{excelPreview.length} sản phẩm khớp</p>
+              </div>
+              <button onClick={function() { setExcelPreview(null); }} className="text-gray-500 hover:text-gray-300 text-xl">✕</button>
+            </div>
+            <div className="overflow-auto flex-1 px-6 py-4">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-500 border-b border-slate-700">
+                    <th className="pb-2 font-medium">Sản phẩm</th>
+                    <th className="pb-2 font-medium text-right">Số lượng</th>
+                    <th className="pb-2 font-medium text-center">Trạng thái</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {excelPreview.map(function(item, idx) {
+                    return (
+                      <tr key={idx} className={item.matched ? '' : 'opacity-50'}>
+                        <td className="py-2 text-gray-200">{item.product}</td>
+                        <td className="py-2 text-right text-gray-300">{item.quantity.toLocaleString('vi-VN')}</td>
+                        <td className="py-2 text-center">
+                          {item.matched
+                            ? <span className="inline-flex px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/15 text-emerald-400">Khớp</span>
+                            : <span className="inline-flex px-2 py-0.5 rounded text-xs font-bold bg-red-500/15 text-red-400">Không tìm thấy</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-6 py-4 border-t border-slate-700 flex items-center justify-between">
+              <p className="text-xs text-gray-500">Chỉ nhập các sản phẩm có trạng thái "Khớp"</p>
+              <div className="flex gap-3">
+                <button onClick={function() { setExcelPreview(null); }}
+                  className="px-4 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors">Hủy</button>
+                <button onClick={confirmExcelImport}
+                  disabled={excelPreview.filter(function(i) { return i.matched; }).length === 0}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm font-medium rounded-lg transition-colors">
+                  Nhập kho ({excelPreview.filter(function(i) { return i.matched; }).length} SP)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
