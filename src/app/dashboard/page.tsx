@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useMemo, Fragment } from 'react';
+import { useState, useMemo, useEffect, Fragment } from 'react';
 import { useAppState } from '@/lib/store';
 import { calculateMetrics, formatCurrency, formatPercent, getAlertBg, getAlertDot, toDateString, exportToCSV } from '@/lib/utils';
 import { Channel, Region, AlertColor } from '@/lib/types';
+import { loadInventory, getReorderAlerts, WAREHOUSE_LABELS, type InventoryData } from '@/lib/inventory';
 import dynamic from 'next/dynamic';
 
 const MonthlyCharts = dynamic(() => import('@/components/MonthlyCharts'), { ssr: false });
@@ -16,6 +17,22 @@ export default function DashboardPage() {
   const [regionFilter, setRegionFilter] = useState<Region | 'all'>('all');
   const [employeeFilter, setEmployeeFilter] = useState<string>('all');
   const [selectedShopId, setSelectedShopId] = useState<string | null>(null);
+
+  const [inv, setInv] = useState<InventoryData>({ products: {}, transactions: [] });
+  useEffect(function() { setInv(loadInventory()); }, []);
+
+  var reorderAlerts = useMemo(function() {
+    return getReorderAlerts(inv);
+  }, [inv]);
+
+  var alertsByWh = useMemo(function() {
+    var hcm = reorderAlerts.filter(function(a) { return a.warehouse === 'HCM'; });
+    var hn = reorderAlerts.filter(function(a) { return a.warehouse === 'HN'; });
+    return { HCM: hcm, HN: hn };
+  }, [reorderAlerts]);
+
+  var criticalCount = reorderAlerts.filter(function(a) { return a.urgency === 'critical'; }).length;
+  var warningCount = reorderAlerts.filter(function(a) { return a.urgency === 'warning'; }).length;
 
   const userShops = useMemo(() => {
     if (!currentUser) return [];
@@ -222,6 +239,61 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Inventory reorder alerts */}
+      {reorderAlerts.length > 0 && currentUser.role === 'admin' && (
+        <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden mb-6">
+          <div className="px-5 py-4 border-b border-slate-700/50 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <h2 className="font-semibold text-gray-100">Cảnh báo tồn kho</h2>
+              {criticalCount > 0 && (
+                <span className="px-2 py-0.5 bg-red-900/40 text-red-300 rounded text-xs font-medium">{criticalCount} khẩn cấp</span>
+              )}
+              {warningCount > 0 && (
+                <span className="px-2 py-0.5 bg-amber-900/40 text-amber-300 rounded text-xs font-medium">{warningCount} cần đặt</span>
+              )}
+            </div>
+            <a href="/admin/inventory" className="text-xs text-blue-400 hover:text-blue-300">Chi tiết &rarr;</a>
+          </div>
+          {(['HCM', 'HN'] as const).map(function(wh) {
+            var alerts = alertsByWh[wh];
+            if (alerts.length === 0) return null;
+            var critical = alerts.filter(function(a) { return a.urgency === 'critical'; });
+            var warning = alerts.filter(function(a) { return a.urgency === 'warning'; });
+            return (
+              <div key={wh} className="px-5 py-3 border-b border-slate-800 last:border-b-0">
+                <p className="text-xs font-semibold text-gray-400 mb-2">{WAREHOUSE_LABELS[wh]}</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {critical.concat(warning).slice(0, 6).map(function(alert) {
+                    return (
+                      <div key={alert.product + wh} className={'flex items-center justify-between px-3 py-2 rounded-lg text-sm ' + (alert.urgency === 'critical' ? 'bg-red-950/30 border border-red-800/30' : 'bg-amber-950/30 border border-amber-800/30')}>
+                        <div>
+                          <span className="text-gray-200">{alert.product}</span>
+                          <span className="text-xs text-gray-500 ml-2">tồn: {alert.currentStock}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className={'font-bold text-sm ' + (alert.urgency === 'critical' ? 'text-red-400' : 'text-amber-400')}>
+                            {alert.daysRemaining >= 9999 ? '—' : alert.daysRemaining + 'ngày'}
+                          </span>
+                          {alert.suggestedOrder > 0 && (
+                            <span className="text-xs text-blue-300 ml-2">+{alert.suggestedOrder.toLocaleString('vi-VN')}</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {alerts.length > 6 && (
+                  <p className="text-xs text-gray-500 mt-2">+ {alerts.length - 6} sản phẩm khác</p>
+                )}
+              </div>
+            );
+          })}
+          <div className="px-5 py-2 border-t border-slate-700/50 text-xs text-gray-500">
+            Dựa trên tốc độ bán 30 ngày. Lead time 30 ngày.
+          </div>
+        </div>
+      )}
 
       {/* Charts */}
       <div className="mb-6">
