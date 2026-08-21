@@ -160,9 +160,12 @@ export function addSaleTransactions(data: InventoryData, sales: Array<{ product:
       };
     });
   if (newTxs.length === 0) return data;
+  var cleaned = data.transactions.filter(function(t) {
+    return !(t.type === 'sale' && t.date === date && t.note === shopName && t.warehouse === wh);
+  });
   var updated = {
     products: JSON.parse(JSON.stringify(data.products)),
-    transactions: data.transactions.concat(newTxs),
+    transactions: cleaned.concat(newTxs),
   };
   saveInventory(updated);
   return updated;
