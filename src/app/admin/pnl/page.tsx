@@ -817,168 +817,156 @@ export default function PnlPage() {
               {/* Daily Profit Chart */}
               {dailyProfit.length > 1 && (function() {
                 var days = dailyProfit;
-                var maxProfit = Math.max.apply(null, days.map(function(d) { return d.profit; }).concat([1]));
-                var minProfit = Math.min.apply(null, days.map(function(d) { return d.profit; }).concat([0]));
-                var maxAbs = Math.max(Math.abs(maxProfit), Math.abs(minProfit), 1);
-                var hasNeg = minProfit < 0;
-                var avg = dailyProfitStats.avg;
-                var stdDev = dailyProfitStats.stdDev;
-                var maxBarH = hasNeg ? 120 : 180;
-                var negBarH = hasNeg ? 60 : 0;
+                var maxVal = Math.max.apply(null, days.map(function(d) { return d.profit; }).concat([1]));
+                var minVal = Math.min.apply(null, days.map(function(d) { return d.profit; }).concat([0]));
+                var hasNeg = minVal < 0;
+                var chartH = 280;
 
                 function shortNum(n: number): string {
                   var abs = Math.abs(n);
                   if (abs >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'tr';
-                  if (abs >= 1000) return (n / 1000).toFixed(0) + 'k';
-                  return String(Math.round(n));
+                  if (abs >= 100000) return (n / 1000).toFixed(0) + 'k';
+                  return String(Math.round(n / 1000)) + 'k';
                 }
 
+                function niceStep(max: number): number {
+                  var raw = max / 5;
+                  var mag = Math.pow(10, Math.floor(Math.log10(raw)));
+                  var norm = raw / mag;
+                  if (norm <= 1) return mag;
+                  if (norm <= 2) return 2 * mag;
+                  if (norm <= 5) return 5 * mag;
+                  return 10 * mag;
+                }
+
+                var step = niceStep(maxVal);
+                var yMax = Math.ceil(maxVal / step) * step;
+                var yMin = hasNeg ? -(Math.ceil(Math.abs(minVal) / step) * step) : 0;
+                var yRange = yMax - yMin;
+                if (yRange === 0) yRange = 1;
+
+                var ticks: number[] = [];
+                for (var t = yMin; t <= yMax; t += step) { ticks.push(t); }
+
                 return (
-                <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+                <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
                     <div>
-                      <p className="text-xs font-bold text-gray-400 tracking-wider">BIỂU ĐỒ LỢI NHUẬN THEO NGÀY</p>
-                      <p className="text-xs text-gray-600 mt-1">Hover cột để xem chi tiết — cột vàng = bất thường so với TB</p>
+                      <p className="text-sm font-bold text-gray-200">Biểu đồ lợi nhuận theo ngày</p>
+                      <p className="text-xs text-gray-500 mt-1">{dateFrom} → {dateTo} | {days.length} ngày | TB: {shortNum(Math.round(dailyProfitStats.avg))}/ngày</p>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/30">
-                        <span className="text-[10px] text-gray-500 uppercase tracking-wider">TB/ngày</span>
-                        <span className={'text-sm font-bold ' + (avg >= 0 ? 'text-emerald-400' : 'text-red-400')}>{shortNum(Math.round(avg))}</span>
-                      </div>
-                      {dailyProfit.some(function(d) { return d.profit < 0; }) && (
-                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30">
-                          <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
-                          <span className="text-xs text-red-400 font-medium">{dailyProfit.filter(function(d) { return d.profit < 0; }).length} ngày lỗ</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="overflow-x-auto pb-2">
-                    <div className="flex items-end gap-1" style={{ minWidth: days.length * 52 + 'px' }}>
-                      {days.map(function(d, i) {
-                        var isAnomaly = stdDev > 0 && Math.abs(d.profit - avg) > 1.5 * stdDev;
-                        var margin = d.revenue > 0 ? (d.profit / d.revenue * 100) : 0;
-                        var dateLabel = d.date.slice(8) + '/' + d.date.slice(5, 7);
-                        var barPct: number;
-                        if (d.profit >= 0) {
-                          barPct = maxProfit > 0 ? Math.max(4, (d.profit / maxProfit) * maxBarH) : 4;
-                        } else {
-                          barPct = Math.abs(minProfit) > 0 ? Math.max(4, (Math.abs(d.profit) / Math.abs(minProfit)) * negBarH) : 4;
-                        }
-
-                        var barBg = d.profit < 0
-                          ? 'linear-gradient(to top, #ef4444, #dc2626)'
-                          : isAnomaly
-                            ? 'linear-gradient(to top, #eab308, #facc15)'
-                            : 'linear-gradient(to top, #059669, #34d399)';
-                        var barBorder = d.profit < 0
-                          ? '1px solid rgba(239,68,68,0.4)'
-                          : isAnomaly
-                            ? '1px solid rgba(234,179,8,0.4)'
-                            : '1px solid rgba(52,211,153,0.3)';
-                        var textColor = d.profit < 0
-                          ? 'text-red-400'
-                          : isAnomaly
-                            ? 'text-yellow-400'
-                            : 'text-emerald-400';
-
-                        return (
-                          <div key={d.date} className="flex flex-col items-center flex-1 min-w-[46px] group relative">
-                            {/* Tooltip */}
-                            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20">
-                              <div className="bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 shadow-2xl whitespace-nowrap">
-                                <p className="text-xs font-bold text-gray-200 mb-2">{d.date}</p>
-                                <div className="space-y-1">
-                                  <div className="flex justify-between gap-4">
-                                    <span className="text-[10px] text-gray-500">Doanh thu</span>
-                                    <span className="text-[10px] text-blue-400 font-medium">{fmt(d.revenue)}</span>
-                                  </div>
-                                  <div className="flex justify-between gap-4">
-                                    <span className="text-[10px] text-gray-500">Lợi nhuận</span>
-                                    <span className={'text-[10px] font-bold ' + textColor}>{fmt(d.profit)}</span>
-                                  </div>
-                                  <div className="flex justify-between gap-4">
-                                    <span className="text-[10px] text-gray-500">Biên LN</span>
-                                    <span className={'text-[10px] font-medium ' + textColor}>{pct(margin)}</span>
-                                  </div>
-                                  <div className="flex justify-between gap-4">
-                                    <span className="text-[10px] text-gray-500">Shop</span>
-                                    <span className="text-[10px] text-gray-300">{d.shops.size} shop</span>
-                                  </div>
-                                </div>
-                                {isAnomaly && <p className="text-[10px] text-yellow-400 font-medium mt-2 pt-1.5 border-t border-slate-700">Bất thường so với TB</p>}
-                              </div>
-                              <div className="w-2 h-2 bg-slate-800 border-r border-b border-slate-600 rotate-45 absolute left-1/2 -translate-x-1/2 -bottom-1"></div>
-                            </div>
-
-                            {/* Value label */}
-                            <p className={'text-[10px] font-bold mb-1 transition-colors ' + textColor + ' opacity-70 group-hover:opacity-100'}>
-                              {shortNum(d.profit)}
-                            </p>
-
-                            {/* Bar */}
-                            {d.profit >= 0 ? (
-                              <div className="w-full flex flex-col justify-end" style={{ height: maxBarH + 'px' }}>
-                                <div
-                                  className="w-full rounded-t-lg transition-all duration-200 group-hover:scale-105 group-hover:shadow-lg"
-                                  style={{ height: barPct + 'px', background: barBg, borderTop: barBorder, borderLeft: barBorder, borderRight: barBorder }}
-                                ></div>
-                              </div>
-                            ) : (
-                              <>
-                                <div className="w-full" style={{ height: maxBarH + 'px' }}></div>
-                              </>
-                            )}
-
-                            {/* Zero line position */}
-                            {hasNeg && d.profit < 0 && (
-                              <div className="w-full flex flex-col justify-start" style={{ height: negBarH + 'px' }}>
-                                <div
-                                  className="w-full rounded-b-lg transition-all duration-200 group-hover:scale-105"
-                                  style={{ height: barPct + 'px', background: barBg, borderBottom: barBorder, borderLeft: barBorder, borderRight: barBorder }}
-                                ></div>
-                              </div>
-                            )}
-
-                            {/* Date label */}
-                            <p className="text-[10px] text-gray-600 mt-2 group-hover:text-gray-300 transition-colors font-medium">{dateLabel}</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {/* Average line overlay */}
-                    {days.length > 2 && !hasNeg && (
-                      <div className="relative" style={{ marginTop: -(maxBarH + 24) + 'px', height: '0px', pointerEvents: 'none' }}>
-                        <div
-                          className="absolute left-0 right-0 border-t-2 border-dashed"
-                          style={{
-                            borderColor: avg >= 0 ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)',
-                            top: (maxBarH - (avg > 0 ? Math.max(4, (avg / maxProfit) * maxBarH) : 0)) + 'px',
-                          }}
-                        >
-                          <span className="absolute -top-3 right-0 text-[9px] px-1.5 py-0.5 rounded bg-slate-800/90 text-emerald-400/70 font-medium">TB</span>
-                        </div>
+                    {dailyProfit.some(function(d) { return d.profit < 0; }) && (
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30">
+                        <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                        <span className="text-xs text-red-400 font-semibold">{dailyProfit.filter(function(d) { return d.profit < 0; }).length} ngày lỗ</span>
                       </div>
                     )}
                   </div>
 
+                  <div className="overflow-x-auto">
+                    <div className="flex" style={{ minWidth: Math.max(days.length * 56 + 60, 400) + 'px' }}>
+                      {/* Y-axis */}
+                      <div className="flex flex-col justify-between flex-shrink-0 pr-2" style={{ height: chartH + 'px', width: '52px' }}>
+                        {ticks.slice().reverse().map(function(tick) {
+                          return (
+                            <span key={tick} className="text-[11px] text-gray-500 text-right leading-none">{shortNum(tick)}</span>
+                          );
+                        })}
+                      </div>
+
+                      {/* Chart area */}
+                      <div className="flex-1 relative" style={{ height: chartH + 'px' }}>
+                        {/* Grid lines */}
+                        {ticks.map(function(tick) {
+                          var pct = ((yMax - tick) / yRange) * 100;
+                          return (
+                            <div key={tick} className="absolute left-0 right-0" style={{ top: pct + '%' }}>
+                              <div style={{ borderTop: tick === 0 ? '2px solid #475569' : '1px solid #1e293b', width: '100%' }}></div>
+                            </div>
+                          );
+                        })}
+
+                        {/* Bars */}
+                        <div className="absolute inset-0 flex items-end">
+                          {days.map(function(d) {
+                            var isAnomaly = dailyProfitStats.stdDev > 0 && Math.abs(d.profit - dailyProfitStats.avg) > 1.5 * dailyProfitStats.stdDev;
+                            var margin = d.revenue > 0 ? (d.profit / d.revenue * 100) : 0;
+                            var barColor = d.profit < 0 ? '#ef4444' : isAnomaly ? '#eab308' : '#f97316';
+                            var textCol = d.profit < 0 ? '#f87171' : isAnomaly ? '#facc15' : '#e2e8f0';
+
+                            var barTop: number;
+                            var barBottom: number;
+                            if (d.profit >= 0) {
+                              barTop = ((yMax - d.profit) / yRange) * chartH;
+                              barBottom = ((yMax - 0) / yRange) * chartH;
+                            } else {
+                              barTop = ((yMax - 0) / yRange) * chartH;
+                              barBottom = ((yMax - d.profit) / yRange) * chartH;
+                            }
+                            var barH = Math.max(2, barBottom - barTop);
+
+                            return (
+                              <div key={d.date} className="flex-1 flex flex-col items-center relative group" style={{ height: chartH + 'px' }}>
+                                {/* Tooltip on hover */}
+                                <div className="absolute left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20" style={{ top: Math.max(0, barTop - 100) + 'px' }}>
+                                  <div className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 shadow-xl whitespace-nowrap text-center">
+                                    <p className="text-[10px] font-bold text-gray-200">{d.date}</p>
+                                    <p className="text-[10px] text-gray-400">DT: {fmt(d.revenue)}</p>
+                                    <p className="text-[10px] font-bold" style={{ color: textCol }}>LN: {fmt(d.profit)}</p>
+                                    <p className="text-[10px] text-gray-400">Biên: {pct(margin)}</p>
+                                  </div>
+                                </div>
+
+                                {/* Value on top of bar */}
+                                <div className="absolute left-0 right-0 text-center" style={{ top: Math.max(0, barTop - 18) + 'px' }}>
+                                  <span className="text-[10px] font-bold" style={{ color: textCol }}>{shortNum(d.profit)}</span>
+                                </div>
+
+                                {/* Bar */}
+                                <div
+                                  className="absolute left-[12%] right-[12%] rounded-t-sm transition-all duration-150 group-hover:left-[8%] group-hover:right-[8%]"
+                                  style={{ top: barTop + 'px', height: barH + 'px', backgroundColor: barColor, opacity: 0.85 }}
+                                ></div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* X-axis labels */}
+                    <div className="flex" style={{ minWidth: Math.max(days.length * 56 + 60, 400) + 'px' }}>
+                      <div style={{ width: '52px', flexShrink: 0 }}></div>
+                      <div className="flex-1 flex">
+                        {days.map(function(d) {
+                          var label = d.date.slice(8) + '/' + d.date.slice(5, 7);
+                          return (
+                            <div key={d.date} className="flex-1 text-center pt-2">
+                              <span className="text-[10px] text-gray-500 font-medium">{label}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Legend */}
-                  <div className="flex flex-wrap items-center gap-5 mt-4 pt-4 border-t border-slate-700/30">
+                  <div className="flex flex-wrap items-center gap-5 mt-4 pt-3 border-t border-slate-700/30">
                     <div className="flex items-center gap-2">
-                      <div className="w-3.5 h-3.5 rounded bg-gradient-to-t from-emerald-500 to-emerald-400"></div>
+                      <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: '#f97316' }}></div>
                       <span className="text-xs text-gray-500">Lãi</span>
                     </div>
+                    {hasNeg && (
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: '#ef4444' }}></div>
+                        <span className="text-xs text-gray-500">Lỗ</span>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2">
-                      <div className="w-3.5 h-3.5 rounded bg-gradient-to-t from-red-600 to-red-500"></div>
-                      <span className="text-xs text-gray-500">Lỗ</span>
+                      <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: '#eab308' }}></div>
+                      <span className="text-xs text-gray-500">Bất thường</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="w-3.5 h-3.5 rounded bg-gradient-to-t from-yellow-500 to-yellow-400"></div>
-                      <span className="text-xs text-gray-500">Bất thường (&gt;1.5x std)</span>
-                    </div>
-                    <span className="text-[10px] text-gray-600 ml-auto">Hover để xem chi tiết</span>
+                    <span className="text-[10px] text-gray-600 ml-auto">Hover cột để xem chi tiết</span>
                   </div>
                 </div>
                 );
