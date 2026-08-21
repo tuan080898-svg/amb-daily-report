@@ -867,16 +867,16 @@ export default function PnlPage() {
                           barPct = Math.abs(minProfit) > 0 ? Math.max(4, (Math.abs(d.profit) / Math.abs(minProfit)) * negBarH) : 4;
                         }
 
-                        var barColor = d.profit < 0
-                          ? 'from-red-500 to-red-600'
+                        var barBg = d.profit < 0
+                          ? 'linear-gradient(to top, #ef4444, #dc2626)'
                           : isAnomaly
-                            ? 'from-yellow-400 to-yellow-500'
-                            : 'from-emerald-400 to-emerald-500';
-                        var borderColor = d.profit < 0
-                          ? 'border-red-500/40'
+                            ? 'linear-gradient(to top, #eab308, #facc15)'
+                            : 'linear-gradient(to top, #059669, #34d399)';
+                        var barBorder = d.profit < 0
+                          ? '1px solid rgba(239,68,68,0.4)'
                           : isAnomaly
-                            ? 'border-yellow-400/40'
-                            : 'border-emerald-400/30';
+                            ? '1px solid rgba(234,179,8,0.4)'
+                            : '1px solid rgba(52,211,153,0.3)';
                         var textColor = d.profit < 0
                           ? 'text-red-400'
                           : isAnomaly
@@ -921,8 +921,8 @@ export default function PnlPage() {
                             {d.profit >= 0 ? (
                               <div className="w-full flex flex-col justify-end" style={{ height: maxBarH + 'px' }}>
                                 <div
-                                  className={'w-full rounded-t-lg bg-gradient-to-t border-t border-l border-r transition-all duration-200 group-hover:scale-105 group-hover:shadow-lg ' + barColor + ' ' + borderColor}
-                                  style={{ height: barPct + 'px' }}
+                                  className="w-full rounded-t-lg transition-all duration-200 group-hover:scale-105 group-hover:shadow-lg"
+                                  style={{ height: barPct + 'px', background: barBg, borderTop: barBorder, borderLeft: barBorder, borderRight: barBorder }}
                                 ></div>
                               </div>
                             ) : (
@@ -935,8 +935,8 @@ export default function PnlPage() {
                             {hasNeg && d.profit < 0 && (
                               <div className="w-full flex flex-col justify-start" style={{ height: negBarH + 'px' }}>
                                 <div
-                                  className={'w-full rounded-b-lg bg-gradient-to-b border-b border-l border-r transition-all duration-200 group-hover:scale-105 ' + barColor + ' ' + borderColor}
-                                  style={{ height: barPct + 'px' }}
+                                  className="w-full rounded-b-lg transition-all duration-200 group-hover:scale-105"
+                                  style={{ height: barPct + 'px', background: barBg, borderBottom: barBorder, borderLeft: barBorder, borderRight: barBorder }}
                                 ></div>
                               </div>
                             )}
