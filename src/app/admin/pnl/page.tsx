@@ -71,6 +71,7 @@ export default function PnlPage() {
   var [selectedShopId, setSelectedShopId] = useState('');
   var [filterShop, setFilterShop] = useState('all');
   var [filterChannel, setFilterChannel] = useState<'all' | 'Shopee' | 'TikTok'>('all');
+  var [filterRegion, setFilterRegion] = useState<'all' | 'HN' | 'HCM'>('all');
   var [dateFrom, setDateFrom] = useState(function() { return getMonthStart(new Date()); });
   var [dateTo, setDateTo] = useState(function() { return getMonthEnd(new Date()); });
   var [editFees, setEditFees] = useState(false);
@@ -85,15 +86,22 @@ export default function PnlPage() {
     return m;
   }, [cogsEntries]);
 
+  var shopRegionMap = useMemo(function() {
+    var m = new Map<string, string>();
+    shops.forEach(function(s) { m.set(s.id, s.region); });
+    return m;
+  }, [shops]);
+
   var filteredImports = useMemo(function() {
     return pnlImports.filter(function(imp) {
       if (filterShop !== 'all' && imp.shopId !== filterShop) return false;
       if (filterChannel !== 'all' && imp.channel !== filterChannel) return false;
+      if (filterRegion !== 'all' && shopRegionMap.get(imp.shopId) !== filterRegion) return false;
       if (dateFrom && imp.dateTo < dateFrom) return false;
       if (dateTo && imp.dateFrom > dateTo) return false;
       return true;
     });
-  }, [pnlImports, filterShop, filterChannel, dateFrom, dateTo]);
+  }, [pnlImports, filterShop, filterChannel, filterRegion, shopRegionMap, dateFrom, dateTo]);
 
   var pnlRows = useMemo(function() {
     var adLookup = new Map<string, number>();
@@ -508,6 +516,12 @@ export default function PnlPage() {
           <option value="all">Tất cả kênh</option>
           <option value="Shopee">Shopee</option>
           <option value="TikTok">TikTok</option>
+        </select>
+        <select value={filterRegion} onChange={function(e) { setFilterRegion(e.target.value as 'all' | 'HN' | 'HCM'); }}
+          className="px-3 py-2 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-200">
+          <option value="all">Tất cả khu vực</option>
+          <option value="HN">Hà Nội</option>
+          <option value="HCM">HCM</option>
         </select>
         <div className="flex items-center gap-1.5 border border-slate-600 rounded-lg px-3 py-2 bg-slate-800">
           <input type="date" value={dateFrom} onChange={function(e) { setDateFrom(e.target.value); if (e.target.value > dateTo) setDateTo(e.target.value); }}
