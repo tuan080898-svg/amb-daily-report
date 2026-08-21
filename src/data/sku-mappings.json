@@ -347,19 +347,53 @@
   ],
   "GH043-1": [
     {
-      "product": "Sofa Da",
+      "product": "Khăn lau sofa",
+      "quantity": 1
+    },
+    {
+      "product": "Lẻ chai vệ sinh Sofa",
+      "quantity": 1
+    },
+    {
+      "product": "Bàn chải cứng",
       "quantity": 1
     }
   ],
   "GH043-2": [
     {
-      "product": "Sofa nỉ",
+      "product": "Khăn lau sofa",
+      "quantity": 1
+    },
+    {
+      "product": "Lẻ chai vệ sinh Sofa",
+      "quantity": 1
+    },
+    {
+      "product": "Bàn chải mềm",
       "quantity": 1
     }
   ],
   "GH043": [
     {
       "product": "Lẻ chai vệ sinh Sofa",
+      "quantity": 1
+    }
+  ],
+  "GH046": [
+    {
+      "product": "Khăn lau sofa",
+      "quantity": 1
+    }
+  ],
+  "GH039-1": [
+    {
+      "product": "Bàn chải cứng",
+      "quantity": 1
+    }
+  ],
+  "GH039-2": [
+    {
+      "product": "Bàn chải mềm",
       "quantity": 1
     }
   ],
