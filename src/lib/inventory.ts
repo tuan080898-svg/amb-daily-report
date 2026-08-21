@@ -65,13 +65,28 @@ export function loadInventory(): InventoryData {
   if (typeof window === 'undefined') return { products: {}, transactions: [] };
   try {
     var raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return migrateData(JSON.parse(raw));
-  } catch (_) {}
+    if (raw) {
+      var parsed = JSON.parse(raw);
+      if (!parsed || !parsed.transactions) {
+        console.error('[Inventory] Dữ liệu localStorage bị hỏng, reset');
+        return { products: {}, transactions: [] };
+      }
+      return migrateData(parsed);
+    }
+  } catch (err) {
+    console.error('[Inventory] Lỗi đọc dữ liệu tồn kho:', err);
+  }
   return { products: {}, transactions: [] };
 }
 
 export function saveInventory(data: InventoryData): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  try {
+    var json = JSON.stringify(data);
+    localStorage.setItem(STORAGE_KEY, json);
+  } catch (err) {
+    console.error('[Inventory] Lỗi lưu dữ liệu tồn kho:', err);
+    alert('Lỗi lưu dữ liệu tồn kho! Bộ nhớ trình duyệt có thể đầy. Hãy xuất Excel để sao lưu.');
+  }
 }
 
 export function getWarehouseConfig(data: InventoryData, product: string, wh: Warehouse): InventoryConfig | null {
