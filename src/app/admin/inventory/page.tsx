@@ -6,9 +6,9 @@ import { getProductSkuCodes, getAllComboSkus } from '@/lib/sku';
 import {
   loadInventory, saveInventory, getCurrentStock, getStockStatus,
   getProductTransactions, getLowStockProducts, getTrackedProducts,
-  isProductTracked, getWarehouseConfig,
+  isProductTracked, getWarehouseConfig, getReorderAlerts,
   WAREHOUSES, WAREHOUSE_LABELS,
-  type InventoryData, type InventoryTransaction, type Warehouse, type InventoryConfig,
+  type InventoryData, type InventoryTransaction, type Warehouse, type InventoryConfig, type ReorderAlert,
 } from '@/lib/inventory';
 import * as XLSX from 'xlsx';
 
@@ -123,6 +123,10 @@ export default function AdminInventoryPage() {
       var canMake = Math.min.apply(null, componentStocks.map(function(c) { return c.available; }));
       return { code: combo.code, items: componentStocks, canMake: Math.max(0, canMake) };
     });
+  }, [inv, selectedWh]);
+
+  var reorderAlerts = useMemo(function() {
+    return getReorderAlerts(inv, selectedWh === 'ALL' ? undefined : selectedWh);
   }, [inv, selectedWh]);
 
   if (!currentUser || currentUser.role !== 'admin') {
@@ -696,6 +700,59 @@ export default function AdminInventoryPage() {
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Reorder alerts */}
+      {reorderAlerts.length > 0 && (
+        <div className="mb-6 bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-700/50 flex items-center gap-3">
+            <span className="text-lg">&#9888;&#65039;</span>
+            <h2 className="font-semibold text-gray-100 text-sm">Cảnh báo đặt hàng ({reorderAlerts.filter(function(a) { return a.urgency !== 'ok'; }).length} cần đặt)</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-gray-500 border-b border-slate-700/50">
+                  <th className="px-5 py-3 font-medium">Sản phẩm</th>
+                  <th className="px-4 py-3 font-medium">Kho</th>
+                  <th className="px-4 py-3 font-medium text-right">Tồn hiện tại</th>
+                  <th className="px-4 py-3 font-medium text-right">Bán TB/ngày</th>
+                  <th className="px-4 py-3 font-medium text-right">Còn bán được</th>
+                  <th className="px-4 py-3 font-medium text-right">Cần đặt thêm</th>
+                  <th className="px-4 py-3 font-medium text-center">Trạng thái</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {reorderAlerts.map(function(alert) {
+                  return (
+                    <tr key={alert.product + '|' + alert.warehouse} className={'hover:bg-slate-800/50' + (alert.urgency === 'critical' ? ' bg-red-950/20' : alert.urgency === 'warning' ? ' bg-amber-950/20' : '')}>
+                      <td className="px-5 py-3 text-gray-200">{alert.product}</td>
+                      <td className="px-4 py-3 text-gray-400 text-xs">{WAREHOUSE_LABELS[alert.warehouse]}</td>
+                      <td className="px-4 py-3 text-right text-gray-200">{formatNum(alert.currentStock)}</td>
+                      <td className="px-4 py-3 text-right text-gray-300">{alert.dailySales > 0 ? alert.dailySales.toFixed(1) : '—'}</td>
+                      <td className={'px-4 py-3 text-right font-bold ' + (alert.urgency === 'critical' ? 'text-red-400' : alert.urgency === 'warning' ? 'text-amber-400' : 'text-emerald-400')}>
+                        {alert.daysRemaining >= 9999 ? '—' : alert.daysRemaining + ' ngày'}
+                      </td>
+                      <td className="px-4 py-3 text-right text-blue-300 font-medium">{alert.suggestedOrder > 0 ? formatNum(alert.suggestedOrder) : '—'}</td>
+                      <td className="px-4 py-3 text-center">
+                        {alert.urgency === 'critical' ? (
+                          <span className="px-2 py-0.5 bg-red-900/40 text-red-300 rounded text-xs font-medium">Khẩn cấp</span>
+                        ) : alert.urgency === 'warning' ? (
+                          <span className="px-2 py-0.5 bg-amber-900/40 text-amber-300 rounded text-xs font-medium">Cần đặt</span>
+                        ) : (
+                          <span className="px-2 py-0.5 bg-emerald-900/40 text-emerald-300 rounded text-xs font-medium">Đủ hàng</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="px-5 py-3 border-t border-slate-700/50 text-xs text-gray-500">
+            Dựa trên tốc độ bán 30 ngày gần nhất. Lead time: 30 ngày. Đặt đủ cho 30 ngày bán.
           </div>
         </div>
       )}

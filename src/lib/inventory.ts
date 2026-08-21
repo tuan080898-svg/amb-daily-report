@@ -167,6 +167,73 @@ export function getProductTransactions(data: InventoryData, product: string, wh?
     .sort(function(a, b) { return b.date.localeCompare(a.date) || b.id.localeCompare(a.id); });
 }
 
+export interface ReorderAlert {
+  product: string;
+  warehouse: Warehouse;
+  currentStock: number;
+  dailySales: number;
+  daysRemaining: number;
+  suggestedOrder: number;
+  urgency: 'critical' | 'warning' | 'ok';
+}
+
+export function getSalesVelocity(data: InventoryData, product: string, wh: Warehouse, days: number): number {
+  var cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  var cutoffStr = cutoff.toISOString().slice(0, 10);
+  var totalSold = 0;
+  data.transactions.forEach(function(t) {
+    if (t.product === product && t.warehouse === wh && t.type === 'sale' && t.date >= cutoffStr) {
+      totalSold += Math.abs(t.quantity);
+    }
+  });
+  return totalSold / days;
+}
+
+export function getReorderAlerts(data: InventoryData, wh?: Warehouse, leadTimeDays?: number, coverageDays?: number): ReorderAlert[] {
+  var lead = leadTimeDays || 30;
+  var coverage = coverageDays || 30;
+  var warehouses = wh ? [wh] : WAREHOUSES;
+  var results: ReorderAlert[] = [];
+  var seen = new Set<string>();
+
+  warehouses.forEach(function(w) {
+    var products = new Set<string>();
+    Object.entries(data.products).forEach(function(entry) {
+      if (entry[1][w] && entry[1][w].initialStock > 0) products.add(entry[0]);
+    });
+    data.transactions.forEach(function(t) {
+      if (t.warehouse === w) products.add(t.product);
+    });
+
+    products.forEach(function(product) {
+      var key = product + '|' + w;
+      if (seen.has(key)) return;
+      seen.add(key);
+      var current = getCurrentStock(data, product, w);
+      var daily = getSalesVelocity(data, product, w, 30);
+      if (daily <= 0 && current <= 0) return;
+      var daysLeft = daily > 0 ? current / daily : 9999;
+      var suggestedOrder = Math.max(0, Math.ceil(daily * coverage - Math.max(0, current - daily * lead)));
+      var urgency: 'critical' | 'warning' | 'ok' = 'ok';
+      if (daysLeft <= lead) urgency = 'critical';
+      else if (daysLeft <= lead + 15) urgency = 'warning';
+
+      if (urgency !== 'ok' || (daily > 0 && daysLeft < 9999)) {
+        results.push({ product: product, warehouse: w, currentStock: current, dailySales: daily, daysRemaining: Math.round(daysLeft), suggestedOrder: suggestedOrder, urgency: urgency });
+      }
+    });
+  });
+
+  return results.sort(function(a, b) {
+    if (a.urgency === 'critical' && b.urgency !== 'critical') return -1;
+    if (a.urgency !== 'critical' && b.urgency === 'critical') return 1;
+    if (a.urgency === 'warning' && b.urgency === 'ok') return -1;
+    if (a.urgency === 'ok' && b.urgency === 'warning') return 1;
+    return a.daysRemaining - b.daysRemaining;
+  });
+}
+
 export function getLowStockProducts(data: InventoryData, wh?: Warehouse): Array<{ product: string; current: number; threshold: number; status: 'low' | 'out'; warehouse: Warehouse }> {
   var results: Array<{ product: string; current: number; threshold: number; status: 'low' | 'out'; warehouse: Warehouse }> = [];
   var warehouses = wh ? [wh] : WAREHOUSES;
