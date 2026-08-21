@@ -815,105 +815,174 @@ export default function PnlPage() {
               </div>
 
               {/* Daily Profit Chart */}
-              {dailyProfit.length > 1 && (
-                <div className="bg-slate-900 border border-slate-700/50 rounded-2xl p-6">
-                  <div className="flex items-center justify-between mb-5">
+              {dailyProfit.length > 1 && (function() {
+                var days = dailyProfit;
+                var maxProfit = Math.max.apply(null, days.map(function(d) { return d.profit; }).concat([1]));
+                var minProfit = Math.min.apply(null, days.map(function(d) { return d.profit; }).concat([0]));
+                var maxAbs = Math.max(Math.abs(maxProfit), Math.abs(minProfit), 1);
+                var hasNeg = minProfit < 0;
+                var avg = dailyProfitStats.avg;
+                var stdDev = dailyProfitStats.stdDev;
+                var maxBarH = hasNeg ? 120 : 180;
+                var negBarH = hasNeg ? 60 : 0;
+
+                function shortNum(n: number): string {
+                  var abs = Math.abs(n);
+                  if (abs >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'tr';
+                  if (abs >= 1000) return (n / 1000).toFixed(0) + 'k';
+                  return String(Math.round(n));
+                }
+
+                return (
+                <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
                     <div>
                       <p className="text-xs font-bold text-gray-400 tracking-wider">BIỂU ĐỒ LỢI NHUẬN THEO NGÀY</p>
-                      <p className="text-xs text-gray-600 mt-1">Phát hiện nhanh ngày bất thường — cột đỏ = lỗ, cột vàng nhấp nháy = chênh lệch lớn so với TB</p>
+                      <p className="text-xs text-gray-600 mt-1">Hover cột để xem chi tiết — cột vàng = bất thường so với TB</p>
                     </div>
-                    <div className="flex items-center gap-3 text-xs text-gray-500">
-                      <span>TB: <span className={'font-medium ' + (dailyProfitStats.avg >= 0 ? 'text-emerald-400' : 'text-red-400')}>{fmt(Math.round(dailyProfitStats.avg))}</span>/ngày</span>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700/30">
+                        <span className="text-[10px] text-gray-500 uppercase tracking-wider">TB/ngày</span>
+                        <span className={'text-sm font-bold ' + (avg >= 0 ? 'text-emerald-400' : 'text-red-400')}>{shortNum(Math.round(avg))}</span>
+                      </div>
+                      {dailyProfit.some(function(d) { return d.profit < 0; }) && (
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                          <span className="text-xs text-red-400 font-medium">{dailyProfit.filter(function(d) { return d.profit < 0; }).length} ngày lỗ</span>
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <div className="overflow-x-auto">
-                    {(function() {
-                      var days = dailyProfit;
-                      var maxAbs = Math.max.apply(null, days.map(function(d) { return Math.abs(d.profit); }).concat([1]));
-                      var chartH = 200;
-                      var barW = Math.max(16, Math.min(40, Math.floor(700 / days.length) - 4));
-                      var gap = Math.max(2, Math.min(6, Math.floor(barW * 0.15)));
-                      var totalW = days.length * (barW + gap);
-                      var zeroY = chartH / 2;
-                      var halfH = chartH / 2 - 10;
-                      var avg = dailyProfitStats.avg;
-                      var stdDev = dailyProfitStats.stdDev;
 
-                      return (
-                        <svg viewBox={'0 0 ' + Math.max(totalW + 60, 300) + ' ' + (chartH + 60)} className="w-full" style={{ minWidth: Math.max(totalW + 60, 300) + 'px' }}>
-                          {/* Zero line */}
-                          <line x1="40" y1={zeroY} x2={totalW + 50} y2={zeroY} stroke="#475569" strokeWidth="1" strokeDasharray="4,3" />
-                          <text x="36" y={zeroY + 4} textAnchor="end" fill="#64748b" fontSize="10">0</text>
+                  <div className="overflow-x-auto pb-2">
+                    <div className="flex items-end gap-1" style={{ minWidth: days.length * 52 + 'px' }}>
+                      {days.map(function(d, i) {
+                        var isAnomaly = stdDev > 0 && Math.abs(d.profit - avg) > 1.5 * stdDev;
+                        var margin = d.revenue > 0 ? (d.profit / d.revenue * 100) : 0;
+                        var dateLabel = d.date.slice(8) + '/' + d.date.slice(5, 7);
+                        var barPct: number;
+                        if (d.profit >= 0) {
+                          barPct = maxProfit > 0 ? Math.max(4, (d.profit / maxProfit) * maxBarH) : 4;
+                        } else {
+                          barPct = Math.abs(minProfit) > 0 ? Math.max(4, (Math.abs(d.profit) / Math.abs(minProfit)) * negBarH) : 4;
+                        }
 
-                          {/* Average line */}
-                          {days.length > 2 && (function() {
-                            var avgY = avg >= 0
-                              ? zeroY - (avg / maxAbs) * halfH
-                              : zeroY + (Math.abs(avg) / maxAbs) * halfH;
-                            return (
+                        var barColor = d.profit < 0
+                          ? 'from-red-500 to-red-600'
+                          : isAnomaly
+                            ? 'from-yellow-400 to-yellow-500'
+                            : 'from-emerald-400 to-emerald-500';
+                        var borderColor = d.profit < 0
+                          ? 'border-red-500/40'
+                          : isAnomaly
+                            ? 'border-yellow-400/40'
+                            : 'border-emerald-400/30';
+                        var textColor = d.profit < 0
+                          ? 'text-red-400'
+                          : isAnomaly
+                            ? 'text-yellow-400'
+                            : 'text-emerald-400';
+
+                        return (
+                          <div key={d.date} className="flex flex-col items-center flex-1 min-w-[46px] group relative">
+                            {/* Tooltip */}
+                            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20">
+                              <div className="bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 shadow-2xl whitespace-nowrap">
+                                <p className="text-xs font-bold text-gray-200 mb-2">{d.date}</p>
+                                <div className="space-y-1">
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-[10px] text-gray-500">Doanh thu</span>
+                                    <span className="text-[10px] text-blue-400 font-medium">{fmt(d.revenue)}</span>
+                                  </div>
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-[10px] text-gray-500">Lợi nhuận</span>
+                                    <span className={'text-[10px] font-bold ' + textColor}>{fmt(d.profit)}</span>
+                                  </div>
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-[10px] text-gray-500">Biên LN</span>
+                                    <span className={'text-[10px] font-medium ' + textColor}>{pct(margin)}</span>
+                                  </div>
+                                  <div className="flex justify-between gap-4">
+                                    <span className="text-[10px] text-gray-500">Shop</span>
+                                    <span className="text-[10px] text-gray-300">{d.shops.size} shop</span>
+                                  </div>
+                                </div>
+                                {isAnomaly && <p className="text-[10px] text-yellow-400 font-medium mt-2 pt-1.5 border-t border-slate-700">Bất thường so với TB</p>}
+                              </div>
+                              <div className="w-2 h-2 bg-slate-800 border-r border-b border-slate-600 rotate-45 absolute left-1/2 -translate-x-1/2 -bottom-1"></div>
+                            </div>
+
+                            {/* Value label */}
+                            <p className={'text-[10px] font-bold mb-1 transition-colors ' + textColor + ' opacity-70 group-hover:opacity-100'}>
+                              {shortNum(d.profit)}
+                            </p>
+
+                            {/* Bar */}
+                            {d.profit >= 0 ? (
+                              <div className="w-full flex flex-col justify-end" style={{ height: maxBarH + 'px' }}>
+                                <div
+                                  className={'w-full rounded-t-lg bg-gradient-to-t border-t border-l border-r transition-all duration-200 group-hover:scale-105 group-hover:shadow-lg ' + barColor + ' ' + borderColor}
+                                  style={{ height: barPct + 'px' }}
+                                ></div>
+                              </div>
+                            ) : (
                               <>
-                                <line x1="40" y1={avgY} x2={totalW + 50} y2={avgY} stroke={avg >= 0 ? '#22c55e' : '#ef4444'} strokeWidth="1" strokeDasharray="6,3" opacity="0.5" />
-                                <text x="36" y={avgY + 3} textAnchor="end" fill={avg >= 0 ? '#22c55e' : '#ef4444'} fontSize="9" opacity="0.7">TB</text>
+                                <div className="w-full" style={{ height: maxBarH + 'px' }}></div>
                               </>
-                            );
-                          })()}
+                            )}
 
-                          {/* Bars */}
-                          {days.map(function(d, i) {
-                            var x = 44 + i * (barW + gap);
-                            var isAnomaly = stdDev > 0 && Math.abs(d.profit - avg) > 1.5 * stdDev;
-                            var barH = Math.max(2, (Math.abs(d.profit) / maxAbs) * halfH);
-                            var y: number;
-                            var fillColor: string;
-                            if (d.profit >= 0) {
-                              y = zeroY - barH;
-                              fillColor = isAnomaly ? '#eab308' : '#22c55e';
-                            } else {
-                              y = zeroY;
-                              fillColor = '#ef4444';
-                            }
-                            var margin = d.revenue > 0 ? (d.profit / d.revenue * 100) : 0;
-                            var dateLabel = d.date.slice(5);
-                            return (
-                              <g key={d.date}>
-                                <rect x={x} y={y} width={barW} height={barH} rx="3" fill={fillColor} opacity={isAnomaly ? '1' : '0.8'}>
-                                  <title>{d.date + '\nLợi nhuận: ' + fmt(d.profit) + '\nDoanh thu: ' + fmt(d.revenue) + '\nBiên LN: ' + pct(margin) + '\nShop: ' + Array.from(d.shops).join(', ')}</title>
-                                </rect>
-                                {isAnomaly && (
-                                  <text x={x + barW / 2} y={d.profit >= 0 ? y - 4 : y + barH + 12} textAnchor="middle" fill={fillColor} fontSize="9" fontWeight="600">!</text>
-                                )}
-                                <text x={x + barW / 2} y={chartH + 14} textAnchor="middle" fill="#64748b" fontSize="9" transform={'rotate(0,' + (x + barW / 2) + ',' + (chartH + 14) + ')'}>{dateLabel}</text>
-                              </g>
-                            );
-                          })}
-                        </svg>
-                      );
-                    })()}
-                  </div>
-                  {/* Anomaly legend */}
-                  <div className="flex flex-wrap items-center gap-4 mt-4 pt-3 border-t border-slate-700/50">
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-sm bg-emerald-500 opacity-80"></span>
-                      <span className="text-xs text-gray-500">Lãi</span>
+                            {/* Zero line position */}
+                            {hasNeg && d.profit < 0 && (
+                              <div className="w-full flex flex-col justify-start" style={{ height: negBarH + 'px' }}>
+                                <div
+                                  className={'w-full rounded-b-lg bg-gradient-to-b border-b border-l border-r transition-all duration-200 group-hover:scale-105 ' + barColor + ' ' + borderColor}
+                                  style={{ height: barPct + 'px' }}
+                                ></div>
+                              </div>
+                            )}
+
+                            {/* Date label */}
+                            <p className="text-[10px] text-gray-600 mt-2 group-hover:text-gray-300 transition-colors font-medium">{dateLabel}</p>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-sm bg-red-500"></span>
-                      <span className="text-xs text-gray-500">Lỗ</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="w-3 h-3 rounded-sm bg-yellow-500"></span>
-                      <span className="text-xs text-gray-500">Bất thường (chênh &gt;1.5x độ lệch chuẩn)</span>
-                    </div>
-                    {dailyProfit.some(function(d) { return d.profit < 0; }) && (
-                      <div className="ml-auto px-3 py-1 rounded-lg bg-red-500/10 border border-red-500/30">
-                        <span className="text-xs text-red-400 font-medium">
-                          {dailyProfit.filter(function(d) { return d.profit < 0; }).length} ngày lỗ trong kỳ
-                        </span>
+
+                    {/* Average line overlay */}
+                    {days.length > 2 && !hasNeg && (
+                      <div className="relative" style={{ marginTop: -(maxBarH + 24) + 'px', height: '0px', pointerEvents: 'none' }}>
+                        <div
+                          className="absolute left-0 right-0 border-t-2 border-dashed"
+                          style={{
+                            borderColor: avg >= 0 ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)',
+                            top: (maxBarH - (avg > 0 ? Math.max(4, (avg / maxProfit) * maxBarH) : 0)) + 'px',
+                          }}
+                        >
+                          <span className="absolute -top-3 right-0 text-[9px] px-1.5 py-0.5 rounded bg-slate-800/90 text-emerald-400/70 font-medium">TB</span>
+                        </div>
                       </div>
                     )}
                   </div>
+
+                  {/* Legend */}
+                  <div className="flex flex-wrap items-center gap-5 mt-4 pt-4 border-t border-slate-700/30">
+                    <div className="flex items-center gap-2">
+                      <div className="w-3.5 h-3.5 rounded bg-gradient-to-t from-emerald-500 to-emerald-400"></div>
+                      <span className="text-xs text-gray-500">Lãi</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-3.5 h-3.5 rounded bg-gradient-to-t from-red-600 to-red-500"></div>
+                      <span className="text-xs text-gray-500">Lỗ</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-3.5 h-3.5 rounded bg-gradient-to-t from-yellow-500 to-yellow-400"></div>
+                      <span className="text-xs text-gray-500">Bất thường (&gt;1.5x std)</span>
+                    </div>
+                    <span className="text-[10px] text-gray-600 ml-auto">Hover để xem chi tiết</span>
+                  </div>
                 </div>
-              )}
+                );
+              })()}
 
               {/* Shop Summary Table */}
               {shopSummary.length > 0 && (
