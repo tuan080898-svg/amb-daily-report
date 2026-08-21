@@ -33,7 +33,8 @@ export default function AdminInventoryPage() {
   const [configThreshold, setConfigThreshold] = useState(10);
   const searchRef = useRef<HTMLDivElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
-  const [excelPreview, setExcelPreview] = useState<Array<{ product: string; quantity: number; matched: boolean }> | null>(null);
+  const [excelPreview, setExcelPreview] = useState<Array<{ product: string; qtyHCM: number; qtyHN: number; matched: boolean }> | null>(null);
+  const [excelDualMode, setExcelDualMode] = useState(false);
 
   useEffect(function() { setInv(loadInventory()); }, []);
 
@@ -215,26 +216,34 @@ export default function AdminInventoryPage() {
         var productMap: Record<string, string> = {};
         allProducts.forEach(function(p) { productMap[p.toLowerCase()] = p; });
 
-        var qtyKeys = ['Số lượng', 'SL nhập', 'SL', 'Quantity', 'Qty', 'Tồn hiện tại', 'Tồn HCM', 'Tồn HN', 'Tổng'];
-        var productKeys = ['Sản phẩm', 'Product', 'Tên sản phẩm', 'Tên SP'];
-
-        var foundProductKey = '';
-        var foundQtyKey = '';
         var headers = Object.keys(json[0]);
+        var productKeys = ['Sản phẩm', 'Product', 'Tên sản phẩm', 'Tên SP'];
+        var foundProductKey = '';
         productKeys.forEach(function(k) { if (!foundProductKey && headers.some(function(h) { return h.toLowerCase() === k.toLowerCase(); })) foundProductKey = headers.find(function(h) { return h.toLowerCase() === k.toLowerCase(); }) || ''; });
-        qtyKeys.forEach(function(k) { if (!foundQtyKey && headers.some(function(h) { return h.toLowerCase() === k.toLowerCase(); })) foundQtyKey = headers.find(function(h) { return h.toLowerCase() === k.toLowerCase(); }) || ''; });
-
         if (!foundProductKey) { alert('Không tìm thấy cột "Sản phẩm" trong file.\nCác cột có: ' + headers.join(', ')); return; }
-        if (!foundQtyKey) { alert('Không tìm thấy cột số lượng trong file.\nCần có một trong: ' + qtyKeys.join(', ') + '\nCác cột có: ' + headers.join(', ')); return; }
+
+        var hcmKey = headers.find(function(h) { return h === 'Tồn HCM'; });
+        var hnKey = headers.find(function(h) { return h === 'Tồn HN'; });
+        var isDual = !!(hcmKey && hnKey);
+
+        if (!isDual) {
+          var qtyKeys = ['Số lượng', 'SL nhập', 'SL', 'Quantity', 'Qty', 'Tồn hiện tại', 'Tồn HCM', 'Tồn HN', 'Tổng'];
+          var foundQtyKey = '';
+          qtyKeys.forEach(function(k) { if (!foundQtyKey && headers.some(function(h) { return h.toLowerCase() === k.toLowerCase(); })) foundQtyKey = headers.find(function(h) { return h.toLowerCase() === k.toLowerCase(); }) || ''; });
+          if (!foundQtyKey) { alert('Không tìm thấy cột số lượng trong file.\nCần có: Số lượng, SL nhập, Tồn HCM, Tồn HN...\nCác cột có: ' + headers.join(', ')); return; }
+          hcmKey = foundQtyKey;
+        }
 
         var items = json.map(function(row) {
           var name = String(row[foundProductKey] || '').trim();
-          var qty = Number(row[foundQtyKey]) || 0;
+          var qHCM = Math.max(0, Math.round(Number(row[hcmKey!]) || 0));
+          var qHN = isDual ? Math.max(0, Math.round(Number(row[hnKey!]) || 0)) : 0;
           var matched = productSet.has(name.toLowerCase());
-          return { product: matched ? productMap[name.toLowerCase()] : name, quantity: Math.max(0, Math.round(qty)), matched: matched };
-        }).filter(function(item) { return item.product && item.quantity > 0; });
+          return { product: matched ? productMap[name.toLowerCase()] : name, qtyHCM: qHCM, qtyHN: qHN, matched: matched };
+        }).filter(function(item) { return item.product && (item.qtyHCM > 0 || item.qtyHN > 0); });
 
         if (items.length === 0) { alert('Không có sản phẩm nào với số lượng > 0 trong file'); return; }
+        setExcelDualMode(isDual);
         setExcelPreview(items);
       } catch (err) {
         alert('Lỗi đọc file: ' + (err instanceof Error ? err.message : 'Unknown'));
@@ -249,18 +258,32 @@ export default function AdminInventoryPage() {
     var matched = excelPreview.filter(function(item) { return item.matched; });
     if (matched.length === 0) { alert('Không có sản phẩm nào khớp với danh sách'); return; }
     var updated: InventoryData = { products: JSON.parse(JSON.stringify(inv.products)), transactions: inv.transactions.slice() };
+    var count = 0;
     matched.forEach(function(item) {
-      updated.transactions = updated.transactions.concat([{
-        id: 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-        date: new Date().toISOString().slice(0, 10),
-        product: item.product, quantity: item.quantity, type: 'import',
-        note: 'Nhập từ Excel', warehouse: opWh,
-      }]);
+      if (item.qtyHCM > 0) {
+        updated.transactions = updated.transactions.concat([{
+          id: 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+          date: new Date().toISOString().slice(0, 10),
+          product: item.product, quantity: item.qtyHCM, type: 'import',
+          note: 'Nhập từ Excel', warehouse: excelDualMode ? 'HCM' as Warehouse : opWh,
+        }]);
+        count++;
+      }
+      if (excelDualMode && item.qtyHN > 0) {
+        updated.transactions = updated.transactions.concat([{
+          id: 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+          date: new Date().toISOString().slice(0, 10),
+          product: item.product, quantity: item.qtyHN, type: 'import',
+          note: 'Nhập từ Excel', warehouse: 'HN' as Warehouse,
+        }]);
+        count++;
+      }
     });
     saveInventory(updated);
     setInv(updated);
     setExcelPreview(null);
-    showSuccess('Đã nhập kho ' + WAREHOUSE_LABELS[opWh] + ': ' + matched.length + ' sản phẩm từ Excel');
+    var whInfo = excelDualMode ? 'Kho HCM + Kho HN' : WAREHOUSE_LABELS[opWh];
+    showSuccess('Đã nhập ' + whInfo + ': ' + matched.length + ' sản phẩm từ Excel');
   }
 
   function exportExcel() {
@@ -732,7 +755,9 @@ export default function AdminInventoryPage() {
             <div className="px-6 py-4 border-b border-slate-700 flex items-center justify-between">
               <div>
                 <h3 className="text-lg font-semibold text-gray-100">Xác nhận nhập kho từ Excel</h3>
-                <p className="text-sm text-gray-400 mt-1">Nhập vào: <span className="text-blue-400 font-medium">{WAREHOUSE_LABELS[opWh]}</span> — {excelPreview.filter(function(i) { return i.matched; }).length}/{excelPreview.length} sản phẩm khớp</p>
+                <p className="text-sm text-gray-400 mt-1">
+                  Nhập vào: <span className="text-blue-400 font-medium">{excelDualMode ? 'Kho HCM + Kho HN' : WAREHOUSE_LABELS[opWh]}</span> — {excelPreview.filter(function(i) { return i.matched; }).length}/{excelPreview.length} sản phẩm khớp
+                </p>
               </div>
               <button onClick={function() { setExcelPreview(null); }} className="text-gray-500 hover:text-gray-300 text-xl">✕</button>
             </div>
@@ -741,7 +766,14 @@ export default function AdminInventoryPage() {
                 <thead>
                   <tr className="text-left text-gray-500 border-b border-slate-700">
                     <th className="pb-2 font-medium">Sản phẩm</th>
-                    <th className="pb-2 font-medium text-right">Số lượng</th>
+                    {excelDualMode ? (
+                      <>
+                        <th className="pb-2 font-medium text-right">HCM</th>
+                        <th className="pb-2 font-medium text-right">HN</th>
+                      </>
+                    ) : (
+                      <th className="pb-2 font-medium text-right">Số lượng</th>
+                    )}
                     <th className="pb-2 font-medium text-center">Trạng thái</th>
                   </tr>
                 </thead>
@@ -750,7 +782,14 @@ export default function AdminInventoryPage() {
                     return (
                       <tr key={idx} className={item.matched ? '' : 'opacity-50'}>
                         <td className="py-2 text-gray-200">{item.product}</td>
-                        <td className="py-2 text-right text-gray-300">{item.quantity.toLocaleString('vi-VN')}</td>
+                        {excelDualMode ? (
+                          <>
+                            <td className="py-2 text-right text-blue-300">{item.qtyHCM > 0 ? item.qtyHCM.toLocaleString('vi-VN') : '—'}</td>
+                            <td className="py-2 text-right text-violet-300">{item.qtyHN > 0 ? item.qtyHN.toLocaleString('vi-VN') : '—'}</td>
+                          </>
+                        ) : (
+                          <td className="py-2 text-right text-gray-300">{item.qtyHCM.toLocaleString('vi-VN')}</td>
+                        )}
                         <td className="py-2 text-center">
                           {item.matched
                             ? <span className="inline-flex px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/15 text-emerald-400">Khớp</span>
@@ -763,7 +802,7 @@ export default function AdminInventoryPage() {
               </table>
             </div>
             <div className="px-6 py-4 border-t border-slate-700 flex items-center justify-between">
-              <p className="text-xs text-gray-500">Chỉ nhập các sản phẩm có trạng thái "Khớp"</p>
+              <p className="text-xs text-gray-500">Chỉ nhập các sản phẩm có trạng thái &quot;Khớp&quot;</p>
               <div className="flex gap-3">
                 <button onClick={function() { setExcelPreview(null); }}
                   className="px-4 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors">Hủy</button>
