@@ -10,6 +10,7 @@ import {
   WAREHOUSES, WAREHOUSE_LABELS,
   type InventoryData, type InventoryTransaction, type Warehouse, type InventoryConfig,
 } from '@/lib/inventory';
+import * as XLSX from 'xlsx';
 
 type ActionTab = 'import' | 'export' | 'audit' | 'config';
 interface BatchItem { product: string; quantity: number; }
@@ -196,6 +197,43 @@ export default function AdminInventoryPage() {
   var historyTxs = historyProduct ? getProductTransactions(inv, historyProduct, selectedWh === 'ALL' ? undefined : selectedWh) : [];
   var historyStock = historyProduct ? getCurrentStock(inv, historyProduct, selectedWh === 'ALL' ? undefined : selectedWh) : 0;
 
+  function exportExcel() {
+    var rows = productRows.map(function(row) {
+      if (selectedWh === 'ALL') {
+        var hcm = getCurrentStock(inv, row.product, 'HCM');
+        var hn = getCurrentStock(inv, row.product, 'HN');
+        return {
+          'Sản phẩm': row.product,
+          'Mã SKU': row.skuCodes.join(', '),
+          'Tồn HCM': hcm,
+          'Tồn HN': hn,
+          'Tổng': hcm + hn,
+          'Trạng thái': row.status === 'ok' ? 'OK' : row.status === 'low' ? 'Thấp' : row.status === 'out' ? 'Hết' : '—',
+        };
+      }
+      return {
+        'Sản phẩm': row.product,
+        'Mã SKU': row.skuCodes.join(', '),
+        'Tồn đầu': row.initial,
+        'Tồn hiện tại': row.current,
+        'Ngưỡng cảnh báo': row.threshold > 0 ? row.threshold : '',
+        'Trạng thái': row.status === 'ok' ? 'OK' : row.status === 'low' ? 'Thấp' : row.status === 'out' ? 'Hết' : '—',
+      };
+    });
+    var ws = XLSX.utils.json_to_sheet(rows);
+    var colWidths = Object.keys(rows[0] || {}).map(function(key) {
+      var maxLen = key.length;
+      rows.forEach(function(r) { var v = String((r as Record<string, unknown>)[key] ?? ''); if (v.length > maxLen) maxLen = v.length; });
+      return { wch: Math.min(maxLen + 2, 40) };
+    });
+    ws['!cols'] = colWidths;
+    var wb = XLSX.utils.book_new();
+    var sheetName = selectedWh === 'ALL' ? 'Tổng hợp' : 'Kho ' + selectedWh;
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    var today = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, 'Ton_kho_' + (selectedWh === 'ALL' ? 'tong_hop' : selectedWh) + '_' + today + '.xlsx');
+  }
+
   var tabConfig = {
     import: { label: 'Nhập kho', color: 'emerald', qtyLabel: 'SL nhập', notePlaceholder: 'VD: Nhập từ NCC tháng 8', btnLabel: 'Nhập kho', btnClass: 'bg-emerald-600 hover:bg-emerald-500' },
     export: { label: 'Trừ kho', color: 'red', qtyLabel: 'SL trừ', notePlaceholder: 'VD: Hàng lỗi, trả NCC', btnLabel: 'Trừ kho', btnClass: 'bg-red-600 hover:bg-red-500' },
@@ -229,6 +267,11 @@ export default function AdminInventoryPage() {
             );
           })}
         </div>
+        <button onClick={exportExcel}
+          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-2">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+          Xuất Excel
+        </button>
       </div>
 
       {successMsg && (
