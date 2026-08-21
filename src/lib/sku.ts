@@ -48,6 +48,17 @@ export function isComboSku(skuCode: string): boolean {
   return items.length > 1;
 }
 
+export function getAllComboSkus(): Array<{ code: string; items: SkuItem[] }> {
+  const skuMap = loadSkuMap();
+  const combos: Array<{ code: string; items: SkuItem[] }> = [];
+  for (const [code, items] of Object.entries(skuMap)) {
+    if (items.length > 1) {
+      combos.push({ code, items });
+    }
+  }
+  return combos.sort(function(a, b) { return a.code.localeCompare(b.code); });
+}
+
 export interface ProductSummary {
   product: string;
   totalQuantity: number;

@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppState } from '@/lib/store';
-import { getProductSkuCodes } from '@/lib/sku';
+import { getProductSkuCodes, getAllComboSkus } from '@/lib/sku';
 import {
   loadInventory, saveInventory, getCurrentStock, getStockStatus,
   getProductTransactions, getLowStockProducts, getTrackedProducts,
@@ -111,6 +111,19 @@ export default function AdminInventoryPage() {
   var trackedCount = useMemo(function() {
     return allProducts.filter(function(p) { return isProductTracked(inv, p); }).length;
   }, [inv, allProducts]);
+
+  var comboStocks = useMemo(function() {
+    var combos = getAllComboSkus();
+    var wh = selectedWh === 'ALL' ? undefined : selectedWh;
+    return combos.map(function(combo) {
+      var componentStocks = combo.items.map(function(item) {
+        var stock = getCurrentStock(inv, item.product, wh);
+        return { product: item.product, quantity: item.quantity, stock: stock, available: Math.floor(stock / item.quantity) };
+      });
+      var canMake = Math.min.apply(null, componentStocks.map(function(c) { return c.available; }));
+      return { code: combo.code, items: componentStocks, canMake: Math.max(0, canMake) };
+    });
+  }, [inv, selectedWh]);
 
   if (!currentUser || currentUser.role !== 'admin') {
     return <div className="p-6 text-red-400">Bạn không có quyền truy cập trang này.</div>;
@@ -637,6 +650,55 @@ export default function AdminInventoryPage() {
           </p>
         </div>
       </div>
+
+      {/* Combo stock */}
+      {comboStocks.length > 0 && (
+        <div className="mb-6 bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-700/50">
+            <h2 className="font-semibold text-gray-100 text-sm">Tồn kho Combo ({comboStocks.length})</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-gray-500 border-b border-slate-700/50">
+                  <th className="px-5 py-3 font-medium">Mã combo</th>
+                  <th className="px-4 py-3 font-medium">Thành phần</th>
+                  <th className="px-4 py-3 font-medium text-right">Có thể bán</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800">
+                {comboStocks.map(function(combo) {
+                  var status = combo.canMake <= 0 ? 'out' : combo.canMake <= 10 ? 'low' : 'ok';
+                  return (
+                    <tr key={combo.code} className="hover:bg-slate-800/50">
+                      <td className="px-5 py-3">
+                        <code className="px-2 py-0.5 bg-slate-800 rounded text-xs text-blue-300 font-mono">{combo.code}</code>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          {combo.items.map(function(c) {
+                            var isMin = c.available === combo.canMake;
+                            return (
+                              <span key={c.product} className={'text-xs ' + (isMin ? 'text-amber-400 font-medium' : 'text-gray-400')}>
+                                {c.product}: {c.stock.toLocaleString('vi-VN')}{c.quantity > 1 ? ' (x' + c.quantity + ')' : ''}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <span className={'font-bold ' + (status === 'out' ? 'text-red-400' : status === 'low' ? 'text-amber-400' : 'text-emerald-400')}>
+                          {combo.canMake.toLocaleString('vi-VN')}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Table search */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
