@@ -104,10 +104,10 @@ export function getStockStatus(current: number, threshold: number): 'ok' | 'low'
 
 export function isProductTracked(data: InventoryData, product: string): boolean {
   var p = data.products[product];
-  if (!p) return false;
-  return WAREHOUSES.some(function(wh) {
-    return p[wh] && p[wh].initialStock > 0;
-  });
+  if (p && WAREHOUSES.some(function(wh) { return p[wh] && p[wh].initialStock > 0; })) {
+    return true;
+  }
+  return data.transactions.some(function(t) { return t.product === product; });
 }
 
 export function addStockImport(data: InventoryData, product: string, quantity: number, note: string, wh: Warehouse): InventoryData {

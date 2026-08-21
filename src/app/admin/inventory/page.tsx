@@ -66,12 +66,14 @@ export default function AdminInventoryPage() {
         var totalThreshold = 0;
         WAREHOUSES.forEach(function(wh) {
           var cfg = getWarehouseConfig(inv, product, wh);
+          var cur = getCurrentStock(inv, product, wh);
           if (cfg && cfg.initialStock > 0) {
             totalInitial += cfg.initialStock;
             totalThreshold += cfg.alertThreshold;
-            var cur = getCurrentStock(inv, product, wh);
-            totalCurrent += cur;
-            var st = getStockStatus(cur, cfg.alertThreshold);
+          }
+          totalCurrent += cur;
+          if (cur !== 0 || (cfg && cfg.initialStock > 0)) {
+            var st = getStockStatus(cur, cfg ? cfg.alertThreshold : 0);
             if (st === 'out') worstStatus = 'out';
             else if (st === 'low' && worstStatus !== 'out') worstStatus = 'low';
             else if (worstStatus === 'unset') worstStatus = 'ok';
@@ -83,7 +85,7 @@ export default function AdminInventoryPage() {
         var initial = cfg ? cfg.initialStock : 0;
         var threshold = cfg ? cfg.alertThreshold : 0;
         var current = getCurrentStock(inv, product, selectedWh);
-        var status = initial > 0 ? getStockStatus(current, threshold) : 'unset';
+        var status = (initial > 0 || current !== 0) ? getStockStatus(current, threshold) : 'unset';
         return { product: product, initial: initial, threshold: threshold, current: current, status: status, skuCodes: skuCodes, tracked: tracked };
       }
     });
@@ -556,15 +558,15 @@ export default function AdminInventoryPage() {
                       var hn = getCurrentStock(inv, row.product, 'HN');
                       var hcmCfg = getWarehouseConfig(inv, row.product, 'HCM');
                       var hnCfg = getWarehouseConfig(inv, row.product, 'HN');
-                      var hcmHasConfig = hcmCfg && hcmCfg.initialStock > 0;
-                      var hnHasConfig = hnCfg && hnCfg.initialStock > 0;
+                      var hcmHasConfig = (hcmCfg && hcmCfg.initialStock > 0) || hcm !== 0;
+                      var hnHasConfig = (hnCfg && hnCfg.initialStock > 0) || hn !== 0;
                       return (
                         <>
                           <td className="px-4 py-3 text-right">
-                            {hcmHasConfig ? <span className={getStockStatus(hcm, hcmCfg!.alertThreshold) === 'out' ? 'text-red-400 font-semibold' : getStockStatus(hcm, hcmCfg!.alertThreshold) === 'low' ? 'text-amber-400 font-semibold' : 'text-blue-300'}>{formatNum(hcm)}</span> : <span className="text-gray-600">—</span>}
+                            {hcmHasConfig ? <span className={getStockStatus(hcm, hcmCfg?.alertThreshold ?? 0) === 'out' ? 'text-red-400 font-semibold' : getStockStatus(hcm, hcmCfg?.alertThreshold ?? 0) === 'low' ? 'text-amber-400 font-semibold' : 'text-blue-300'}>{formatNum(hcm)}</span> : <span className="text-gray-600">—</span>}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            {hnHasConfig ? <span className={getStockStatus(hn, hnCfg!.alertThreshold) === 'out' ? 'text-red-400 font-semibold' : getStockStatus(hn, hnCfg!.alertThreshold) === 'low' ? 'text-amber-400 font-semibold' : 'text-violet-300'}>{formatNum(hn)}</span> : <span className="text-gray-600">—</span>}
+                            {hnHasConfig ? <span className={getStockStatus(hn, hnCfg?.alertThreshold ?? 0) === 'out' ? 'text-red-400 font-semibold' : getStockStatus(hn, hnCfg?.alertThreshold ?? 0) === 'low' ? 'text-amber-400 font-semibold' : 'text-violet-300'}>{formatNum(hn)}</span> : <span className="text-gray-600">—</span>}
                           </td>
                           <td className="px-4 py-3 text-right font-semibold text-gray-300">
                             {(hcmHasConfig || hnHasConfig) ? formatNum(hcm + hn) : <span className="text-gray-600">—</span>}
@@ -573,10 +575,10 @@ export default function AdminInventoryPage() {
                       );
                     })() : (
                       <>
-                        <td className="px-4 py-3 text-right text-gray-300">{row.initial > 0 ? formatNum(row.initial) : <span className="text-gray-600">—</span>}</td>
+                        <td className="px-4 py-3 text-right text-gray-300">{(row.initial > 0 || row.current !== 0) ? formatNum(row.initial) : <span className="text-gray-600">—</span>}</td>
                         <td className={'px-4 py-3 text-right font-semibold ' + (
                           row.status === 'out' ? 'text-red-400' : row.status === 'low' ? 'text-amber-400' : row.status === 'ok' ? 'text-emerald-400' : 'text-gray-600'
-                        )}>{row.initial > 0 ? formatNum(row.current) : '—'}</td>
+                        )}>{(row.initial > 0 || row.current !== 0) ? formatNum(row.current) : '—'}</td>
                         <td className="px-4 py-3 text-right text-gray-400">{row.threshold > 0 ? formatNum(row.threshold) : <span className="text-gray-600">—</span>}</td>
                       </>
                     )}
