@@ -539,7 +539,9 @@ export async function dbGetPnlImports(): Promise<PnlImport[]> {
 }
 
 export async function dbSavePnlImports(list: PnlImport[]): Promise<void> {
+  var shopDatePairs = new Set<string>();
   for (const imp of list) {
+    shopDatePairs.add(imp.shopId + '|' + imp.dateFrom + '|' + imp.dateTo);
     const { error } = await db().from('pnl_imports').upsert({
       id: imp.id,
       shop_id: imp.shopId,
@@ -552,11 +554,43 @@ export async function dbSavePnlImports(list: PnlImport[]): Promise<void> {
     });
     if (error) throw new Error('Lưu PnL imports thất bại: ' + error.message);
   }
-  const newIds = new Set(list.map(function(imp) { return imp.id; }));
-  const { data: existing } = await db().from('pnl_imports').select('id');
-  const toDelete = (existing || []).filter(function(r: Record<string, unknown>) { return !newIds.has(r.id as string); });
-  for (const row of toDelete) {
-    await db().from('pnl_imports').delete().eq('id', row.id as string);
+  var newIds = new Set(list.map(function(imp) { return imp.id; }));
+  for (const imp of list) {
+    const { data: overlapping } = await db().from('pnl_imports').select('id,date_from,date_to')
+      .eq('shop_id', imp.shopId)
+      .lte('date_from', imp.dateTo)
+      .gte('date_to', imp.dateFrom);
+    if (overlapping) {
+      for (const row of overlapping) {
+        if (!newIds.has(row.id as string)) {
+          await db().from('pnl_imports').delete().eq('id', row.id as string);
+        }
+      }
+    }
+  }
+}
+
+export async function dbAddPnlImport(imp: PnlImport): Promise<void> {
+  const { error } = await db().from('pnl_imports').upsert({
+    id: imp.id,
+    shop_id: imp.shopId,
+    shop_name: imp.shopName,
+    channel: imp.channel,
+    date_from: imp.dateFrom,
+    date_to: imp.dateTo,
+    daily_data: imp.dailyData,
+    imported_at: imp.importedAt,
+  });
+  if (error) throw new Error('Lưu PnL import thất bại: ' + error.message);
+  const { data: overlapping } = await db().from('pnl_imports').select('id')
+    .eq('shop_id', imp.shopId)
+    .lte('date_from', imp.dateTo)
+    .gte('date_to', imp.dateFrom)
+    .neq('id', imp.id);
+  if (overlapping) {
+    for (const row of overlapping) {
+      await db().from('pnl_imports').delete().eq('id', row.id as string);
+    }
   }
 }
 

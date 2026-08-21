@@ -16,7 +16,7 @@ import {
   dbGetCskhReviews, dbAddCskhReview, dbUpdateCskhReview,
   dbGetCskhIssues, dbAddCskhIssue, dbUpdateCskhIssue,
   dbGetCogs, dbSaveCogs, dbGetPnlConfig, dbSavePnlConfig,
-  dbGetPnlImports, dbSavePnlImports,
+  dbGetPnlImports, dbSavePnlImports, dbAddPnlImport,
   dbGetChecklistTasks, dbSaveChecklistTasks,
   dbGetChecklistEntries, dbSaveChecklistEntries,
 } from '@/lib/db';
@@ -307,6 +307,16 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     if (IS_SUPABASE) dbSavePnlImports(imports).catch(function(err) { console.error(err); alert('Lỗi lưu PnL: ' + err.message); });
   }, []);
 
+  const addPnlImportCb = useCallback(function(imp: PnlImport) {
+    setState(function(s) {
+      var filtered = s.pnlImports.filter(function(existing) {
+        return existing.id !== imp.id && !(existing.shopId === imp.shopId && existing.dateFrom <= imp.dateTo && existing.dateTo >= imp.dateFrom);
+      });
+      return { ...s, pnlImports: filtered.concat([imp]) };
+    });
+    if (IS_SUPABASE) dbAddPnlImport(imp).catch(function(err) { console.error(err); });
+  }, []);
+
   const saveChecklistTasksCb = useCallback(function(tasks: ChecklistTask[]) {
     setState(function(s) { return { ...s, checklistTasks: tasks }; });
     if (IS_SUPABASE) dbSaveChecklistTasks(tasks).catch(function(err) { console.error(err); alert('Lỗi lưu checklist: ' + err.message); });
@@ -346,7 +356,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       addAnalytics: addAnalyticsCb, deleteAnalytics: deleteAnalyticsCb,
       addCskhReview: addCskhReviewCb, updateCskhReview: updateCskhReviewCb,
       addCskhIssue: addCskhIssueCb, updateCskhIssue: updateCskhIssueCb,
-      saveCogs: saveCogsCb, savePnlConfig: savePnlConfigCb, savePnlImports: savePnlImportsCb,
+      saveCogs: saveCogsCb, savePnlConfig: savePnlConfigCb, savePnlImports: savePnlImportsCb, addPnlImport: addPnlImportCb,
       saveChecklistTasks: saveChecklistTasksCb, saveChecklistEntries: saveChecklistEntriesCb,
     }}>
       {children}

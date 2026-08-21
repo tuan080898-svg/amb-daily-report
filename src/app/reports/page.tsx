@@ -84,7 +84,7 @@ interface ParsedRow {
 }
 
 function FileUploadForm() {
-  const { currentUser, shops, reports, monthlyPlans, monthlyKPIs, config, getUserShops, addReport, updateReport, addSkuImport, addAnalytics, cogsEntries, pnlConfig, pnlImports, savePnlImports } = useAppState();
+  const { currentUser, shops, reports, monthlyPlans, monthlyKPIs, config, getUserShops, addReport, updateReport, addSkuImport, addAnalytics, cogsEntries, pnlConfig, addPnlImport } = useAppState();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
   const [fileNames, setFileNames] = useState<string[]>([]);
@@ -905,10 +905,7 @@ function FileUploadForm() {
 
       var newPnlImport = buildPnlFromRawData(rawDataList, detectedPlatform, selectedShopId, adMapForPnl);
       if (newPnlImport) {
-        var existingPnl = pnlImports.filter(function(imp) {
-          return !(imp.shopId === newPnlImport!.shopId && !(newPnlImport!.dateTo < imp.dateFrom || newPnlImport!.dateFrom > imp.dateTo));
-        });
-        savePnlImports(existingPnl.concat([newPnlImport]));
+        addPnlImport(newPnlImport);
         pnlGenerated = true;
       }
     }
