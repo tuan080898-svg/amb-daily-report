@@ -215,10 +215,10 @@ export async function dbGetConfig(): Promise<AppConfig> {
   const { data } = await db().from('app_config').select('*').eq('id', 1).single();
   if (!data) return DEFAULT_CONFIG;
   return {
-    adsThresholdGreen: Number(data.ads_threshold_green) || DEFAULT_CONFIG.adsThresholdGreen,
-    adsThresholdYellow: Number(data.ads_threshold_yellow) || DEFAULT_CONFIG.adsThresholdYellow,
-    cancelReturnThresholdYellow: Number(data.cancel_return_threshold_yellow) || DEFAULT_CONFIG.cancelReturnThresholdYellow,
-    cancelReturnThresholdRed: Number(data.cancel_return_threshold_red) || DEFAULT_CONFIG.cancelReturnThresholdRed,
+    adsThresholdGreen: data.ads_threshold_green != null ? Number(data.ads_threshold_green) : DEFAULT_CONFIG.adsThresholdGreen,
+    adsThresholdYellow: data.ads_threshold_yellow != null ? Number(data.ads_threshold_yellow) : DEFAULT_CONFIG.adsThresholdYellow,
+    cancelReturnThresholdYellow: data.cancel_return_threshold_yellow != null ? Number(data.cancel_return_threshold_yellow) : DEFAULT_CONFIG.cancelReturnThresholdYellow,
+    cancelReturnThresholdRed: data.cancel_return_threshold_red != null ? Number(data.cancel_return_threshold_red) : DEFAULT_CONFIG.cancelReturnThresholdRed,
   };
 }
 
@@ -472,13 +472,12 @@ export async function dbGetCogs(): Promise<CogsEntry[]> {
 }
 
 export async function dbSaveCogs(list: CogsEntry[]): Promise<void> {
-  if (list.length > 0) {
-    const rows = list.map(function(e) { return { sku: e.sku, name: e.name, cost: e.cost }; });
-    const BATCH = 500;
-    for (let i = 0; i < rows.length; i += BATCH) {
-      const { error } = await db().from('cogs_entries').upsert(rows.slice(i, i + BATCH));
-      if (error) throw new Error('Lưu giá vốn thất bại: ' + error.message);
-    }
+  if (list.length === 0) return;
+  const rows = list.map(function(e) { return { sku: e.sku, name: e.name, cost: e.cost }; });
+  const BATCH = 500;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const { error } = await db().from('cogs_entries').upsert(rows.slice(i, i + BATCH));
+    if (error) throw new Error('Lưu giá vốn thất bại: ' + error.message);
   }
   const newSkus = new Set(list.map(function(e) { return e.sku; }));
   const { data: existing } = await db().from('cogs_entries').select('sku');
@@ -494,9 +493,9 @@ export async function dbGetPnlConfig(): Promise<PnlConfig> {
   const { data } = await db().from('pnl_config').select('*').eq('id', 1).single();
   if (data) {
     return {
-      shopeeFeeRate: Number(data.shopee_fee_rate) || 34,
-      tiktokFeeRate: Number(data.tiktok_fee_rate) || 34,
-      opexRate: Number(data.opex_rate) || 16,
+      shopeeFeeRate: data.shopee_fee_rate != null ? Number(data.shopee_fee_rate) : 34,
+      tiktokFeeRate: data.tiktok_fee_rate != null ? Number(data.tiktok_fee_rate) : 34,
+      opexRate: data.opex_rate != null ? Number(data.opex_rate) : 16,
     };
   }
   try {
@@ -504,7 +503,7 @@ export async function dbGetPnlConfig(): Promise<PnlConfig> {
     if (!res.error && res.data) {
       const parsed = JSON.parse(await res.data.text()) as PnlConfig;
       if (parsed.opexRate === undefined) parsed.opexRate = 16;
-      if (parsed.shopeeFeeRate <= 10) parsed.shopeeFeeRate = 34;
+      if (parsed.shopeeFeeRate == null) parsed.shopeeFeeRate = 34;
       await dbSavePnlConfig(parsed);
       return parsed;
     }

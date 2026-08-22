@@ -248,7 +248,7 @@ function FileUploadForm() {
         orderSeen.add(orderId);
         agg.totalOrders++;
         if (isCancelled) agg.cancelledOrders++;
-        if (isReturned) agg.returnedOrders++;
+        else if (isReturned) agg.returnedOrders++;
       }
 
       dailyMap.set(date, agg);
@@ -327,7 +327,7 @@ function FileUploadForm() {
         orderSeen.add(orderId);
         agg.totalOrders++;
         if (isCancelled) agg.cancelledOrders++;
-        if (isReturned) agg.returnedOrders++;
+        else if (isReturned) agg.returnedOrders++;
       }
 
       dailyMap.set(date, agg);

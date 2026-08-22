@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAppState } from '@/lib/store';
 import { formatCurrency, getDaysInMonth, getSaleDays, getDayCounts, calcPlanTotal, calcMktTotal } from '@/lib/utils';
 import { MonthlyPlan } from '@/lib/types';
@@ -45,7 +45,7 @@ export default function PlanningPage() {
     saleDayMkt: existingPlan?.saleDayMkt || 0,
   }));
 
-  useMemo(() => {
+  useEffect(() => {
     if (existingPlan) {
       setForm({
         regularDayTarget: existingPlan.regularDayTarget,

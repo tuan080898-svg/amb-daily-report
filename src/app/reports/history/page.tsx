@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAppState } from '@/lib/store';
 import { calculateMetrics, formatCurrency, formatPercent, getAlertBg } from '@/lib/utils';
 
@@ -19,13 +19,14 @@ export default function ReportHistoryPage() {
   }, [currentUser, getUserShops]);
 
   const filteredReports = useMemo(() => {
-    setPage(0);
     return reports
       .filter(r => r.date.startsWith(selectedMonth))
       .filter(r => selectedShopId === 'all' || r.shopId === selectedShopId)
       .filter(r => userShops.some(s => s.id === r.shopId))
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [reports, selectedMonth, selectedShopId, userShops]);
+
+  useEffect(() => { setPage(0); }, [selectedMonth, selectedShopId]);
 
   const summary = useMemo(() => {
     if (filteredReports.length === 0) return null;

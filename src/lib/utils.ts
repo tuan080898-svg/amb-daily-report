@@ -154,7 +154,7 @@ export function toDateString(date: Date): string {
 
 export function exportToCSV(headers: string[], rows: string[][]): string {
   const bom = '﻿';
-  const headerLine = headers.join(',');
+  const headerLine = headers.map(h => `"${String(h).replace(/"/g, '""')}"`).join(',');
   const dataLines = rows.map(row =>
     row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
   );
