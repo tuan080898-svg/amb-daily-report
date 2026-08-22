@@ -29,7 +29,7 @@ export async function dbAddUser(user: User): Promise<void> {
     name: user.name,
     role: user.role,
     assigned_shops: user.assignedShops,
-    password: user.password || '123456',
+    password: user.password || 'Amb@2024',
   });
   if (error) throw new Error('Thêm user thất bại: ' + error.message);
 }

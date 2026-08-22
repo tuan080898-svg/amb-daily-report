@@ -20,7 +20,7 @@ export default function AdminUsersPage() {
       name: '',
       role: 'employee',
       assignedShops: [],
-      password: '123456',
+      password: '',
     });
     setIsNew(true);
   }
@@ -108,6 +108,7 @@ function UserForm({ user, shops, onSave, onCancel, isNew }: {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.name.trim() || !form.email.trim()) { alert('Vui lòng nhập đầy đủ'); return; }
+    if (isNew && !form.password?.trim()) { alert('Vui lòng nhập mật khẩu cho user mới'); return; }
     onSave(form);
   }
 
@@ -149,7 +150,8 @@ function UserForm({ user, shops, onSave, onCancel, isNew }: {
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">Mật khẩu {isNew ? '' : '(để trống = giữ nguyên)'}</label>
             <input
-              type="text"
+              type="password"
+              autoComplete="new-password"
               value={form.password || ''}
               onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
               className="w-full px-3 py-2.5 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
