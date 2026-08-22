@@ -1,4 +1,5 @@
 import { getAllProducts } from './sku';
+import { IS_SUPABASE_CONFIGURED } from './supabase';
 
 export type Warehouse = 'HCM' | 'HN';
 export var WAREHOUSES: Warehouse[] = ['HCM', 'HN'];
@@ -87,6 +88,19 @@ export function saveInventory(data: InventoryData): void {
     console.error('[Inventory] Lỗi lưu dữ liệu tồn kho:', err);
     alert('Lỗi lưu dữ liệu tồn kho! Bộ nhớ trình duyệt có thể đầy. Hãy xuất Excel để sao lưu.');
   }
+  if (IS_SUPABASE_CONFIGURED) {
+    import('./db').then(function(mod) {
+      mod.dbSaveInventory(data).catch(function(err) {
+        console.error('[Inventory] Lỗi đồng bộ Supabase:', err);
+      });
+    });
+  }
+}
+
+export function hydrateInventory(data: InventoryData): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch {}
 }
 
 export function getWarehouseConfig(data: InventoryData, product: string, wh: Warehouse): InventoryConfig | null {

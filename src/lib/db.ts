@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry } from './types';
+import type { InventoryData, InventoryTransaction, InventoryConfig, Warehouse } from './inventory';
 import { DEFAULT_CONFIG } from './utils';
 import bcrypt from 'bcryptjs';
 
@@ -682,5 +683,88 @@ export async function dbSaveChecklistEntries(list: ChecklistEntry[]): Promise<vo
   for (let i = 0; i < rows.length; i += BATCH) {
     const { error } = await db().from('checklist_entries').upsert(rows.slice(i, i + BATCH));
     if (error) throw new Error('Lưu checklist entries thất bại: ' + error.message);
+  }
+}
+
+// ==================== Inventory ====================
+
+export async function dbGetInventory(): Promise<InventoryData> {
+  const [configRes, txRes] = await Promise.all([
+    db().from('inventory_configs').select('*'),
+    db().from('inventory_transactions').select('*').order('date', { ascending: false }),
+  ]);
+
+  const products: Record<string, Record<string, InventoryConfig>> = {};
+  if (configRes.data) {
+    configRes.data.forEach(function(r: { product: string; warehouse: string; initial_stock: number; alert_threshold: number }) {
+      if (!products[r.product]) products[r.product] = {};
+      products[r.product][r.warehouse] = {
+        initialStock: r.initial_stock || 0,
+        alertThreshold: r.alert_threshold || 10,
+      };
+    });
+  }
+
+  const transactions: InventoryTransaction[] = [];
+  if (txRes.data) {
+    txRes.data.forEach(function(r: { id: string; date: string; product: string; quantity: number; type: string; note: string; warehouse: string }) {
+      transactions.push({
+        id: r.id,
+        date: r.date,
+        product: r.product,
+        quantity: r.quantity,
+        type: r.type as InventoryTransaction['type'],
+        note: r.note || '',
+        warehouse: (r.warehouse || 'HCM') as Warehouse,
+      });
+    });
+  }
+
+  return { products, transactions };
+}
+
+export async function dbSaveInventory(data: InventoryData): Promise<void> {
+  const configRows: Array<{ product: string; warehouse: string; initial_stock: number; alert_threshold: number }> = [];
+  Object.entries(data.products).forEach(function(entry) {
+    var product = entry[0];
+    var whConfigs = entry[1];
+    Object.entries(whConfigs).forEach(function(whEntry) {
+      configRows.push({
+        product: product,
+        warehouse: whEntry[0],
+        initial_stock: whEntry[1].initialStock,
+        alert_threshold: whEntry[1].alertThreshold,
+      });
+    });
+  });
+
+  if (configRows.length > 0) {
+    await db().from('inventory_configs').delete().neq('product', '');
+    const BATCH = 500;
+    for (let i = 0; i < configRows.length; i += BATCH) {
+      const { error } = await db().from('inventory_configs').upsert(configRows.slice(i, i + BATCH));
+      if (error) throw new Error('Lưu config tồn kho thất bại: ' + error.message);
+    }
+  }
+
+  const txRows = data.transactions.map(function(t) {
+    return {
+      id: t.id,
+      date: t.date,
+      product: t.product,
+      quantity: t.quantity,
+      type: t.type,
+      note: t.note,
+      warehouse: t.warehouse || 'HCM',
+    };
+  });
+
+  await db().from('inventory_transactions').delete().neq('id', '');
+  if (txRows.length > 0) {
+    const BATCH = 500;
+    for (let i = 0; i < txRows.length; i += BATCH) {
+      const { error } = await db().from('inventory_transactions').upsert(txRows.slice(i, i + BATCH));
+      if (error) throw new Error('Lưu giao dịch tồn kho thất bại: ' + error.message);
+    }
   }
 }

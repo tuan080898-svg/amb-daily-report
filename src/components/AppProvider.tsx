@@ -19,7 +19,9 @@ import {
   dbGetPnlImports, dbSavePnlImports, dbAddPnlImport,
   dbGetChecklistTasks, dbSaveChecklistTasks,
   dbGetChecklistEntries, dbSaveChecklistEntries,
+  dbGetInventory,
 } from '@/lib/db';
+import { hydrateInventory } from '@/lib/inventory';
 
 const IS_SUPABASE = IS_SUPABASE_CONFIGURED;
 
@@ -46,11 +48,14 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss, cogsData, pnlCfg, pnlImps, clTasks, clEntries] = await Promise.all([
+        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss, cogsData, pnlCfg, pnlImps, clTasks, clEntries, invData] = await Promise.all([
           dbGetUsers(), dbGetShops(), dbGetReports(), dbGetKPIs(), dbGetPlans(), dbGetConfig(), dbGetSkuImports(), dbGetAnalytics(),
           dbGetCskhReviews(), dbGetCskhIssues(), dbGetCogs(), dbGetPnlConfig(), dbGetPnlImports(),
-          dbGetChecklistTasks(), dbGetChecklistEntries(),
+          dbGetChecklistTasks(), dbGetChecklistEntries(), dbGetInventory(),
         ]);
+        if (invData && (invData.transactions.length > 0 || Object.keys(invData.products).length > 0)) {
+          hydrateInventory(invData);
+        }
         if (cancelled) return;
         let savedUser = null;
         if (savedId && users.length > 0) {
