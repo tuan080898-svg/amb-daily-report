@@ -144,9 +144,16 @@ export function addStockImport(data: InventoryData, product: string, quantity: n
 }
 
 export function addSaleTransactions(data: InventoryData, sales: Array<{ product: string; quantity: number }>, date: string, shopName: string, wh: Warehouse): InventoryData {
+  var trackedInWh = new Set<string>();
+  Object.entries(data.products).forEach(function(entry) {
+    if (entry[1][wh]) trackedInWh.add(entry[0]);
+  });
+  data.transactions.forEach(function(t) {
+    if (t.warehouse === wh) trackedInWh.add(t.product);
+  });
   var newTxs = sales
     .filter(function(s) {
-      return s.quantity > 0 && data.products[s.product] && data.products[s.product][wh];
+      return s.quantity > 0 && trackedInWh.has(s.product);
     })
     .map(function(s) {
       return {
