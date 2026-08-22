@@ -20,7 +20,9 @@ function loadSkuMap(): SkuMap {
       cachedMap = JSON.parse(raw) as SkuMap;
       return cachedMap;
     }
-  } catch (_) {}
+  } catch (err) {
+    console.error('[SKU] Lỗi đọc SKU từ localStorage:', err);
+  }
   cachedMap = defaultSkuData as SkuMap;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(cachedMap));
   return cachedMap;
