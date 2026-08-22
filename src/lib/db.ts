@@ -1,6 +1,7 @@
 import { supabase } from './supabase';
 import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry } from './types';
 import { DEFAULT_CONFIG } from './utils';
+import bcrypt from 'bcryptjs';
 
 function db() {
   if (!supabase) throw new Error('Supabase not configured');
@@ -10,7 +11,7 @@ function db() {
 // ==================== Users ====================
 
 export async function dbGetUsers(): Promise<User[]> {
-  const { data } = await db().from('users').select('*');
+  const { data } = await db().from('users').select('id, email, name, role, assigned_shops');
   if (!data) return [];
   return data.map(r => ({
     id: r.id,
@@ -18,18 +19,19 @@ export async function dbGetUsers(): Promise<User[]> {
     name: r.name,
     role: r.role,
     assignedShops: r.assigned_shops || [],
-    password: r.password,
   }));
 }
 
 export async function dbAddUser(user: User): Promise<void> {
+  const rawPassword = user.password || 'Amb@2024';
+  const hashed = await bcrypt.hash(rawPassword, 10);
   const { error } = await db().from('users').insert({
     id: user.id,
     email: user.email,
     name: user.name,
     role: user.role,
     assigned_shops: user.assignedShops,
-    password: user.password || 'Amb@2024',
+    password: hashed,
   });
   if (error) throw new Error('Thêm user thất bại: ' + error.message);
 }
@@ -42,7 +44,7 @@ export async function dbUpdateUser(user: User): Promise<void> {
     assigned_shops: user.assignedShops,
   };
   if (user.password) {
-    updateData.password = user.password;
+    updateData.password = await bcrypt.hash(user.password, 10);
   }
   const { error } = await db().from('users').update(updateData).eq('id', user.id);
   if (error) throw new Error('Cập nhật user thất bại: ' + error.message);

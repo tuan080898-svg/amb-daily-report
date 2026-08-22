@@ -17,13 +17,21 @@ export default function LoginPage() {
     }
   }, [currentUser, router]);
 
-  function handleSubmit(e: React.FormEvent) {
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError('');
-    if (login(email, password)) {
-      router.push('/dashboard');
-    } else {
-      setError('Email hoặc mật khẩu không đúng');
+    setLoading(true);
+    try {
+      const ok = await login(email, password);
+      if (ok) {
+        router.push('/dashboard');
+      } else {
+        setError('Email hoặc mật khẩu không đúng');
+      }
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -66,9 +74,10 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 transition-colors"
+              disabled={loading}
+              className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Đăng nhập
+              {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
             </button>
           </form>
 

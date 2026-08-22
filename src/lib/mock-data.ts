@@ -22,15 +22,15 @@ export const MOCK_SHOPS: Shop[] = [
 ];
 
 export const MOCK_USERS: User[] = [
-  { id: 'admin', email: 'admin@amb.com.vn', name: 'Phạm Cao Tuấn', role: 'admin', assignedShops: MOCK_SHOPS.map(s => s.id), password: 'admin123' },
-  { id: 'uyen', email: 'uyen@amb.com.vn', name: 'Uyên', role: 'employee', assignedShops: ['sp1', 'sp6', 'sp8'], password: '123456' },
-  { id: 'thuhoai', email: 'thuhoai@amb.com.vn', name: 'Thu Hoài', role: 'employee', assignedShops: ['sp2', 'sp10', 'sp11'], password: '123456' },
-  { id: 'tuananh', email: 'tuananh@amb.com.vn', name: 'Tuấn Anh', role: 'employee', assignedShops: ['sp3'], password: '123456' },
-  { id: 'van', email: 'van@amb.com.vn', name: 'Vân', role: 'employee', assignedShops: ['sp4', 'sp7'], password: '123456' },
-  { id: 'truong', email: 'truong@amb.com.vn', name: 'Trường', role: 'employee', assignedShops: ['sp5'], password: '123456' },
-  { id: 'hailinh', email: 'hailinh@amb.com.vn', name: 'Hải Linh', role: 'employee', assignedShops: ['sp9'], password: '123456' },
-  { id: 'minh', email: 'minh@amb.com.vn', name: 'Minh', role: 'employee', assignedShops: ['tt1'], password: '123456' },
-  { id: 'ngat', email: 'ngat@amb.com.vn', name: 'Ngát', role: 'employee', assignedShops: ['tt2', 'tt3'], password: '123456' },
+  { id: 'admin', email: 'admin@amb.com.vn', name: 'Phạm Cao Tuấn', role: 'admin', assignedShops: MOCK_SHOPS.map(s => s.id) },
+  { id: 'uyen', email: 'uyen@amb.com.vn', name: 'Uyên', role: 'employee', assignedShops: ['sp1', 'sp6', 'sp8'] },
+  { id: 'thuhoai', email: 'thuhoai@amb.com.vn', name: 'Thu Hoài', role: 'employee', assignedShops: ['sp2', 'sp10', 'sp11'] },
+  { id: 'tuananh', email: 'tuananh@amb.com.vn', name: 'Tuấn Anh', role: 'employee', assignedShops: ['sp3'] },
+  { id: 'van', email: 'van@amb.com.vn', name: 'Vân', role: 'employee', assignedShops: ['sp4', 'sp7'] },
+  { id: 'truong', email: 'truong@amb.com.vn', name: 'Trường', role: 'employee', assignedShops: ['sp5'] },
+  { id: 'hailinh', email: 'hailinh@amb.com.vn', name: 'Hải Linh', role: 'employee', assignedShops: ['sp9'] },
+  { id: 'minh', email: 'minh@amb.com.vn', name: 'Minh', role: 'employee', assignedShops: ['tt1'] },
+  { id: 'ngat', email: 'ngat@amb.com.vn', name: 'Ngát', role: 'employee', assignedShops: ['tt2', 'tt3'] },
 ];
 
 function seededRandom(seed: number): () => number {

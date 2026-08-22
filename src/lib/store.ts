@@ -22,7 +22,7 @@ export interface AppState {
   checklistTasks: ChecklistTask[];
   checklistEntries: ChecklistEntry[];
   config: AppConfig;
-  login: (email: string, password: string) => boolean;
+  login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
   addReport: (report: DailyReport) => void;
   updateReport: (report: DailyReport) => void;

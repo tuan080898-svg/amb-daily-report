@@ -127,15 +127,25 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
-  const login = useCallback((email: string, password: string): boolean => {
-    const user = state.users.find(u => u.email === email && u.password === password);
-    if (user) {
-      setState(s => ({ ...s, currentUser: user }));
-      try { localStorage.setItem('amb_user_id', user.id); } catch {}
-      return true;
+  const login = useCallback(async (email: string, password: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      if (!res.ok) return false;
+      const { user } = await res.json();
+      if (user) {
+        setState(s => ({ ...s, currentUser: user }));
+        try { localStorage.setItem('amb_user_id', user.id); } catch {}
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
     }
-    return false;
-  }, [state.users]);
+  }, []);
 
   const logout = useCallback(() => {
     setState(s => ({ ...s, currentUser: null }));
