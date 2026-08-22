@@ -31,6 +31,7 @@ export default function SkuReportPage() {
   const [filterChannel, setFilterChannel] = useState<Channel | 'all'>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [activeRange, setActiveRange] = useState<string>('all');
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
@@ -116,6 +117,7 @@ export default function SkuReportPage() {
   const [showUnmapped, setShowUnmapped] = useState(false);
 
   function setQuickRange(type: 'all' | 'yesterday' | 'thisMonth' | 'lastMonth' | 'last3Months') {
+    setActiveRange(type);
     const now = new Date();
     if (type === 'all') {
       if (imports.length > 0) {
@@ -211,11 +213,9 @@ export default function SkuReportPage() {
       {imports.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <span className="text-xs text-gray-500">Nhanh:</span>
-          <button onClick={function() { setQuickRange('all'); }} className="px-3 py-1 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-500 border border-blue-500 transition-colors font-medium">Tất cả</button>
-          <button onClick={function() { setQuickRange('yesterday'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Hôm qua</button>
-          <button onClick={function() { setQuickRange('thisMonth'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Tháng này</button>
-          <button onClick={function() { setQuickRange('lastMonth'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">Tháng trước</button>
-          <button onClick={function() { setQuickRange('last3Months'); }} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 border border-slate-700 transition-colors">3 tháng</button>
+          {([['all', 'Tất cả'], ['yesterday', 'Hôm qua'], ['thisMonth', 'Tháng này'], ['lastMonth', 'Tháng trước'], ['last3Months', '3 tháng']] as const).map(function(item) {
+            return <button key={item[0]} onClick={function() { setQuickRange(item[0]); }} className={'px-3 py-1 text-xs rounded-lg border transition-colors ' + (activeRange === item[0] ? 'bg-blue-600 text-white border-blue-500 font-medium' : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border-slate-700')}>{item[1]}</button>;
+          })}
         </div>
       )}
 
