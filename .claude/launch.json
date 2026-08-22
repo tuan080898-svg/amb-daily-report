@@ -3,8 +3,9 @@
   "configurations": [
     {
       "name": "daily-report-dev",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "cwd": ".",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "dev"],
       "port": 3000
     }
   ]

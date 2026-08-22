@@ -67,7 +67,7 @@ export async function dbGetShops(): Promise<Shop[]> {
 }
 
 export async function dbAddShop(shop: Shop): Promise<void> {
-  await db().from('shops').insert({
+  const { error } = await db().from('shops').insert({
     id: shop.id,
     name: shop.name,
     channel: shop.channel,
@@ -75,6 +75,7 @@ export async function dbAddShop(shop: Shop): Promise<void> {
     assigned_to: shop.assignedTo,
     default_monthly_target: shop.defaultMonthlyTarget,
   });
+  if (error) throw new Error('Thêm shop thất bại: ' + error.message);
 }
 
 export async function dbUpdateShop(shop: Shop): Promise<void> {
@@ -89,7 +90,8 @@ export async function dbUpdateShop(shop: Shop): Promise<void> {
 }
 
 export async function dbDeleteShop(shopId: string): Promise<void> {
-  await db().from('shops').delete().eq('id', shopId);
+  const { error } = await db().from('shops').delete().eq('id', shopId);
+  if (error) throw new Error('Xóa shop thất bại: ' + error.message);
 }
 
 // ==================== Reports ====================
@@ -161,11 +163,12 @@ export async function dbGetKPIs(): Promise<MonthlyKPI[]> {
 }
 
 export async function dbUpdateKPI(kpi: MonthlyKPI): Promise<void> {
-  await db().from('monthly_kpis').upsert({
+  const { error } = await db().from('monthly_kpis').upsert({
     shop_id: kpi.shopId,
     month: kpi.month,
     kpi_amount: kpi.kpiAmount,
   }, { onConflict: 'shop_id,month' });
+  if (error) throw new Error('Cập nhật KPI thất bại: ' + error.message);
 }
 
 // ==================== Plans ====================
@@ -187,7 +190,7 @@ export async function dbGetPlans(): Promise<MonthlyPlan[]> {
 }
 
 export async function dbUpdatePlan(plan: MonthlyPlan): Promise<void> {
-  await db().from('monthly_plans').upsert({
+  const { error } = await db().from('monthly_plans').upsert({
     shop_id: plan.shopId,
     month: plan.month,
     regular_day_target: plan.regularDayTarget,
@@ -198,6 +201,7 @@ export async function dbUpdatePlan(plan: MonthlyPlan): Promise<void> {
     sale_day_mkt: plan.saleDayMkt,
     daily_overrides: plan.dailyOverrides,
   }, { onConflict: 'shop_id,month' });
+  if (error) throw new Error('Cập nhật kế hoạch thất bại: ' + error.message);
 }
 
 // ==================== Config ====================
