@@ -199,13 +199,18 @@ export function getSalesVelocity(data: InventoryData, product: string, wh: Wareh
   var cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - days);
   var cutoffStr = cutoff.toISOString().slice(0, 10);
+  var todayStr = new Date().toISOString().slice(0, 10);
   var totalSold = 0;
+  var earliestDate = '';
   data.transactions.forEach(function(t) {
     if (t.product === product && t.warehouse === wh && t.type === 'sale' && t.date >= cutoffStr) {
       totalSold += Math.abs(t.quantity);
+      if (!earliestDate || t.date < earliestDate) earliestDate = t.date;
     }
   });
-  return totalSold / days;
+  if (totalSold === 0) return 0;
+  var actualDays = Math.max(1, Math.round((new Date(todayStr).getTime() - new Date(earliestDate).getTime()) / 86400000) + 1);
+  return totalSold / Math.min(days, actualDays);
 }
 
 export function getReorderAlerts(data: InventoryData, wh?: Warehouse, leadTimeDays?: number, coverageDays?: number): ReorderAlert[] {
