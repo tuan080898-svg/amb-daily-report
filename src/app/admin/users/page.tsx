@@ -5,7 +5,7 @@ import { useAppState } from '@/lib/store';
 import { User, UserRole } from '@/lib/types';
 
 export default function AdminUsersPage() {
-  const { currentUser, users, shops, addUser, updateUser } = useAppState();
+  const { currentUser, users, shops, addUser, updateUser, deleteUser } = useAppState();
   const [editing, setEditing] = useState<User | null>(null);
   const [isNew, setIsNew] = useState(false);
 
@@ -83,8 +83,11 @@ export default function AdminUsersPage() {
                   <td className="px-4 py-3 text-gray-400 max-w-[300px]">
                     {user.role === 'admin' ? 'Tất cả' : (assignedShopNames.join(', ') || '—')}
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right space-x-3">
                     <button onClick={() => { setEditing(user); setIsNew(false); }} className="text-blue-400 hover:underline text-xs">Sửa</button>
+                    {user.id !== currentUser.id && (
+                      <button onClick={() => { if (confirm('Xóa user "' + user.name + '"? Thao tác không thể hoàn tác.')) deleteUser(user.id); }} className="text-red-400 hover:underline text-xs">Xóa</button>
+                    )}
                   </td>
                 </tr>
               );

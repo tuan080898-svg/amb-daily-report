@@ -34,6 +34,7 @@ export interface AppState {
   updateConfig: (config: AppConfig) => void;
   addUser: (user: User) => void;
   updateUser: (user: User) => void;
+  deleteUser: (userId: string) => void;
   getUserShops: (userId: string) => Shop[];
   addSkuImport: (imp: SkuImport) => void;
   deleteSkuImport: (id: string) => void;
@@ -51,7 +52,7 @@ export interface AppState {
   saveChecklistEntries: (entries: ChecklistEntry[]) => void;
 }
 
-export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addReport' | 'updateReport' | 'addShop' | 'updateShop' | 'deleteShop' | 'updateKPI' | 'updatePlan' | 'updateConfig' | 'addUser' | 'updateUser' | 'getUserShops' | 'addSkuImport' | 'deleteSkuImport' | 'addAnalytics' | 'deleteAnalytics' | 'addCskhReview' | 'updateCskhReview' | 'addCskhIssue' | 'updateCskhIssue' | 'saveCogs' | 'savePnlConfig' | 'savePnlImports' | 'addPnlImport' | 'saveChecklistTasks' | 'saveChecklistEntries'> {
+export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addReport' | 'updateReport' | 'addShop' | 'updateShop' | 'deleteShop' | 'updateKPI' | 'updatePlan' | 'updateConfig' | 'addUser' | 'updateUser' | 'deleteUser' | 'getUserShops' | 'addSkuImport' | 'deleteSkuImport' | 'addAnalytics' | 'deleteAnalytics' | 'addCskhReview' | 'updateCskhReview' | 'addCskhIssue' | 'updateCskhIssue' | 'saveCogs' | 'savePnlConfig' | 'savePnlImports' | 'addPnlImport' | 'saveChecklistTasks' | 'saveChecklistEntries'> {
   return {
     currentUser: null,
     users: [...MOCK_USERS],

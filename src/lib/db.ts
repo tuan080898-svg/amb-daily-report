@@ -51,6 +51,11 @@ export async function dbUpdateUser(user: User): Promise<void> {
   if (error) throw new Error('Cập nhật user thất bại: ' + error.message);
 }
 
+export async function dbDeleteUser(userId: string): Promise<void> {
+  const { error } = await db().from('users').delete().eq('id', userId);
+  if (error) throw new Error('Xóa user thất bại: ' + error.message);
+}
+
 // ==================== Shops ====================
 
 export async function dbGetShops(): Promise<Shop[]> {

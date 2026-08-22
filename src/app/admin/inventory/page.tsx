@@ -356,21 +356,6 @@ export default function AdminInventoryPage() {
           <h1 className="text-2xl font-bold text-gray-100">Quản lý Kho</h1>
           <p className="text-sm text-gray-500 mt-1">
             {trackedCount}/{allProducts.length} sản phẩm đang theo dõi — {inv.transactions.length} giao dịch đã lưu
-            <button onClick={function() {
-              try {
-                var raw = localStorage.getItem('amb_inventory');
-                if (!raw) { alert('Không có dữ liệu tồn kho trong localStorage!'); return; }
-                var d = JSON.parse(raw);
-                var txByProduct: Record<string, number> = {};
-                (d.transactions || []).forEach(function(t: { product: string; quantity: number }) {
-                  txByProduct[t.product] = (txByProduct[t.product] || 0) + t.quantity;
-                });
-                var lines = Object.entries(txByProduct).map(function(e) { return e[0] + ': ' + e[1]; }).join('\n');
-                alert('Products config: ' + Object.keys(d.products || {}).length + '\nGiao dịch: ' + (d.transactions || []).length + '\nSize: ' + (raw.length / 1024).toFixed(1) + 'KB\n\nTồn theo sản phẩm:\n' + (lines || 'Không có'));
-              } catch (err) { alert('Lỗi: ' + err); }
-            }} className="ml-2 text-blue-400 hover:text-blue-300 underline cursor-pointer text-xs">
-              [Debug]
-            </button>
           </p>
         </div>
         {/* Warehouse filter for table view */}

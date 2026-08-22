@@ -3,13 +3,15 @@
 import { useState, useMemo } from 'react';
 import { useAppState } from '@/lib/store';
 import { calculateMetrics, formatCurrency, formatPercent, getAlertBg } from '@/lib/utils';
-import Link from 'next/link';
+
+const PAGE_SIZE = 30;
 
 export default function ReportHistoryPage() {
   const { currentUser, shops, reports, config, getUserShops } = useAppState();
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`);
   const [selectedShopId, setSelectedShopId] = useState('all');
+  const [page, setPage] = useState(0);
 
   const userShops = useMemo(() => {
     if (!currentUser) return [];
@@ -17,12 +19,34 @@ export default function ReportHistoryPage() {
   }, [currentUser, getUserShops]);
 
   const filteredReports = useMemo(() => {
+    setPage(0);
     return reports
       .filter(r => r.date.startsWith(selectedMonth))
       .filter(r => selectedShopId === 'all' || r.shopId === selectedShopId)
       .filter(r => userShops.some(s => s.id === r.shopId))
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [reports, selectedMonth, selectedShopId, userShops]);
+
+  const summary = useMemo(() => {
+    if (filteredReports.length === 0) return null;
+    const totalTarget = filteredReports.reduce((s, r) => s + r.targetRevenue, 0);
+    const totalRevenue = filteredReports.reduce((s, r) => s + r.actualRevenue, 0);
+    const totalAdSpend = filteredReports.reduce((s, r) => s + r.adSpend, 0);
+    const totalOrders = filteredReports.reduce((s, r) => s + r.totalOrders, 0);
+    const totalCancelled = filteredReports.reduce((s, r) => s + r.cancelledOrders + r.returnedOrders, 0);
+    return {
+      totalTarget,
+      totalRevenue,
+      totalAdSpend,
+      totalOrders,
+      achievement: totalTarget > 0 ? totalRevenue / totalTarget : 0,
+      adsRatio: totalRevenue > 0 ? totalAdSpend / totalRevenue : 0,
+      cancelRate: totalOrders > 0 ? totalCancelled / totalOrders : 0,
+    };
+  }, [filteredReports]);
+
+  const totalPages = Math.ceil(filteredReports.length / PAGE_SIZE);
+  const pagedReports = filteredReports.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   if (!currentUser) return null;
 
@@ -53,6 +77,33 @@ export default function ReportHistoryPage() {
         </div>
       </div>
 
+      {summary && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+          <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-3">
+            <p className="text-xs text-gray-500 mb-1">Tổng target</p>
+            <p className="text-lg font-bold text-gray-100">{formatCurrency(summary.totalTarget)}</p>
+          </div>
+          <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-3">
+            <p className="text-xs text-gray-500 mb-1">Tổng doanh thu</p>
+            <p className="text-lg font-bold text-emerald-400">{formatCurrency(summary.totalRevenue)}</p>
+          </div>
+          <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-3">
+            <p className="text-xs text-gray-500 mb-1">% Đạt</p>
+            <p className={'text-lg font-bold ' + (summary.achievement >= 1 ? 'text-emerald-400' : summary.achievement >= 0.8 ? 'text-yellow-400' : 'text-red-400')}>{formatPercent(summary.achievement)}</p>
+          </div>
+          <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-3">
+            <p className="text-xs text-gray-500 mb-1">Tổng CP QC</p>
+            <p className="text-lg font-bold text-gray-100">{formatCurrency(summary.totalAdSpend)}</p>
+            <p className="text-xs text-gray-500">{formatPercent(summary.adsRatio)} DT</p>
+          </div>
+          <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-3">
+            <p className="text-xs text-gray-500 mb-1">Tổng đơn</p>
+            <p className="text-lg font-bold text-gray-100">{summary.totalOrders.toLocaleString()}</p>
+            <p className="text-xs text-gray-500">{formatPercent(summary.cancelRate)} hủy/hoàn</p>
+          </div>
+        </div>
+      )}
+
       <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -71,7 +122,7 @@ export default function ReportHistoryPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {filteredReports.map(report => {
+              {pagedReports.map(report => {
                 const shop = shops.find(s => s.id === report.shopId);
                 const metrics = calculateMetrics(report, config);
                 return (
@@ -111,6 +162,15 @@ export default function ReportHistoryPage() {
             </tbody>
           </table>
         </div>
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-4 py-3 border-t border-slate-700/50">
+            <p className="text-xs text-gray-500">Trang {page + 1}/{totalPages} ({filteredReports.length} dòng)</p>
+            <div className="flex gap-2">
+              <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed">Trước</button>
+              <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1} className="px-3 py-1 text-xs rounded-lg bg-slate-800 text-gray-300 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed">Sau</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

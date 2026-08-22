@@ -5,7 +5,7 @@ import { AppContext, createInitialState } from '@/lib/store';
 import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry } from '@/lib/types';
 import { IS_SUPABASE_CONFIGURED } from '@/lib/supabase';
 import {
-  dbGetUsers, dbAddUser, dbUpdateUser,
+  dbGetUsers, dbAddUser, dbUpdateUser, dbDeleteUser,
   dbGetShops, dbAddShop, dbUpdateShop, dbDeleteShop,
   dbGetReports, dbAddReport, dbUpdateReport,
   dbGetKPIs, dbUpdateKPI,
@@ -233,6 +233,11 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const deleteUser = useCallback((userId: string) => {
+    setState(s => ({ ...s, users: s.users.filter(u => u.id !== userId) }));
+    if (IS_SUPABASE) dbDeleteUser(userId).catch(err => { console.error(err); alert('Lỗi xóa user: ' + err.message); });
+  }, []);
+
   const addSkuImportCb = useCallback((imp: SkuImport) => {
     setState(s => {
       const filtered = s.skuImports.filter(e => {
@@ -366,7 +371,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       login, logout, addReport, updateReport,
       addShop, updateShop, deleteShop,
       updateKPI, updatePlan, updateConfig,
-      addUser, updateUser, getUserShops,
+      addUser, updateUser, deleteUser, getUserShops,
       addSkuImport: addSkuImportCb, deleteSkuImport: deleteSkuImportCb,
       addAnalytics: addAnalyticsCb, deleteAnalytics: deleteAnalyticsCb,
       addCskhReview: addCskhReviewCb, updateCskhReview: updateCskhReviewCb,
