@@ -886,7 +886,7 @@ function FileUploadForm() {
             }
           });
         }
-      } catch (_) {}
+      } catch (err) { console.error('[Inventory] Lỗi trừ kho:', err); }
     }
 
     // Auto-generate PnL data
