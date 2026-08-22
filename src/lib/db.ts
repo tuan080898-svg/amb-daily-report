@@ -746,12 +746,19 @@ export async function dbSaveInventory(data: InventoryData): Promise<void> {
     });
   });
 
+  const BATCH = 500;
   if (configRows.length > 0) {
-    await db().from('inventory_configs').delete().neq('product', '');
-    const BATCH = 500;
     for (let i = 0; i < configRows.length; i += BATCH) {
       const { error } = await db().from('inventory_configs').upsert(configRows.slice(i, i + BATCH));
       if (error) throw new Error('Lưu config tồn kho thất bại: ' + error.message);
+    }
+    const newProducts = new Set(configRows.map(r => r.product + '|' + r.warehouse));
+    const { data: existing } = await db().from('inventory_configs').select('product, warehouse');
+    if (existing) {
+      const toDelete = existing.filter(r => !newProducts.has(r.product + '|' + r.warehouse));
+      for (const row of toDelete) {
+        await db().from('inventory_configs').delete().eq('product', row.product).eq('warehouse', row.warehouse);
+      }
     }
   }
 
@@ -767,12 +774,18 @@ export async function dbSaveInventory(data: InventoryData): Promise<void> {
     };
   });
 
-  await db().from('inventory_transactions').delete().neq('id', '');
   if (txRows.length > 0) {
-    const BATCH = 500;
     for (let i = 0; i < txRows.length; i += BATCH) {
       const { error } = await db().from('inventory_transactions').upsert(txRows.slice(i, i + BATCH));
       if (error) throw new Error('Lưu giao dịch tồn kho thất bại: ' + error.message);
+    }
+    const newIds = new Set(txRows.map(r => r.id));
+    const { data: existingTx } = await db().from('inventory_transactions').select('id');
+    if (existingTx) {
+      const txToDelete = existingTx.filter(r => !newIds.has(r.id));
+      for (const row of txToDelete) {
+        await db().from('inventory_transactions').delete().eq('id', row.id);
+      }
     }
   }
 }

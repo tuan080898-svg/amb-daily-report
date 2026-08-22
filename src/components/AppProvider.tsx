@@ -159,7 +159,9 @@ export default function AppProvider({ children }: { children: ReactNode }) {
 
 
   const addReport = useCallback((report: DailyReport) => {
+    let prev: DailyReport[] | null = null;
     setState(s => {
+      prev = s.reports;
       const exists = s.reports.some(r => r.id === report.id);
       return {
         ...s,
@@ -168,110 +170,119 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           : [...s.reports, report],
       };
     });
-    if (IS_SUPABASE) dbAddReport(report).catch(err => { console.error(err); alert('Lỗi lưu báo cáo: ' + err.message); });
+    if (IS_SUPABASE) dbAddReport(report).catch(err => { console.error(err); alert('Lỗi lưu báo cáo: ' + err.message); if (prev) setState(s => ({ ...s, reports: prev! })); });
   }, []);
 
   const updateReport = useCallback((report: DailyReport) => {
     const updated = { ...report, updatedAt: new Date().toISOString() };
-    setState(s => ({
-      ...s,
-      reports: s.reports.map(r => r.id === report.id ? updated : r),
-    }));
-    if (IS_SUPABASE) dbUpdateReport(updated).catch(err => { console.error(err); alert('Lỗi cập nhật báo cáo: ' + err.message); });
+    let prev: DailyReport[] | null = null;
+    setState(s => {
+      prev = s.reports;
+      return { ...s, reports: s.reports.map(r => r.id === report.id ? updated : r) };
+    });
+    if (IS_SUPABASE) dbUpdateReport(updated).catch(err => { console.error(err); alert('Lỗi cập nhật báo cáo: ' + err.message); if (prev) setState(s => ({ ...s, reports: prev! })); });
   }, []);
 
   const addShop = useCallback((shop: Shop) => {
     setState(s => ({ ...s, shops: [...s.shops, shop] }));
-    if (IS_SUPABASE) dbAddShop(shop).catch(err => { console.error(err); alert('Lỗi lưu shop: ' + err.message); });
+    if (IS_SUPABASE) dbAddShop(shop).catch(err => { console.error(err); alert('Lỗi lưu shop: ' + err.message); setState(s => ({ ...s, shops: s.shops.filter(sh => sh.id !== shop.id) })); });
   }, []);
 
   const updateShop = useCallback((shop: Shop) => {
-    setState(s => ({ ...s, shops: s.shops.map(sh => sh.id === shop.id ? shop : sh) }));
-    if (IS_SUPABASE) dbUpdateShop(shop).catch(err => { console.error(err); alert('Lỗi cập nhật shop: ' + err.message); });
+    let prev: Shop[] | null = null;
+    setState(s => { prev = s.shops; return { ...s, shops: s.shops.map(sh => sh.id === shop.id ? shop : sh) }; });
+    if (IS_SUPABASE) dbUpdateShop(shop).catch(err => { console.error(err); alert('Lỗi cập nhật shop: ' + err.message); if (prev) setState(s => ({ ...s, shops: prev! })); });
   }, []);
 
   const deleteShop = useCallback((shopId: string) => {
-    setState(s => ({ ...s, shops: s.shops.filter(sh => sh.id !== shopId) }));
-    if (IS_SUPABASE) dbDeleteShop(shopId).catch(err => { console.error(err); alert('Lỗi xóa shop: ' + err.message); });
+    let prev: Shop[] | null = null;
+    setState(s => { prev = s.shops; return { ...s, shops: s.shops.filter(sh => sh.id !== shopId) }; });
+    if (IS_SUPABASE) dbDeleteShop(shopId).catch(err => { console.error(err); alert('Lỗi xóa shop: ' + err.message); if (prev) setState(s => ({ ...s, shops: prev! })); });
   }, []);
 
   const updateKPI = useCallback((kpi: MonthlyKPI) => {
-    setState(s => ({
-      ...s,
-      monthlyKPIs: s.monthlyKPIs.some(k => k.shopId === kpi.shopId && k.month === kpi.month)
-        ? s.monthlyKPIs.map(k => (k.shopId === kpi.shopId && k.month === kpi.month) ? kpi : k)
-        : [...s.monthlyKPIs, kpi],
-    }));
-    if (IS_SUPABASE) dbUpdateKPI(kpi).catch(err => { console.error(err); alert('Lỗi cập nhật KPI: ' + err.message); });
+    let prev: MonthlyKPI[] | null = null;
+    setState(s => {
+      prev = s.monthlyKPIs;
+      return { ...s, monthlyKPIs: s.monthlyKPIs.some(k => k.shopId === kpi.shopId && k.month === kpi.month) ? s.monthlyKPIs.map(k => (k.shopId === kpi.shopId && k.month === kpi.month) ? kpi : k) : [...s.monthlyKPIs, kpi] };
+    });
+    if (IS_SUPABASE) dbUpdateKPI(kpi).catch(err => { console.error(err); alert('Lỗi cập nhật KPI: ' + err.message); if (prev) setState(s => ({ ...s, monthlyKPIs: prev! })); });
   }, []);
 
   const updatePlan = useCallback((plan: MonthlyPlan) => {
-    setState(s => ({
-      ...s,
-      monthlyPlans: s.monthlyPlans.some(p => p.shopId === plan.shopId && p.month === plan.month)
-        ? s.monthlyPlans.map(p => (p.shopId === plan.shopId && p.month === plan.month) ? plan : p)
-        : [...s.monthlyPlans, plan],
-    }));
-    if (IS_SUPABASE) dbUpdatePlan(plan).catch(err => { console.error(err); alert('Lỗi cập nhật kế hoạch: ' + err.message); });
+    let prev: MonthlyPlan[] | null = null;
+    setState(s => {
+      prev = s.monthlyPlans;
+      return { ...s, monthlyPlans: s.monthlyPlans.some(p => p.shopId === plan.shopId && p.month === plan.month) ? s.monthlyPlans.map(p => (p.shopId === plan.shopId && p.month === plan.month) ? plan : p) : [...s.monthlyPlans, plan] };
+    });
+    if (IS_SUPABASE) dbUpdatePlan(plan).catch(err => { console.error(err); alert('Lỗi cập nhật kế hoạch: ' + err.message); if (prev) setState(s => ({ ...s, monthlyPlans: prev! })); });
   }, []);
 
   const updateConfig = useCallback((config: AppConfig) => {
-    setState(s => ({ ...s, config }));
-    if (IS_SUPABASE) dbUpdateConfig(config).catch(err => { console.error(err); alert('Lỗi cập nhật cấu hình: ' + err.message); });
+    let prev: AppConfig | null = null;
+    setState(s => { prev = s.config; return { ...s, config }; });
+    if (IS_SUPABASE) dbUpdateConfig(config).catch(err => { console.error(err); alert('Lỗi cập nhật cấu hình: ' + err.message); if (prev) setState(s => ({ ...s, config: prev! })); });
   }, []);
 
   const addUser = useCallback((user: User) => {
     setState(s => ({ ...s, users: [...s.users, user] }));
-    if (IS_SUPABASE) dbAddUser(user).catch(err => { console.error(err); alert('Lỗi lưu user: ' + err.message); });
+    if (IS_SUPABASE) dbAddUser(user).catch(err => { console.error(err); alert('Lỗi lưu user: ' + err.message); setState(s => ({ ...s, users: s.users.filter(u => u.id !== user.id) })); });
   }, []);
 
   const updateUser = useCallback((user: User) => {
-    setState(s => ({ ...s, users: s.users.map(u => u.id === user.id ? user : u) }));
-    if (IS_SUPABASE) {
-      dbUpdateUser(user)
-        .catch(err => { console.error(err); alert('Lỗi cập nhật user: ' + err.message); });
-    }
+    let prev: User[] | null = null;
+    setState(s => { prev = s.users; return { ...s, users: s.users.map(u => u.id === user.id ? user : u) }; });
+    if (IS_SUPABASE) dbUpdateUser(user).catch(err => { console.error(err); alert('Lỗi cập nhật user: ' + err.message); if (prev) setState(s => ({ ...s, users: prev! })); });
   }, []);
 
   const deleteUser = useCallback((userId: string) => {
-    setState(s => ({ ...s, users: s.users.filter(u => u.id !== userId) }));
-    if (IS_SUPABASE) dbDeleteUser(userId).catch(err => { console.error(err); alert('Lỗi xóa user: ' + err.message); });
+    let prev: User[] | null = null;
+    setState(s => { prev = s.users; return { ...s, users: s.users.filter(u => u.id !== userId) }; });
+    if (IS_SUPABASE) dbDeleteUser(userId).catch(err => { console.error(err); alert('Lỗi xóa user: ' + err.message); if (prev) setState(s => ({ ...s, users: prev! })); });
   }, []);
 
   const addSkuImportCb = useCallback((imp: SkuImport) => {
+    let prev: SkuImport[] | null = null;
     setState(s => {
+      prev = s.skuImports;
       const filtered = s.skuImports.filter(e => {
         if (e.shopId !== imp.shopId) return true;
         return e.dateTo < imp.dateFrom || e.dateFrom > imp.dateTo;
       });
       return { ...s, skuImports: [...filtered, imp] };
     });
-    if (IS_SUPABASE) dbAddSkuImport(imp).then(() => console.log('[SKU] save complete')).catch(err => { console.error('[SKU] save failed:', err); alert('Lỗi lưu SKU: ' + err.message); });
+    if (IS_SUPABASE) dbAddSkuImport(imp).then(() => console.log('[SKU] save complete')).catch(err => { console.error('[SKU] save failed:', err); alert('Lỗi lưu SKU: ' + err.message); if (prev) setState(s => ({ ...s, skuImports: prev! })); });
   }, []);
 
   const deleteSkuImportCb = useCallback((id: string) => {
-    setState(s => ({ ...s, skuImports: s.skuImports.filter(e => e.id !== id) }));
-    if (IS_SUPABASE) dbDeleteSkuImport(id).catch(err => { console.error(err); alert('Lỗi xoá SKU: ' + err.message); });
+    let prev: SkuImport[] | null = null;
+    setState(s => { prev = s.skuImports; return { ...s, skuImports: s.skuImports.filter(e => e.id !== id) }; });
+    if (IS_SUPABASE) dbDeleteSkuImport(id).catch(err => { console.error(err); alert('Lỗi xoá SKU: ' + err.message); if (prev) setState(s => ({ ...s, skuImports: prev! })); });
   }, []);
 
   const addAnalyticsCb = useCallback((imp: AnalyticsImport) => {
+    let prev: AnalyticsImport[] | null = null;
     setState(s => {
+      prev = s.analyticsImports;
       const filtered = s.analyticsImports.filter(function(e) {
         if (e.shopId !== imp.shopId) return true;
         return e.dateTo < imp.dateFrom || e.dateFrom > imp.dateTo;
       });
       return { ...s, analyticsImports: [...filtered, imp] };
     });
-    if (IS_SUPABASE) dbAddAnalytics(imp).then(() => console.log('[Analytics] save complete')).catch(err => { console.error('[Analytics] save failed:', err); alert('Lỗi lưu Analytics: ' + err.message); });
+    if (IS_SUPABASE) dbAddAnalytics(imp).then(() => console.log('[Analytics] save complete')).catch(err => { console.error('[Analytics] save failed:', err); alert('Lỗi lưu Analytics: ' + err.message); if (prev) setState(s => ({ ...s, analyticsImports: prev! })); });
   }, []);
 
   const deleteAnalyticsCb = useCallback((id: string) => {
-    setState(s => ({ ...s, analyticsImports: s.analyticsImports.filter(e => e.id !== id) }));
-    if (IS_SUPABASE) dbDeleteAnalytics(id).catch(err => { console.error(err); alert('Lỗi xoá Analytics: ' + err.message); });
+    let prev: AnalyticsImport[] | null = null;
+    setState(s => { prev = s.analyticsImports; return { ...s, analyticsImports: s.analyticsImports.filter(e => e.id !== id) }; });
+    if (IS_SUPABASE) dbDeleteAnalytics(id).catch(err => { console.error(err); alert('Lỗi xoá Analytics: ' + err.message); if (prev) setState(s => ({ ...s, analyticsImports: prev! })); });
   }, []);
 
   const addCskhReviewCb = useCallback(function(review: CskhReview) {
+    let prev: CskhReview[] | null = null;
     setState(function(s) {
+      prev = s.cskhReviews;
       const exists = s.cskhReviews.some(function(r) { return r.id === review.id; });
       return {
         ...s,
@@ -280,19 +291,23 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           : [...s.cskhReviews, review],
       };
     });
-    if (IS_SUPABASE) dbAddCskhReview(review).catch(function(err) { console.error(err); alert('Lỗi lưu đánh giá CSKH: ' + err.message); });
+    if (IS_SUPABASE) dbAddCskhReview(review).catch(function(err) { console.error(err); alert('Lỗi lưu đánh giá CSKH: ' + err.message); if (prev) setState(function(s) { return { ...s, cskhReviews: prev! }; }); });
   }, []);
 
   const updateCskhReviewCb = useCallback(function(review: CskhReview) {
     const updated = { ...review, updatedAt: new Date().toISOString() };
+    let prev: CskhReview[] | null = null;
     setState(function(s) {
+      prev = s.cskhReviews;
       return { ...s, cskhReviews: s.cskhReviews.map(function(r) { return r.id === review.id ? updated : r; }) };
     });
-    if (IS_SUPABASE) dbUpdateCskhReview(updated).catch(function(err) { console.error(err); alert('Lỗi cập nhật đánh giá CSKH: ' + err.message); });
+    if (IS_SUPABASE) dbUpdateCskhReview(updated).catch(function(err) { console.error(err); alert('Lỗi cập nhật đánh giá CSKH: ' + err.message); if (prev) setState(function(s) { return { ...s, cskhReviews: prev! }; }); });
   }, []);
 
   const addCskhIssueCb = useCallback(function(issue: CskhIssue) {
+    let prev: CskhIssue[] | null = null;
     setState(function(s) {
+      prev = s.cskhIssues;
       const exists = s.cskhIssues.some(function(i) { return i.id === issue.id; });
       return {
         ...s,
@@ -301,50 +316,59 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           : [...s.cskhIssues, issue],
       };
     });
-    if (IS_SUPABASE) dbAddCskhIssue(issue).catch(function(err) { console.error(err); alert('Lỗi lưu vấn đề CSKH: ' + err.message); });
+    if (IS_SUPABASE) dbAddCskhIssue(issue).catch(function(err) { console.error(err); alert('Lỗi lưu vấn đề CSKH: ' + err.message); if (prev) setState(function(s) { return { ...s, cskhIssues: prev! }; }); });
   }, []);
 
   const updateCskhIssueCb = useCallback(function(issue: CskhIssue) {
     const updated = { ...issue, updatedAt: new Date().toISOString() };
+    let prev: CskhIssue[] | null = null;
     setState(function(s) {
+      prev = s.cskhIssues;
       return { ...s, cskhIssues: s.cskhIssues.map(function(i) { return i.id === issue.id ? updated : i; }) };
     });
-    if (IS_SUPABASE) dbUpdateCskhIssue(updated).catch(function(err) { console.error(err); alert('Lỗi cập nhật vấn đề CSKH: ' + err.message); });
+    if (IS_SUPABASE) dbUpdateCskhIssue(updated).catch(function(err) { console.error(err); alert('Lỗi cập nhật vấn đề CSKH: ' + err.message); if (prev) setState(function(s) { return { ...s, cskhIssues: prev! }; }); });
   }, []);
 
   const saveCogsCb = useCallback(function(entries: CogsEntry[]) {
-    setState(function(s) { return { ...s, cogsEntries: entries }; });
-    if (IS_SUPABASE) dbSaveCogs(entries).catch(function(err) { console.error(err); alert('Lỗi lưu giá vốn: ' + err.message); });
+    let prev: CogsEntry[] | null = null;
+    setState(function(s) { prev = s.cogsEntries; return { ...s, cogsEntries: entries }; });
+    if (IS_SUPABASE) dbSaveCogs(entries).catch(function(err) { console.error(err); alert('Lỗi lưu giá vốn: ' + err.message); if (prev) setState(function(s) { return { ...s, cogsEntries: prev! }; }); });
   }, []);
 
   const savePnlConfigCb = useCallback(function(cfg: PnlConfig) {
-    setState(function(s) { return { ...s, pnlConfig: cfg }; });
-    if (IS_SUPABASE) dbSavePnlConfig(cfg).catch(function(err) { console.error(err); alert('Lỗi lưu cấu hình PnL: ' + err.message); });
+    let prev: PnlConfig | null = null;
+    setState(function(s) { prev = s.pnlConfig; return { ...s, pnlConfig: cfg }; });
+    if (IS_SUPABASE) dbSavePnlConfig(cfg).catch(function(err) { console.error(err); alert('Lỗi lưu cấu hình PnL: ' + err.message); if (prev) setState(function(s) { return { ...s, pnlConfig: prev! }; }); });
   }, []);
 
   const savePnlImportsCb = useCallback(function(imports: PnlImport[]) {
-    setState(function(s) { return { ...s, pnlImports: imports }; });
-    if (IS_SUPABASE) dbSavePnlImports(imports).catch(function(err) { console.error(err); alert('Lỗi lưu PnL: ' + err.message); });
+    let prev: PnlImport[] | null = null;
+    setState(function(s) { prev = s.pnlImports; return { ...s, pnlImports: imports }; });
+    if (IS_SUPABASE) dbSavePnlImports(imports).catch(function(err) { console.error(err); alert('Lỗi lưu PnL: ' + err.message); if (prev) setState(function(s) { return { ...s, pnlImports: prev! }; }); });
   }, []);
 
   const addPnlImportCb = useCallback(function(imp: PnlImport) {
+    let prev: PnlImport[] | null = null;
     setState(function(s) {
+      prev = s.pnlImports;
       var filtered = s.pnlImports.filter(function(existing) {
         return existing.id !== imp.id && !(existing.shopId === imp.shopId && existing.dateFrom <= imp.dateTo && existing.dateTo >= imp.dateFrom);
       });
       return { ...s, pnlImports: filtered.concat([imp]) };
     });
-    if (IS_SUPABASE) dbAddPnlImport(imp).catch(function(err) { console.error(err); });
+    if (IS_SUPABASE) dbAddPnlImport(imp).catch(function(err) { console.error(err); alert('Lỗi lưu PnL import: ' + err.message); if (prev) setState(function(s) { return { ...s, pnlImports: prev! }; }); });
   }, []);
 
   const saveChecklistTasksCb = useCallback(function(tasks: ChecklistTask[]) {
-    setState(function(s) { return { ...s, checklistTasks: tasks }; });
-    if (IS_SUPABASE) dbSaveChecklistTasks(tasks).catch(function(err) { console.error(err); alert('Lỗi lưu checklist: ' + err.message); });
+    let prev: ChecklistTask[] | null = null;
+    setState(function(s) { prev = s.checklistTasks; return { ...s, checklistTasks: tasks }; });
+    if (IS_SUPABASE) dbSaveChecklistTasks(tasks).catch(function(err) { console.error(err); alert('Lỗi lưu checklist: ' + err.message); if (prev) setState(function(s) { return { ...s, checklistTasks: prev! }; }); });
   }, []);
 
   const saveChecklistEntriesCb = useCallback(function(entries: ChecklistEntry[]) {
-    setState(function(s) { return { ...s, checklistEntries: entries }; });
-    if (IS_SUPABASE) dbSaveChecklistEntries(entries).catch(function(err) { console.error(err); alert('Lỗi lưu checklist: ' + err.message); });
+    let prev: ChecklistEntry[] | null = null;
+    setState(function(s) { prev = s.checklistEntries; return { ...s, checklistEntries: entries }; });
+    if (IS_SUPABASE) dbSaveChecklistEntries(entries).catch(function(err) { console.error(err); alert('Lỗi lưu checklist: ' + err.message); if (prev) setState(function(s) { return { ...s, checklistEntries: prev! }; }); });
   }, []);
 
   const getUserShops = useCallback((userId: string): Shop[] => {

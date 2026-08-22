@@ -63,19 +63,19 @@ function processRecord(recordId: string, tableId: string, fields: Record<string,
 
 function toLarkFields(data: Record<string, unknown>, includeAttachments = true): Record<string, unknown> {
   const fields: Record<string, unknown> = {};
-  if (data.customerName) fields['Tên khách hàng'] = String(data.customerName);
-  if (data.orderCode) fields['Mã đơn hàng'] = String(data.orderCode);
-  if (data.phone) fields['Số điện thoại'] = String(data.phone);
-  if (data.product) fields['Sản phẩm'] = String(data.product);
-  if (data.shop) fields['Shop'] = String(data.shop);
-  if (data.platform) fields['Sàn'] = String(data.platform);
+  if (data.customerName !== undefined) fields['Tên khách hàng'] = String(data.customerName);
+  if (data.orderCode !== undefined) fields['Mã đơn hàng'] = String(data.orderCode);
+  if (data.phone !== undefined) fields['Số điện thoại'] = String(data.phone);
+  if (data.product !== undefined) fields['Sản phẩm'] = String(data.product);
+  if (data.shop !== undefined) fields['Shop'] = String(data.shop);
+  if (data.platform !== undefined) fields['Sàn'] = String(data.platform);
   if (data.refundAmount !== undefined) {
     const amt = Number(data.refundAmount) || 0;
     fields['Số tiền hoàn'] = String(Math.round(amt / 1000));
   }
-  if (data.refundReason) fields['Lý do hoàn'] = String(data.refundReason);
-  if (data.status) fields['Trạng thái'] = String(data.status);
-  if (data.handler) fields['Người hoàn tiền'] = String(data.handler);
+  if (data.refundReason !== undefined) fields['Lý do hoàn'] = String(data.refundReason);
+  if (data.status !== undefined) fields['Trạng thái'] = String(data.status);
+  if (data.handler !== undefined) fields['Người hoàn tiền'] = String(data.handler);
   if (data.date) {
     const ts = new Date(String(data.date)).getTime();
     if (!isNaN(ts)) fields['Ngày'] = ts;
