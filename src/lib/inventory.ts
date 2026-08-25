@@ -55,6 +55,15 @@ function migrateData(raw: OldInventoryData): InventoryData {
     return tx;
   });
 
+  var beforeCount = transactions.length;
+  transactions = transactions.filter(function(tx) {
+    if (tx.type !== 'sale') return true;
+    var cfg = products[tx.product];
+    var wh = tx.warehouse || 'HCM';
+    return cfg && cfg[wh] && cfg[wh].initialStock > 0;
+  });
+  if (transactions.length < beforeCount) needsMigration = true;
+
   var data = { products: products, transactions: transactions };
   if (needsMigration) {
     saveInventory(data);
@@ -160,7 +169,9 @@ export function addStockImport(data: InventoryData, product: string, quantity: n
 export function addSaleTransactions(data: InventoryData, sales: Array<{ product: string; quantity: number }>, date: string, shopName: string, wh: Warehouse): InventoryData {
   var newTxs = sales
     .filter(function(s) {
-      return s.quantity > 0;
+      if (s.quantity <= 0) return false;
+      var cfg = data.products[s.product];
+      return cfg && cfg[wh] && cfg[wh].initialStock > 0;
     })
     .map(function(s) {
       return {

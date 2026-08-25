@@ -646,36 +646,16 @@ export default function PnlPage() {
                 </div>
               </div>
 
-              {/* Two Main Cards: Net Profit + CEO Insight */}
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* Net Profit Card */}
-                <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <p className="text-xs font-bold text-gray-400 tracking-wider">LỢI NHUẬN RÒNG CUỐI CÙNG</p>
-                    <span className={'inline-flex px-3 py-1 rounded-full text-xs font-bold ' + (profitMargin >= 0 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30')}>{pct(Math.abs(profitMargin))}</span>
-                  </div>
-                  <p className={'text-4xl font-extrabold tracking-tight mb-4 ' + (totals.profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>{fmt(totals.profit)}</p>
-                  <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800/80 border border-slate-700/30">
-                    <span className={'text-lg font-bold ' + (profitMargin >= 0 ? 'text-emerald-400' : 'text-red-400')}>{pct(Math.abs(profitMargin))}</span>
-                    <span className="text-sm text-gray-500">biên lợi nhuận ròng</span>
-                  </div>
+              {/* Net Profit Card */}
+              <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <p className="text-xs font-bold text-gray-400 tracking-wider">LỢI NHUẬN RÒNG CUỐI CÙNG</p>
+                  <span className={'inline-flex px-3 py-1 rounded-full text-xs font-bold ' + (profitMargin >= 0 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30')}>{pct(Math.abs(profitMargin))}</span>
                 </div>
-
-                {/* CEO Insight Card */}
-                <div className="bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800/50 border border-slate-700/50 rounded-2xl p-6">
-                  <p className="text-xs font-bold text-gray-400 tracking-wider mb-4">CEO CẦN NHÌN CON SỐ CUỐI CÙNG</p>
-                  <div className="space-y-3 mb-4">
-                    {profitMargin >= 15 && <p className="text-sm text-gray-300 leading-relaxed">Biên lợi nhuận ròng đang ở mức tốt. Doanh nghiệp có dư địa để đầu tư mở rộng quy mô.</p>}
-                    {profitMargin >= 5 && profitMargin < 15 && <p className="text-sm text-gray-300 leading-relaxed">Doanh thu cao chưa chắc lợi nhuận cao.</p>}
-                    {profitMargin >= 5 && profitMargin < 15 && <p className="text-sm text-gray-300 leading-relaxed">Chỉ cần bỏ sót 3% chi phí, lợi nhuận có thể sai lệch gần một phần ba.</p>}
-                    {profitMargin >= 0 && profitMargin < 5 && <p className="text-sm text-gray-300 leading-relaxed">Biên lợi nhuận rất mỏng. Mỗi phần trăm chi phí tăng thêm đều ảnh hưởng trực tiếp đến lãi ròng.</p>}
-                    {profitMargin < 0 && <p className="text-sm text-gray-300 leading-relaxed">Đang kinh doanh LỖ. Chi phí vượt quá doanh thu, cần rà soát ngay từng khoản mục chi phí.</p>}
-                  </div>
-                  <div className="px-4 py-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30">
-                    <p className="text-xs font-bold text-amber-400 tracking-wider">
-                      {'QUYẾT ĐỊNH: ' + (profitMargin < 0 ? 'CẮT GIẢM CHI PHÍ NGAY' : profitMargin < 10 ? 'GOM ĐỦ CHI PHÍ TRƯỚC KHI SCALE' : adRatio > 15 ? 'TỐI ƯU QC TRƯỚC KHI SCALE' : 'ĐỦ ĐIỀU KIỆN ĐỂ SCALE')}
-                    </p>
-                  </div>
+                <p className={'text-4xl font-extrabold tracking-tight mb-4 ' + (totals.profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>{fmt(totals.profit)}</p>
+                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800/80 border border-slate-700/30">
+                  <span className={'text-lg font-bold ' + (profitMargin >= 0 ? 'text-emerald-400' : 'text-red-400')}>{pct(Math.abs(profitMargin))}</span>
+                  <span className="text-sm text-gray-500">biên lợi nhuận ròng</span>
                 </div>
               </div>
 
