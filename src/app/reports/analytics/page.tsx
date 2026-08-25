@@ -68,39 +68,64 @@ export default function AnalyticsPage() {
     });
   }, [imports, filterShop, filterChannel, dateFrom, dateTo, shops]);
 
-  // Merge hourly data across filtered imports
+  // Merge hourly data across filtered imports (per-day when available)
   const mergedHourly = useMemo(function() {
     const hourly: { hour: number; revenue: number; orders: number }[] = [];
     for (var h = 0; h < 24; h++) {
       hourly.push({ hour: h, revenue: 0, orders: 0 });
     }
     filteredImports.forEach(function(imp) {
-      imp.hourlyData.forEach(function(hd) {
-        if (hd.hour >= 0 && hd.hour < 24) {
-          hourly[hd.hour].revenue += hd.revenue;
-          hourly[hd.hour].orders += hd.orders;
-        }
-      });
+      if (imp.dailyHourly && dateFrom && dateTo) {
+        Object.keys(imp.dailyHourly).forEach(function(day) {
+          if (day >= dateFrom && day <= dateTo) {
+            imp.dailyHourly![day].forEach(function(hd) {
+              if (hd.hour >= 0 && hd.hour < 24) {
+                hourly[hd.hour].revenue += hd.revenue;
+                hourly[hd.hour].orders += hd.orders;
+              }
+            });
+          }
+        });
+      } else {
+        imp.hourlyData.forEach(function(hd) {
+          if (hd.hour >= 0 && hd.hour < 24) {
+            hourly[hd.hour].revenue += hd.revenue;
+            hourly[hd.hour].orders += hd.orders;
+          }
+        });
+      }
     });
     return hourly;
-  }, [filteredImports]);
+  }, [filteredImports, dateFrom, dateTo]);
 
-  // Merge province data across filtered imports
+  // Merge province data across filtered imports (per-day when available)
   const mergedProvince = useMemo(function() {
     const provMap: Record<string, { revenue: number; orders: number }> = {};
     filteredImports.forEach(function(imp) {
-      imp.provinceData.forEach(function(pd) {
-        if (!provMap[pd.province]) provMap[pd.province] = { revenue: 0, orders: 0 };
-        provMap[pd.province].revenue += pd.revenue;
-        provMap[pd.province].orders += pd.orders;
-      });
+      if (imp.dailyProvince && dateFrom && dateTo) {
+        Object.keys(imp.dailyProvince).forEach(function(day) {
+          if (day >= dateFrom && day <= dateTo) {
+            imp.dailyProvince![day].forEach(function(pd) {
+              if (!provMap[pd.province]) provMap[pd.province] = { revenue: 0, orders: 0 };
+              provMap[pd.province].revenue += pd.revenue;
+              provMap[pd.province].orders += pd.orders;
+            });
+          }
+        });
+      } else {
+        imp.provinceData.forEach(function(pd) {
+          if (!provMap[pd.province]) provMap[pd.province] = { revenue: 0, orders: 0 };
+          provMap[pd.province].revenue += pd.revenue;
+          provMap[pd.province].orders += pd.orders;
+        });
+      }
     });
     return Object.entries(provMap)
       .map(function(entry) {
         return { province: entry[0], revenue: entry[1].revenue, orders: entry[1].orders };
       })
       .sort(function(a, b) { return b.revenue - a.revenue; });
-  }, [filteredImports]);
+  }, [filteredImports, dateFrom, dateTo]);
 
   const totalRevenue = useMemo(function() {
     return mergedHourly.reduce(function(sum, h) { return sum + h.revenue; }, 0);

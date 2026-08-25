@@ -76,6 +76,8 @@ export interface AnalyticsImport {
   dateTo: string;
   hourlyData: { hour: number; revenue: number; orders: number }[];
   provinceData: { province: string; revenue: number; orders: number }[];
+  dailyHourly?: Record<string, { hour: number; revenue: number; orders: number }[]>;
+  dailyProvince?: Record<string, { province: string; revenue: number; orders: number }[]>;
   importedAt: string;
 }
 

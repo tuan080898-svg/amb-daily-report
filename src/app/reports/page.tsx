@@ -107,6 +107,8 @@ function FileUploadForm() {
   const [collectedSkuByDateWh, setCollectedSkuByDateWh] = useState<Record<string, Record<string, string[]>>>({});
   const [collectedHourly, setCollectedHourly] = useState<Record<number, { revenue: number; orders: Set<string> }>>({});
   const [collectedProvince, setCollectedProvince] = useState<Record<string, { revenue: number; orders: Set<string> }>>({});
+  const [collectedDailyHourly, setCollectedDailyHourly] = useState<Record<string, Record<number, { revenue: number; orders: Set<string> }>>>({});
+  const [collectedDailyProvince, setCollectedDailyProvince] = useState<Record<string, Record<string, { revenue: number; orders: Set<string> }>>>({});
 
   const cogsMap = useMemo(function() {
     var m = new Map<string, number>();
@@ -197,6 +199,8 @@ function FileUploadForm() {
     const skuByDate: Record<string, string[]> = {};
     const hourlyMap: Record<number, { revenue: number; orders: Set<string> }> = {};
     const provinceMap: Record<string, { revenue: number; orders: Set<string> }> = {};
+    const dailyHourlyMap: Record<string, Record<number, { revenue: number; orders: Set<string> }>> = {};
+    const dailyProvinceMap: Record<string, Record<string, { revenue: number; orders: Set<string> }>> = {};
 
     for (const row of data) {
       const orderId = String(row['Mã đơn hàng'] || '').trim();
@@ -232,6 +236,10 @@ function FileUploadForm() {
           if (!hourlyMap[hour]) hourlyMap[hour] = { revenue: 0, orders: new Set() };
           hourlyMap[hour].revenue += lineRev;
           hourlyMap[hour].orders.add(orderId);
+          if (!dailyHourlyMap[date]) dailyHourlyMap[date] = {};
+          if (!dailyHourlyMap[date][hour]) dailyHourlyMap[date][hour] = { revenue: 0, orders: new Set() };
+          dailyHourlyMap[date][hour].revenue += lineRev;
+          dailyHourlyMap[date][hour].orders.add(orderId);
         }
 
         // Province data
@@ -241,6 +249,10 @@ function FileUploadForm() {
           if (!provinceMap[province]) provinceMap[province] = { revenue: 0, orders: new Set() };
           provinceMap[province].revenue += lineRev;
           provinceMap[province].orders.add(orderId);
+          if (!dailyProvinceMap[date]) dailyProvinceMap[date] = {};
+          if (!dailyProvinceMap[date][province]) dailyProvinceMap[date][province] = { revenue: 0, orders: new Set() };
+          dailyProvinceMap[date][province].revenue += lineRev;
+          dailyProvinceMap[date][province].orders.add(orderId);
         }
       }
 
@@ -258,6 +270,8 @@ function FileUploadForm() {
     setCollectedSkuByDate(skuByDate);
     setCollectedHourly(hourlyMap);
     setCollectedProvince(provinceMap);
+    setCollectedDailyHourly(dailyHourlyMap);
+    setCollectedDailyProvince(dailyProvinceMap);
     return Array.from(dailyMap.values()).sort(function(a, b) { return a.date.localeCompare(b.date); });
   }
 
@@ -269,6 +283,8 @@ function FileUploadForm() {
     const skuByDateWh: Record<string, Record<string, string[]>> = {};
     const hourlyMap: Record<number, { revenue: number; orders: Set<string> }> = {};
     const provinceMap: Record<string, { revenue: number; orders: Set<string> }> = {};
+    const dailyHourlyMap: Record<string, Record<number, { revenue: number; orders: Set<string> }>> = {};
+    const dailyProvinceMap: Record<string, Record<string, { revenue: number; orders: Set<string> }>> = {};
 
     for (const row of data) {
       const orderId = String(row['Order ID'] || '').trim();
@@ -311,6 +327,10 @@ function FileUploadForm() {
           if (!hourlyMap[hour]) hourlyMap[hour] = { revenue: 0, orders: new Set() };
           hourlyMap[hour].revenue += skuRevenue;
           hourlyMap[hour].orders.add(orderId);
+          if (!dailyHourlyMap[date]) dailyHourlyMap[date] = {};
+          if (!dailyHourlyMap[date][hour]) dailyHourlyMap[date][hour] = { revenue: 0, orders: new Set() };
+          dailyHourlyMap[date][hour].revenue += skuRevenue;
+          dailyHourlyMap[date][hour].orders.add(orderId);
         }
 
         // Province data
@@ -320,6 +340,10 @@ function FileUploadForm() {
           if (!provinceMap[province]) provinceMap[province] = { revenue: 0, orders: new Set() };
           provinceMap[province].revenue += skuRevenue;
           provinceMap[province].orders.add(orderId);
+          if (!dailyProvinceMap[date]) dailyProvinceMap[date] = {};
+          if (!dailyProvinceMap[date][province]) dailyProvinceMap[date][province] = { revenue: 0, orders: new Set() };
+          dailyProvinceMap[date][province].revenue += skuRevenue;
+          dailyProvinceMap[date][province].orders.add(orderId);
         }
       }
 
@@ -338,6 +362,8 @@ function FileUploadForm() {
     setCollectedSkuByDateWh(skuByDateWh);
     setCollectedHourly(hourlyMap);
     setCollectedProvince(provinceMap);
+    setCollectedDailyHourly(dailyHourlyMap);
+    setCollectedDailyProvince(dailyProvinceMap);
     return Array.from(dailyMap.values()).sort(function(a, b) { return a.date.localeCompare(b.date); });
   }
 
@@ -822,6 +848,22 @@ function FileUploadForm() {
           };
         })
         .sort(function(a, b) { return b.revenue - a.revenue; });
+      const dailyHourly: Record<string, { hour: number; revenue: number; orders: number }[]> = {};
+      Object.entries(collectedDailyHourly).forEach(function(entry) {
+        const d = entry[0]; const hMap = entry[1];
+        dailyHourly[d] = [];
+        for (var dh = 0; dh < 24; dh++) {
+          const he = hMap[dh];
+          dailyHourly[d].push({ hour: dh, revenue: he ? Math.round(he.revenue) : 0, orders: he ? he.orders.size : 0 });
+        }
+      });
+      const dailyProvince: Record<string, { province: string; revenue: number; orders: number }[]> = {};
+      Object.entries(collectedDailyProvince).forEach(function(entry) {
+        const d = entry[0]; const pMap = entry[1];
+        dailyProvince[d] = Object.entries(pMap).map(function(pe) {
+          return { province: pe[0], revenue: Math.round(pe[1].revenue), orders: pe[1].orders.size };
+        }).sort(function(a, b) { return b.revenue - a.revenue; });
+      });
       addAnalytics({
         id: 'analytics-' + selectedShopId + '-' + (sortedDates[0] || validRows[0].date),
         shopId: selectedShopId,
@@ -830,6 +872,8 @@ function FileUploadForm() {
         dateTo: sortedDates[sortedDates.length - 1] || validRows[validRows.length - 1].date,
         hourlyData: hourlyData,
         provinceData: provinceData,
+        dailyHourly: dailyHourly,
+        dailyProvince: dailyProvince,
         importedAt: new Date().toISOString(),
       });
     }
