@@ -134,6 +134,29 @@ export default function DashboardPage() {
     URL.revokeObjectURL(url);
   }
 
+  const missingReports = useMemo(() => {
+    if (!dateFrom || !dateTo || dateFrom > dateTo) return [];
+    const dates: string[] = [];
+    const d = new Date(dateFrom + 'T00:00:00');
+    const end = new Date(dateTo + 'T00:00:00');
+    while (d <= end) {
+      dates.push(toDateString(d));
+      d.setDate(d.getDate() + 1);
+    }
+    const today = toDateString(new Date());
+    const validDates = dates.filter(dt => dt <= today);
+    if (validDates.length === 0) return [];
+
+    return filteredShops.map(shop => {
+      const shopReportDates = new Set(
+        reports.filter(r => r.shopId === shop.id).map(r => r.date)
+      );
+      const missing = validDates.filter(dt => !shopReportDates.has(dt));
+      return { shop, missing };
+    }).filter(item => item.missing.length > 0)
+      .sort((a, b) => b.missing.length - a.missing.length);
+  }, [filteredShops, reports, dateFrom, dateTo]);
+
   if (!currentUser) return null;
 
   return (
@@ -239,6 +262,48 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Missing reports */}
+      {missingReports.length > 0 && (
+        <div className="bg-slate-900 border border-amber-500/30 rounded-xl overflow-hidden mb-6">
+          <div className="px-5 py-4 border-b border-slate-700/50 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <h2 className="font-semibold text-gray-100">Báo cáo thiếu</h2>
+              <span className="px-2 py-0.5 bg-amber-900/40 text-amber-300 rounded text-xs font-medium">
+                {missingReports.length} shop
+              </span>
+            </div>
+            <span className="text-xs text-gray-500">
+              {dateFrom === dateTo ? dateFrom : dateFrom + ' → ' + dateTo}
+            </span>
+          </div>
+          <div className="divide-y divide-slate-800">
+            {missingReports.map(({ shop, missing }) => (
+              <div key={shop.id} className="px-5 py-3 flex items-start gap-4">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="text-sm font-medium text-gray-200">{shop.name}</span>
+                    <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                      shop.channel === 'Shopee' ? 'bg-orange-500/15 text-orange-400' : 'bg-pink-500/15 text-pink-400'
+                    }`}>{shop.channel}</span>
+                    <span className="text-xs text-red-400 font-medium">thiếu {missing.length} ngày</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {missing.slice(0, 14).map(dt => (
+                      <span key={dt} className="px-2 py-0.5 bg-red-500/10 border border-red-500/20 rounded text-xs text-red-300">
+                        {dt.slice(5)}
+                      </span>
+                    ))}
+                    {missing.length > 14 && (
+                      <span className="px-2 py-0.5 text-xs text-gray-500">+{missing.length - 14} ngày</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Inventory reorder alerts */}
       {reorderAlerts.length > 0 && currentUser.role === 'admin' && (
