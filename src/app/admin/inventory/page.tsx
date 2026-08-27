@@ -31,6 +31,7 @@ export default function AdminInventoryPage() {
   const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
   const [opNote, setOpNote] = useState('');
   const [configThreshold, setConfigThreshold] = useState(10);
+  const [configLeadTime, setConfigLeadTime] = useState(10);
   const searchRef = useRef<HTMLDivElement>(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
   const [excelPreview, setExcelPreview] = useState<Array<{ product: string; qtyHCM: number; qtyHN: number; matched: boolean }> | null>(null);
@@ -203,7 +204,7 @@ export default function AdminInventoryPage() {
     } else if (activeTab === 'config') {
       batchItems.forEach(function(item) {
         if (!updated.products[item.product]) updated.products[item.product] = {};
-        updated.products[item.product][opWh] = { initialStock: item.quantity, alertThreshold: configThreshold };
+        updated.products[item.product][opWh] = { initialStock: item.quantity, alertThreshold: configThreshold, leadTimeDays: configLeadTime };
         count++;
       });
       saveInventory(updated); setInv(updated);
@@ -552,11 +553,18 @@ export default function AdminInventoryPage() {
                 </div>
               )}
               {activeTab === 'config' && (
-                <div className="w-48">
-                  <label className="block text-xs text-gray-400 mb-1">Ngưỡng cảnh báo</label>
-                  <input type="number" min={0} value={configThreshold} onChange={function(e) { setConfigThreshold(parseInt(e.target.value) || 0); }}
-                    className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none" />
-                </div>
+                <>
+                  <div className="w-40">
+                    <label className="block text-xs text-gray-400 mb-1">Ngưỡng cảnh báo</label>
+                    <input type="number" min={0} value={configThreshold} onChange={function(e) { setConfigThreshold(parseInt(e.target.value) || 0); }}
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none" />
+                  </div>
+                  <div className="w-40">
+                    <label className="block text-xs text-gray-400 mb-1">Lead time (ngày)</label>
+                    <input type="number" min={1} value={configLeadTime} onChange={function(e) { setConfigLeadTime(parseInt(e.target.value) || 10); }}
+                      className="w-full px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none" />
+                  </div>
+                </>
               )}
               <button onClick={handleSubmitBatch}
                 className={'px-6 py-2 text-white rounded-lg text-sm font-medium transition-colors ' + tc.btnClass}>

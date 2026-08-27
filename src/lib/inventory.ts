@@ -8,7 +8,10 @@ export var WAREHOUSE_LABELS: Record<Warehouse, string> = { HCM: 'Kho HCM', HN: '
 export interface InventoryConfig {
   initialStock: number;
   alertThreshold: number;
+  leadTimeDays: number;
 }
+
+export var DEFAULT_LEAD_TIME = 10;
 
 export interface InventoryTransaction {
   id: string;
@@ -41,9 +44,20 @@ function migrateData(raw: OldInventoryData): InventoryData {
     var val = entry[1] as InventoryConfig | Record<string, InventoryConfig>;
     if (typeof (val as InventoryConfig).initialStock === 'number') {
       needsMigration = true;
-      products[name] = { HCM: val as InventoryConfig };
+      var old = val as InventoryConfig;
+      products[name] = { HCM: { initialStock: old.initialStock, alertThreshold: old.alertThreshold, leadTimeDays: old.leadTimeDays || DEFAULT_LEAD_TIME } };
     } else {
-      products[name] = val as Record<string, InventoryConfig>;
+      var whMap = val as Record<string, InventoryConfig>;
+      products[name] = {};
+      Object.entries(whMap).forEach(function(whEntry) {
+        var cfg = whEntry[1];
+        if (!cfg.leadTimeDays) {
+          needsMigration = true;
+          products[name][whEntry[0]] = { initialStock: cfg.initialStock, alertThreshold: cfg.alertThreshold, leadTimeDays: DEFAULT_LEAD_TIME };
+        } else {
+          products[name][whEntry[0]] = cfg;
+        }
+      });
     }
   });
 
@@ -54,15 +68,6 @@ function migrateData(raw: OldInventoryData): InventoryData {
     }
     return tx;
   });
-
-  var beforeCount = transactions.length;
-  transactions = transactions.filter(function(tx) {
-    if (tx.type !== 'sale') return true;
-    var cfg = products[tx.product];
-    var wh = tx.warehouse || 'HCM';
-    return cfg && cfg[wh] && cfg[wh].initialStock > 0;
-  });
-  if (transactions.length < beforeCount) needsMigration = true;
 
   var data = { products: products, transactions: transactions };
   if (needsMigration) {
@@ -216,7 +221,9 @@ export interface ReorderAlert {
   currentStock: number;
   dailySales: number;
   daysRemaining: number;
+  reorderPoint: number;
   suggestedOrder: number;
+  leadTimeDays: number;
   urgency: 'critical' | 'warning' | 'ok';
 }
 
@@ -238,9 +245,7 @@ export function getSalesVelocity(data: InventoryData, product: string, wh: Wareh
   return totalSold / Math.min(days, actualDays);
 }
 
-export function getReorderAlerts(data: InventoryData, wh?: Warehouse, leadTimeDays?: number, coverageDays?: number): ReorderAlert[] {
-  var lead = leadTimeDays || 30;
-  var coverage = coverageDays || 30;
+export function getReorderAlerts(data: InventoryData, wh?: Warehouse): ReorderAlert[] {
   var warehouses = wh ? [wh] : WAREHOUSES;
   var results: ReorderAlert[] = [];
   var seen = new Set<string>();
@@ -261,14 +266,20 @@ export function getReorderAlerts(data: InventoryData, wh?: Warehouse, leadTimeDa
       var current = getCurrentStock(data, product, w);
       var daily = getSalesVelocity(data, product, w, 30);
       if (daily <= 0 && current <= 0) return;
+
+      var cfg = getWarehouseConfig(data, product, w);
+      var lead = cfg && cfg.leadTimeDays > 0 ? cfg.leadTimeDays : DEFAULT_LEAD_TIME;
+      var safetyBuffer = Math.ceil(daily * 3);
+      var rop = Math.ceil(daily * lead) + safetyBuffer;
       var daysLeft = daily > 0 ? current / daily : 9999;
-      var suggestedOrder = Math.max(0, Math.ceil(daily * coverage - Math.max(0, current - daily * lead)));
+      var suggestedOrder = Math.max(0, Math.ceil(daily * lead * 2 - current));
+
       var urgency: 'critical' | 'warning' | 'ok' = 'ok';
-      if (daysLeft <= lead) urgency = 'critical';
-      else if (daysLeft <= lead + 15) urgency = 'warning';
+      if (current <= rop * 0.5) urgency = 'critical';
+      else if (current <= rop) urgency = 'warning';
 
       if (urgency !== 'ok' || (daily > 0 && daysLeft < 9999)) {
-        results.push({ product: product, warehouse: w, currentStock: current, dailySales: daily, daysRemaining: Math.round(daysLeft), suggestedOrder: suggestedOrder, urgency: urgency });
+        results.push({ product: product, warehouse: w, currentStock: current, dailySales: daily, daysRemaining: Math.round(daysLeft), reorderPoint: rop, suggestedOrder: suggestedOrder, leadTimeDays: lead, urgency: urgency });
       }
     });
   });

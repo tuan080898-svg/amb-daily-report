@@ -704,11 +704,12 @@ export async function dbGetInventory(): Promise<InventoryData> {
 
   const products: Record<string, Record<string, InventoryConfig>> = {};
   if (configRes.data) {
-    configRes.data.forEach(function(r: { product: string; warehouse: string; initial_stock: number; alert_threshold: number }) {
+    configRes.data.forEach(function(r: { product: string; warehouse: string; initial_stock: number; alert_threshold: number; lead_time_days?: number }) {
       if (!products[r.product]) products[r.product] = {};
       products[r.product][r.warehouse] = {
         initialStock: r.initial_stock || 0,
         alertThreshold: r.alert_threshold || 10,
+        leadTimeDays: r.lead_time_days || 10,
       };
     });
   }
@@ -732,12 +733,20 @@ export async function dbGetInventory(): Promise<InventoryData> {
 }
 
 export async function dbSaveInventory(data: InventoryData): Promise<void> {
-  const configRows: Array<{ product: string; warehouse: string; initial_stock: number; alert_threshold: number }> = [];
+  const configRowsFull: Array<{ product: string; warehouse: string; initial_stock: number; alert_threshold: number; lead_time_days: number }> = [];
+  const configRowsBasic: Array<{ product: string; warehouse: string; initial_stock: number; alert_threshold: number }> = [];
   Object.entries(data.products).forEach(function(entry) {
     var product = entry[0];
     var whConfigs = entry[1];
     Object.entries(whConfigs).forEach(function(whEntry) {
-      configRows.push({
+      configRowsFull.push({
+        product: product,
+        warehouse: whEntry[0],
+        initial_stock: whEntry[1].initialStock,
+        alert_threshold: whEntry[1].alertThreshold,
+        lead_time_days: whEntry[1].leadTimeDays || 10,
+      });
+      configRowsBasic.push({
         product: product,
         warehouse: whEntry[0],
         initial_stock: whEntry[1].initialStock,
@@ -747,12 +756,22 @@ export async function dbSaveInventory(data: InventoryData): Promise<void> {
   });
 
   const BATCH = 500;
-  if (configRows.length > 0) {
-    for (let i = 0; i < configRows.length; i += BATCH) {
-      const { error } = await db().from('inventory_configs').upsert(configRows.slice(i, i + BATCH));
-      if (error) throw new Error('Lưu config tồn kho thất bại: ' + error.message);
+  if (configRowsFull.length > 0) {
+    let useFull = true;
+    for (let i = 0; i < configRowsFull.length; i += BATCH) {
+      const rows = useFull ? configRowsFull.slice(i, i + BATCH) : configRowsBasic.slice(i, i + BATCH);
+      const { error } = await db().from('inventory_configs').upsert(rows);
+      if (error) {
+        if (useFull && error.message.includes('lead_time_days')) {
+          useFull = false;
+          const { error: err2 } = await db().from('inventory_configs').upsert(configRowsBasic.slice(i, i + BATCH));
+          if (err2) throw new Error('Lưu config tồn kho thất bại: ' + err2.message);
+        } else {
+          throw new Error('Lưu config tồn kho thất bại: ' + error.message);
+        }
+      }
     }
-    const newProducts = new Set(configRows.map(r => r.product + '|' + r.warehouse));
+    const newProducts = new Set(configRowsBasic.map(r => r.product + '|' + r.warehouse));
     const { data: existing } = await db().from('inventory_configs').select('product, warehouse');
     if (existing) {
       const toDelete = existing.filter(r => !newProducts.has(r.product + '|' + r.warehouse));

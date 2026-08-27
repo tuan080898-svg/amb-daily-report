@@ -144,7 +144,7 @@ export default function DashboardPage() {
       d.setDate(d.getDate() + 1);
     }
     const today = toDateString(new Date());
-    const validDates = dates.filter(dt => dt <= today);
+    const validDates = dates.filter(dt => dt < today);
     if (validDates.length === 0) return [];
 
     return filteredShops.map(shop => {
@@ -328,34 +328,41 @@ export default function DashboardPage() {
             return (
               <div key={wh} className="px-5 py-3 border-b border-slate-800 last:border-b-0">
                 <p className="text-xs font-semibold text-gray-400 mb-2">{WAREHOUSE_LABELS[wh]}</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {critical.concat(warning).slice(0, 6).map(function(alert) {
+                <div className="space-y-2">
+                  {critical.concat(warning).slice(0, 8).map(function(alert) {
                     return (
-                      <div key={alert.product + wh} className={'flex items-center justify-between px-3 py-2 rounded-lg text-sm ' + (alert.urgency === 'critical' ? 'bg-red-950/30 border border-red-800/30' : 'bg-amber-950/30 border border-amber-800/30')}>
-                        <div>
-                          <span className="text-gray-200">{alert.product}</span>
-                          <span className="text-xs text-gray-500 ml-2">tồn: {alert.currentStock}</span>
-                        </div>
-                        <div className="text-right">
+                      <div key={alert.product + wh} className={'px-3 py-2.5 rounded-lg text-sm ' + (alert.urgency === 'critical' ? 'bg-red-950/30 border border-red-800/30' : 'bg-amber-950/30 border border-amber-800/30')}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-gray-200 font-medium">{alert.product}</span>
                           <span className={'font-bold text-sm ' + (alert.urgency === 'critical' ? 'text-red-400' : 'text-amber-400')}>
-                            {alert.daysRemaining >= 9999 ? '—' : alert.daysRemaining + 'ngày'}
+                            {alert.urgency === 'critical' ? 'SẮP HẾT' : 'CẦN ĐẶT'}
                           </span>
-                          {alert.suggestedOrder > 0 && (
-                            <span className="text-xs text-blue-300 ml-2">+{alert.suggestedOrder.toLocaleString('vi-VN')}</span>
-                          )}
                         </div>
+                        <div className="flex items-center gap-4 text-xs text-gray-400">
+                          <span>Tồn: <span className="text-gray-200">{alert.currentStock.toLocaleString('vi-VN')}</span></span>
+                          <span>Bán/ngày: <span className="text-gray-200">{Math.round(alert.dailySales)}</span></span>
+                          <span>Còn: <span className={alert.daysRemaining <= 7 ? 'text-red-400 font-medium' : 'text-gray-200'}>
+                            {alert.daysRemaining >= 9999 ? '—' : alert.daysRemaining + ' ngày'}
+                          </span></span>
+                          <span>ROP: <span className="text-gray-200">{alert.reorderPoint.toLocaleString('vi-VN')}</span></span>
+                        </div>
+                        {alert.suggestedOrder > 0 && (
+                          <div className="mt-1.5 text-xs">
+                            <span className="text-blue-400">&#8594; Đặt thêm: <span className="font-semibold">{alert.suggestedOrder.toLocaleString('vi-VN')}</span> (lead {alert.leadTimeDays} ngày)</span>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
                 </div>
-                {alerts.length > 6 && (
-                  <p className="text-xs text-gray-500 mt-2">+ {alerts.length - 6} sản phẩm khác</p>
+                {alerts.length > 8 && (
+                  <p className="text-xs text-gray-500 mt-2">+ {alerts.length - 8} sản phẩm khác</p>
                 )}
               </div>
             );
           })}
           <div className="px-5 py-2 border-t border-slate-700/50 text-xs text-gray-500">
-            Dựa trên tốc độ bán 30 ngày. Lead time 30 ngày.
+            ROP = (bán/ngày × lead time) + buffer 3 ngày. Dữ liệu bán 30 ngày gần nhất.
           </div>
         </div>
       )}
