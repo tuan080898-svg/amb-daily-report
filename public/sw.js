@@ -1,4 +1,4 @@
-var CACHE_NAME = 'amb-report-v1';
+var CACHE_NAME = 'amb-report-v2';
 
 self.addEventListener('install', function(event) {
   self.skipWaiting();
