@@ -16,6 +16,21 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+@media (max-width: 767px) {
+  .mobile-card {
+    padding: 0.75rem;
+  }
+
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
 input[type="date"]::-webkit-calendar-picker-indicator {

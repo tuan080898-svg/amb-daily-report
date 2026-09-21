@@ -160,61 +160,63 @@ export default function DashboardPage() {
   if (!currentUser) return null;
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
-        <div>
+    <div className="p-3 md:p-6 max-w-7xl mx-auto">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-4 md:mb-6 gap-3">
+        <div className="hidden md:block">
           <h1 className="text-2xl font-bold text-gray-100">Dashboard</h1>
           <p className="text-sm text-gray-500 mt-1">Tổng hợp doanh số {filteredShops.length} shop {dateFrom === dateTo ? `ngày ${dateFrom}` : `từ ${dateFrom} đến ${dateTo}`}</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <select
             value={regionFilter}
             onChange={e => setRegionFilter(e.target.value as Region | 'all')}
-            className="px-3 py-2 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-200"
+            className="px-2 md:px-3 py-1.5 md:py-2 border border-slate-600 rounded-lg text-xs md:text-sm bg-slate-800 text-gray-200 flex-1 min-w-0 md:flex-none"
           >
-            <option value="all">Tất cả khu vực</option>
+            <option value="all">Khu vực</option>
             <option value="HCM">HCM</option>
             <option value="HN">Hà Nội</option>
           </select>
           <select
             value={channelFilter}
             onChange={e => setChannelFilter(e.target.value as Channel | 'all')}
-            className="px-3 py-2 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-200"
+            className="px-2 md:px-3 py-1.5 md:py-2 border border-slate-600 rounded-lg text-xs md:text-sm bg-slate-800 text-gray-200 flex-1 min-w-0 md:flex-none"
           >
-            <option value="all">Tất cả kênh</option>
+            <option value="all">Kênh</option>
             <option value="Shopee">Shopee</option>
             <option value="TikTok">TikTok</option>
           </select>
           <select
             value={employeeFilter}
             onChange={e => setEmployeeFilter(e.target.value)}
-            className="px-3 py-2 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-200"
+            className="px-2 md:px-3 py-1.5 md:py-2 border border-slate-600 rounded-lg text-xs md:text-sm bg-slate-800 text-gray-200 flex-1 min-w-0 md:flex-none"
           >
-            <option value="all">Tất cả NV</option>
+            <option value="all">NV</option>
             {employees.map(emp => (
               <option key={emp.id} value={emp.id}>{emp.name}</option>
             ))}
           </select>
-          <div className="flex items-center gap-1.5 border border-slate-600 rounded-lg px-3 py-2 bg-slate-800">
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 border border-slate-600 rounded-lg px-2 md:px-3 py-1.5 md:py-2 bg-slate-800 flex-1 min-w-0">
             <input
               type="date"
               value={dateFrom}
               onChange={e => { setDateFrom(e.target.value); if (e.target.value > dateTo) setDateTo(e.target.value); }}
-              className="text-sm outline-none bg-transparent text-gray-200"
+              className="text-xs md:text-sm outline-none bg-transparent text-gray-200 w-full min-w-0"
             />
             <span className="text-gray-500 text-xs">→</span>
             <input
               type="date"
               value={dateTo}
               onChange={e => { setDateTo(e.target.value); if (e.target.value < dateFrom) setDateFrom(e.target.value); }}
-              className="text-sm outline-none bg-transparent text-gray-200"
+              className="text-xs md:text-sm outline-none bg-transparent text-gray-200 w-full min-w-0"
             />
           </div>
           <button
             onClick={handleExportCSV}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-500 transition-colors"
+            className="px-3 md:px-4 py-1.5 md:py-2 bg-green-600 text-white rounded-lg text-xs md:text-sm font-medium hover:bg-green-500 transition-colors whitespace-nowrap"
           >
-            Xuất CSV
+            CSV
           </button>
         </div>
       </div>
@@ -234,7 +236,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4 mb-4 md:mb-6">
         <SummaryCard label="Tổng target" value={formatCurrency(summary.totalTarget)} sub="đ" />
         <SummaryCard
           label="Tổng doanh thu"
@@ -264,8 +266,8 @@ export default function DashboardPage() {
 
       {/* Missing reports */}
       {missingReports.length > 0 && (
-        <div className="bg-slate-900 border border-amber-500/30 rounded-xl overflow-hidden mb-6">
-          <div className="px-5 py-4 border-b border-slate-700/50 flex items-center justify-between">
+        <div className="bg-slate-900 border border-amber-500/30 rounded-xl overflow-hidden mb-4 md:mb-6">
+          <div className="px-3 md:px-5 py-3 md:py-4 border-b border-slate-700/50 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <h2 className="font-semibold text-gray-100">Báo cáo thiếu</h2>
               <span className="px-2 py-0.5 bg-amber-900/40 text-amber-300 rounded text-xs font-medium">
@@ -278,7 +280,7 @@ export default function DashboardPage() {
           </div>
           <div className="divide-y divide-slate-800">
             {missingReports.map(({ shop, missing }) => (
-              <div key={shop.id} className="px-5 py-3 flex items-start gap-4">
+              <div key={shop.id} className="px-3 md:px-5 py-2.5 md:py-3 flex items-start gap-3 md:gap-4">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 mb-1.5">
                     <span className="text-sm font-medium text-gray-200">{shop.name}</span>
@@ -306,10 +308,10 @@ export default function DashboardPage() {
 
       {/* Inventory reorder alerts */}
       {reorderAlerts.length > 0 && currentUser.role === 'admin' && (
-        <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden mb-6">
-          <div className="px-5 py-4 border-b border-slate-700/50 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <h2 className="font-semibold text-gray-100">Cảnh báo tồn kho</h2>
+        <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden mb-4 md:mb-6">
+          <div className="px-3 md:px-5 py-3 md:py-4 border-b border-slate-700/50 flex items-center justify-between">
+            <div className="flex items-center gap-2 md:gap-3 flex-wrap">
+              <h2 className="font-semibold text-gray-100 text-sm md:text-base">Cảnh báo tồn kho</h2>
               {criticalCount > 0 && (
                 <span className="px-2 py-0.5 bg-red-900/40 text-red-300 rounded text-xs font-medium">{criticalCount} khẩn cấp</span>
               )}
@@ -325,19 +327,19 @@ export default function DashboardPage() {
             var critical = alerts.filter(function(a) { return a.urgency === 'critical'; });
             var warning = alerts.filter(function(a) { return a.urgency === 'warning'; });
             return (
-              <div key={wh} className="px-5 py-3 border-b border-slate-800 last:border-b-0">
+              <div key={wh} className="px-3 md:px-5 py-3 border-b border-slate-800 last:border-b-0">
                 <p className="text-xs font-semibold text-gray-400 mb-2">{WAREHOUSE_LABELS[wh]}</p>
                 <div className="space-y-2">
                   {critical.concat(warning).slice(0, 8).map(function(alert) {
                     return (
-                      <div key={alert.product + wh} className={'px-3 py-2.5 rounded-lg text-sm ' + (alert.urgency === 'critical' ? 'bg-red-950/30 border border-red-800/30' : 'bg-amber-950/30 border border-amber-800/30')}>
+                      <div key={alert.product + wh} className={'px-2.5 md:px-3 py-2 md:py-2.5 rounded-lg text-xs md:text-sm ' + (alert.urgency === 'critical' ? 'bg-red-950/30 border border-red-800/30' : 'bg-amber-950/30 border border-amber-800/30')}>
                         <div className="flex items-center justify-between mb-1">
-                          <span className="text-gray-200 font-medium">{alert.product}</span>
-                          <span className={'font-bold text-sm ' + (alert.urgency === 'critical' ? 'text-red-400' : 'text-amber-400')}>
+                          <span className="text-gray-200 font-medium truncate mr-2">{alert.product}</span>
+                          <span className={'font-bold text-xs md:text-sm whitespace-nowrap ' + (alert.urgency === 'critical' ? 'text-red-400' : 'text-amber-400')}>
                             {alert.urgency === 'critical' ? 'SẮP HẾT' : 'CẦN ĐẶT'}
                           </span>
                         </div>
-                        <div className="flex items-center gap-4 text-xs text-gray-400">
+                        <div className="flex flex-wrap items-center gap-2 md:gap-4 text-[10px] md:text-xs text-gray-400">
                           <span>Tồn: <span className="text-gray-200">{alert.currentStock.toLocaleString('vi-VN')}</span></span>
                           <span>Bán/ngày: <span className="text-gray-200">{Math.round(alert.dailySales)}</span></span>
                           <span>Còn: <span className={alert.daysRemaining <= 7 ? 'text-red-400 font-medium' : 'text-gray-200'}>
@@ -346,7 +348,7 @@ export default function DashboardPage() {
                           <span>ROP: <span className="text-gray-200">{alert.reorderPoint.toLocaleString('vi-VN')}</span></span>
                         </div>
                         {alert.suggestedOrder > 0 && (
-                          <div className="mt-1.5 text-xs">
+                          <div className="mt-1.5 text-[10px] md:text-xs">
                             <span className="text-blue-400">&#8594; Đặt thêm: <span className="font-semibold">{alert.suggestedOrder.toLocaleString('vi-VN')}</span> (lead {alert.leadTimeDays} ngày)</span>
                           </div>
                         )}
@@ -378,9 +380,9 @@ export default function DashboardPage() {
       </div>
 
       {/* Employee summary */}
-      <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden mb-6">
-        <div className="px-5 py-4 border-b border-slate-700/50">
-          <h2 className="font-semibold text-gray-100">Tổng hợp theo nhân viên</h2>
+      <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden mb-4 md:mb-6">
+        <div className="px-3 md:px-5 py-3 md:py-4 border-b border-slate-700/50">
+          <h2 className="font-semibold text-gray-100 text-sm md:text-base">Tổng hợp theo nhân viên</h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -454,8 +456,8 @@ export default function DashboardPage() {
 
       {/* Detail table */}
       <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-700/50">
-          <h2 className="font-semibold text-gray-100">Chi tiết theo shop</h2>
+        <div className="px-3 md:px-5 py-3 md:py-4 border-b border-slate-700/50">
+          <h2 className="font-semibold text-gray-100 text-sm md:text-base">Chi tiết theo shop</h2>
           <p className="text-xs text-gray-500 mt-1">Click vào shop để xem chi tiết từng ngày</p>
         </div>
         <div className="overflow-x-auto">
@@ -608,10 +610,10 @@ export default function DashboardPage() {
 
 function SummaryCard({ label, value, sub, highlight }: { label: string; value: string; sub: string; highlight?: boolean }) {
   return (
-    <div className={`border rounded-xl p-4 ${highlight ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-slate-900 border-slate-700/50'}`}>
-      <p className="text-xs text-gray-500 mb-1">{label}</p>
-      <p className={`text-lg font-bold ${highlight ? 'text-emerald-400' : 'text-gray-100'}`}>{value}</p>
-      <p className="text-xs text-gray-500 mt-0.5">{sub}</p>
+    <div className={`border rounded-xl p-3 md:p-4 ${highlight ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-slate-900 border-slate-700/50'}`}>
+      <p className="text-[10px] md:text-xs text-gray-500 mb-1">{label}</p>
+      <p className={`text-sm md:text-lg font-bold ${highlight ? 'text-emerald-400' : 'text-gray-100'}`}>{value}</p>
+      <p className="text-[10px] md:text-xs text-gray-500 mt-0.5">{sub}</p>
     </div>
   );
 }
