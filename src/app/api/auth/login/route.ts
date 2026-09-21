@@ -8,7 +8,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Database not configured' }, { status: 500 });
     }
 
-    const { email, password } = await req.json();
+    const body = await req.json();
+    const email = (body.email || '').trim().toLowerCase();
+    const password = (body.password || '').trim();
     if (!email || !password) {
       return NextResponse.json({ error: 'Email và mật khẩu không được để trống' }, { status: 400 });
     }
