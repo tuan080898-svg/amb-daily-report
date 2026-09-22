@@ -223,12 +223,13 @@ export async function dbGetConfig(): Promise<AppConfig> {
 }
 
 export async function dbUpdateConfig(config: AppConfig): Promise<void> {
-  await db().from('app_config').update({
+  const { error } = await db().from('app_config').update({
     ads_threshold_green: config.adsThresholdGreen,
     ads_threshold_yellow: config.adsThresholdYellow,
     cancel_return_threshold_yellow: config.cancelReturnThresholdYellow,
     cancel_return_threshold_red: config.cancelReturnThresholdRed,
   }).eq('id', 1);
+  if (error) throw error;
 }
 
 // ==================== SKU Imports (Supabase Storage) ====================
