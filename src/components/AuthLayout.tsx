@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAppState } from '@/lib/store';
 import Sidebar, { MobileBottomNav } from './Sidebar';
+import AiChat from './AiChat';
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAppState();
@@ -32,6 +33,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </div>
       </main>
       <MobileBottomNav />
+      <AiChat />
     </div>
   );
 }

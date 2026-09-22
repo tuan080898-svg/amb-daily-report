@@ -8,6 +8,7 @@ import { loadInventory, getReorderAlerts, WAREHOUSE_LABELS, type InventoryData }
 import dynamic from 'next/dynamic';
 
 const MonthlyCharts = dynamic(() => import('@/components/MonthlyCharts'), { ssr: false });
+const AiInsights = dynamic(() => import('@/components/AiInsights'), { ssr: false });
 
 export default function DashboardPage() {
   const { currentUser, shops, users, reports, config, getUserShops } = useAppState();
@@ -367,6 +368,9 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      {/* AI Insights */}
+      <AiInsights />
 
       {/* Charts */}
       <div className="mb-6">
