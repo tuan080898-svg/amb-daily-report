@@ -30,6 +30,71 @@ export interface InventoryData {
 
 const STORAGE_KEY = 'amb_inventory';
 
+let pendingSync: InventoryData | null = null;
+let syncInProgress = false;
+
+function notifySyncError(err: unknown): void {
+  var msg = err instanceof Error ? err.message : String(err);
+  console.error('[Inventory] Lỗi đồng bộ Supabase:', msg);
+  if (typeof window !== 'undefined') {
+    var banner = document.getElementById('inv-sync-error');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'inv-sync-error';
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:8px 16px;font-size:14px;text-align:center;cursor:pointer;';
+      banner.textContent = '⚠ Lỗi đồng bộ tồn kho lên cloud — đang thử lại...';
+      banner.onclick = function() { banner!.remove(); };
+      document.body.appendChild(banner);
+    }
+  }
+}
+
+function clearSyncError(): void {
+  if (typeof window !== 'undefined') {
+    var banner = document.getElementById('inv-sync-error');
+    if (banner) banner.remove();
+  }
+}
+
+async function syncToSupabase(data: InventoryData): Promise<void> {
+  if (syncInProgress) {
+    pendingSync = data;
+    return;
+  }
+  syncInProgress = true;
+  try {
+    var mod = await import('./db');
+    await mod.dbSaveInventory(data);
+    clearSyncError();
+    if (pendingSync) {
+      var next = pendingSync;
+      pendingSync = null;
+      syncInProgress = false;
+      await syncToSupabase(next);
+      return;
+    }
+  } catch (err) {
+    notifySyncError(err);
+    var retryData = pendingSync || data;
+    pendingSync = null;
+    syncInProgress = false;
+    await new Promise(function(r) { setTimeout(r, 3000); });
+    try {
+      var mod2 = await import('./db');
+      await mod2.dbSaveInventory(retryData);
+      clearSyncError();
+    } catch (err2) {
+      notifySyncError(err2);
+      if (typeof window !== 'undefined') {
+        var banner = document.getElementById('inv-sync-error');
+        if (banner) banner.textContent = '⚠ Đồng bộ tồn kho thất bại! Dữ liệu đã lưu local, sẽ thử lại khi tải trang.';
+      }
+    }
+    return;
+  }
+  syncInProgress = false;
+}
+
 interface OldInventoryData {
   products: Record<string, InventoryConfig | Record<string, InventoryConfig>>;
   transactions: InventoryTransaction[];
@@ -103,11 +168,7 @@ export function saveInventory(data: InventoryData): void {
     alert('Lỗi lưu dữ liệu tồn kho! Bộ nhớ trình duyệt có thể đầy. Hãy xuất Excel để sao lưu.');
   }
   if (IS_SUPABASE_CONFIGURED) {
-    import('./db').then(function(mod) {
-      mod.dbSaveInventory(data).catch(function(err) {
-        console.error('[Inventory] Lỗi đồng bộ Supabase:', err);
-      });
-    });
+    syncToSupabase(data);
   }
 }
 
