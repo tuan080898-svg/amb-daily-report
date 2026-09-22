@@ -22,6 +22,7 @@ import {
   dbGetInventory,
 } from '@/lib/db';
 import { hydrateInventory } from '@/lib/inventory';
+import { initSkuMapFromSupabase } from '@/lib/sku';
 
 const IS_SUPABASE = IS_SUPABASE_CONFIGURED;
 
@@ -56,6 +57,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
         if (invData && (invData.transactions.length > 0 || Object.keys(invData.products).length > 0)) {
           hydrateInventory(invData);
         }
+        initSkuMapFromSupabase().catch(function(e) { console.error('[SKU] init sync error:', e); });
         if (cancelled) return;
         let savedUser = null;
         if (savedId && users.length > 0) {

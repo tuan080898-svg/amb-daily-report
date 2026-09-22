@@ -289,9 +289,11 @@ export default function AdminSkuPage() {
 
   function handleResetToDefault() {
     if (!confirm('Reset toàn bộ mapping về mặc định? Các thay đổi sẽ bị mất.')) return;
-    localStorage.removeItem('amb_sku_mappings');
     invalidateCache();
-    setSkuMap(getSkuMap());
+    localStorage.removeItem('amb_sku_mappings');
+    var defaultMap = getSkuMap();
+    saveSkuMap(defaultMap);
+    setSkuMap(defaultMap);
     showSuccess('Đã reset về mapping mặc định');
   }
 

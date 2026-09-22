@@ -1,4 +1,5 @@
 import defaultSkuData from '@/data/sku-mappings.json';
+import { IS_SUPABASE_CONFIGURED } from './supabase';
 
 export interface SkuItem {
   product: string;
@@ -10,6 +11,7 @@ export type SkuMap = Record<string, SkuItem[]>;
 const STORAGE_KEY = 'amb_sku_mappings';
 
 let cachedMap: SkuMap | null = null;
+let supabaseSynced = false;
 
 function loadSkuMap(): SkuMap {
   if (cachedMap) return cachedMap;
@@ -28,6 +30,27 @@ function loadSkuMap(): SkuMap {
   return cachedMap;
 }
 
+export async function initSkuMapFromSupabase(): Promise<void> {
+  if (!IS_SUPABASE_CONFIGURED || supabaseSynced) return;
+  supabaseSynced = true;
+  try {
+    const { dbGetSkuMappings } = await import('./db');
+    const remote = await dbGetSkuMappings();
+    if (remote && Object.keys(remote).length > 0) {
+      cachedMap = remote as SkuMap;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cachedMap));
+    } else {
+      const local = loadSkuMap();
+      if (Object.keys(local).length > 0) {
+        const { dbSaveSkuMappings } = await import('./db');
+        await dbSaveSkuMappings(local);
+      }
+    }
+  } catch (err) {
+    console.error('[SKU] Supabase sync error:', err);
+  }
+}
+
 export function getSkuMap(): SkuMap {
   return loadSkuMap();
 }
@@ -35,6 +58,13 @@ export function getSkuMap(): SkuMap {
 export function saveSkuMap(map: SkuMap): void {
   cachedMap = map;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
+  if (IS_SUPABASE_CONFIGURED) {
+    import('./db').then(function(db) {
+      return db.dbSaveSkuMappings(map);
+    }).catch(function(err) {
+      console.error('[SKU] Supabase save error:', err);
+    });
+  }
 }
 
 export function invalidateCache(): void {

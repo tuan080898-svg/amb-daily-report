@@ -232,9 +232,32 @@ export async function dbUpdateConfig(config: AppConfig): Promise<void> {
   if (error) throw error;
 }
 
-// ==================== SKU Imports (Supabase Storage) ====================
+// ==================== SKU Mappings (Supabase Storage) ====================
 
 const SKU_BUCKET = 'sku-data';
+const SKU_MAPPINGS_FILE = 'mappings.json';
+
+export async function dbGetSkuMappings(): Promise<Record<string, Array<{ product: string; quantity: number }>> | null> {
+  try {
+    const { data, error } = await db().storage.from(SKU_BUCKET).download(SKU_MAPPINGS_FILE);
+    if (error) return null;
+    if (!data) return null;
+    const text = await data.text();
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+export async function dbSaveSkuMappings(map: Record<string, Array<{ product: string; quantity: number }>>): Promise<void> {
+  const json = JSON.stringify(map);
+  const blob = new Blob([json], { type: 'application/json' });
+  const { error } = await db().storage.from(SKU_BUCKET).upload(SKU_MAPPINGS_FILE, blob, { upsert: true });
+  if (error) throw new Error('Lưu SKU mappings thất bại: ' + error.message);
+}
+
+// ==================== SKU Imports (Supabase Storage) ====================
+
 const SKU_FILE = 'imports.json';
 
 export async function dbGetSkuImports(): Promise<SkuImport[]> {
