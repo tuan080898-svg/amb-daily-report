@@ -4,6 +4,24 @@ import { getChatSystemPrompt } from '@/lib/ai/system-prompts';
 import { buildChatContext } from '@/lib/ai/data-context';
 import { dbGetUsers } from '@/lib/db';
 
+export async function GET() {
+  var keyExists = !!process.env.ANTHROPIC_API_KEY;
+  var keyPrefix = process.env.ANTHROPIC_API_KEY ? process.env.ANTHROPIC_API_KEY.slice(0, 10) + '...' : 'NOT SET';
+  var keyLength = process.env.ANTHROPIC_API_KEY ? process.env.ANTHROPIC_API_KEY.length : 0;
+
+  if (!keyExists) {
+    return NextResponse.json({ status: 'ERROR', message: 'ANTHROPIC_API_KEY not set', keyPrefix, keyLength });
+  }
+
+  try {
+    var reply = await callClaude('Reply with just "OK"', [{ role: 'user', content: 'test' }], { maxTokens: 10 });
+    return NextResponse.json({ status: 'OK', message: 'AI working', keyPrefix, keyLength, reply });
+  } catch (err) {
+    var msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ status: 'ERROR', message: msg, keyPrefix, keyLength });
+  }
+}
+
 var rateMap = new Map<string, number[]>();
 
 function checkRate(userId: string): boolean {
@@ -53,15 +71,6 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     console.error('[AI Chat] Error:', err);
     var errMsg = err instanceof Error ? err.message : String(err);
-    if (errMsg.includes('rate_limit') || errMsg.includes('429')) {
-      return NextResponse.json({ error: 'AI dang ban, vui long thu lai sau.' }, { status: 429 });
-    }
-    if (errMsg.includes('authentication') || errMsg.includes('401') || errMsg.includes('invalid')) {
-      return NextResponse.json({ error: 'API key khong hop le. Kiem tra lai ANTHROPIC_API_KEY tren Vercel.' }, { status: 401 });
-    }
-    if (errMsg.includes('credit') || errMsg.includes('billing') || errMsg.includes('402')) {
-      return NextResponse.json({ error: 'Tai khoan Anthropic het credit. Vao console.anthropic.com nap them.' }, { status: 402 });
-    }
-    return NextResponse.json({ error: 'Loi AI: ' + errMsg.slice(0, 200) }, { status: 500 });
+    return NextResponse.json({ error: '[DEBUG] ' + errMsg.slice(0, 300) }, { status: 500 });
   }
 }
