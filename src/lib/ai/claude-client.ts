@@ -18,7 +18,7 @@ export async function callClaude(
 ): Promise<string> {
   var c = getClient();
   var response = await c.messages.create({
-    model: 'claude-sonnet-4-20250514',
+    model: 'claude-haiku-4-5-20251001',
     max_tokens: options?.maxTokens || 4096,
     system: systemPrompt,
     messages: messages,
