@@ -15,6 +15,8 @@ var categoryLabels: Record<string, string> = {
   anomaly: 'Bat thuong',
   inventory: 'Ton kho',
   cskh: 'CSKH',
+  kpi: 'KPI',
+  employee: 'Nhan vien',
 };
 
 export default function AiInsights() {
@@ -113,6 +115,13 @@ export default function AiInsights() {
                         <span className="text-[10px] text-gray-500">{categoryLabels[insight.category] || insight.category}</span>
                       </div>
                       <p className="text-xs text-gray-300 leading-relaxed">{insight.content}</p>
+                      {insight.action && (
+                        <div className="mt-1.5 pt-1.5 border-t border-slate-700/30">
+                          <p className="text-xs text-emerald-400 leading-relaxed">
+                            <span className="font-semibold">Hanh dong:</span> {insight.action}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

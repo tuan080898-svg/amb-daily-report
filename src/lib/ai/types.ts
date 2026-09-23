@@ -20,10 +20,11 @@ export interface DailyInsight {
   id: string;
   date: string;
   shopId?: string;
-  category: 'performance' | 'anomaly' | 'inventory' | 'cskh';
+  category: 'performance' | 'anomaly' | 'inventory' | 'cskh' | 'kpi' | 'employee';
   severity: 'info' | 'warning' | 'critical';
   title: string;
   content: string;
+  action?: string;
 }
 
 export interface InsightsResponse {

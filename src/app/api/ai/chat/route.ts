@@ -4,24 +4,6 @@ import { getChatSystemPrompt } from '@/lib/ai/system-prompts';
 import { buildChatContext } from '@/lib/ai/data-context';
 import { dbGetUsers } from '@/lib/db';
 
-export async function GET() {
-  var keyExists = !!process.env.ANTHROPIC_API_KEY;
-  var keyPrefix = process.env.ANTHROPIC_API_KEY ? process.env.ANTHROPIC_API_KEY.slice(0, 10) + '...' : 'NOT SET';
-  var keyLength = process.env.ANTHROPIC_API_KEY ? process.env.ANTHROPIC_API_KEY.length : 0;
-
-  if (!keyExists) {
-    return NextResponse.json({ status: 'ERROR', message: 'ANTHROPIC_API_KEY not set', keyPrefix, keyLength });
-  }
-
-  try {
-    var reply = await callClaude('Reply with just "OK"', [{ role: 'user', content: 'test' }], { maxTokens: 10 });
-    return NextResponse.json({ status: 'OK', message: 'AI working', keyPrefix, keyLength, reply });
-  } catch (err) {
-    var msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ status: 'ERROR', message: msg, keyPrefix, keyLength });
-  }
-}
-
 var rateMap = new Map<string, number[]>();
 
 function checkRate(userId: string): boolean {
@@ -65,12 +47,12 @@ export async function POST(req: NextRequest) {
     var lastMessages = history.slice(-6);
     var messages = lastMessages.concat([{ role: 'user' as const, content: message }]);
 
-    var reply = await callClaude(systemPrompt, messages, { maxTokens: 2048, budget: 'low' });
+    var reply = await callClaude(systemPrompt, messages, { maxTokens: 4096, budget: 'low' });
 
     return NextResponse.json({ reply: reply });
   } catch (err) {
     console.error('[AI Chat] Error:', err);
     var errMsg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ error: '[DEBUG] ' + errMsg.slice(0, 300) }, { status: 500 });
+    return NextResponse.json({ error: 'Loi AI, vui long thu lai sau.' }, { status: 500 });
   }
 }
