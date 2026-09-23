@@ -52,10 +52,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ reply: reply });
   } catch (err) {
     console.error('[AI Chat] Error:', err);
-    var errMsg = err instanceof Error ? err.message : 'Unknown error';
+    var errMsg = err instanceof Error ? err.message : String(err);
     if (errMsg.includes('rate_limit') || errMsg.includes('429')) {
       return NextResponse.json({ error: 'AI dang ban, vui long thu lai sau.' }, { status: 429 });
     }
-    return NextResponse.json({ error: 'Loi AI, vui long thu lai.' }, { status: 500 });
+    if (errMsg.includes('authentication') || errMsg.includes('401') || errMsg.includes('invalid')) {
+      return NextResponse.json({ error: 'API key khong hop le. Kiem tra lai ANTHROPIC_API_KEY tren Vercel.' }, { status: 401 });
+    }
+    if (errMsg.includes('credit') || errMsg.includes('billing') || errMsg.includes('402')) {
+      return NextResponse.json({ error: 'Tai khoan Anthropic het credit. Vao console.anthropic.com nap them.' }, { status: 402 });
+    }
+    return NextResponse.json({ error: 'Loi AI: ' + errMsg.slice(0, 200) }, { status: 500 });
   }
 }

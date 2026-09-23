@@ -49,6 +49,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     console.error('[AI Insights] Error:', err);
-    return NextResponse.json({ error: 'Loi phan tich AI', insights: [], summary: '' }, { status: 500 });
+    var errMsg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: 'Loi AI: ' + errMsg.slice(0, 200), insights: [], summary: '' }, { status: 500 });
   }
 }
