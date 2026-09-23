@@ -25,15 +25,28 @@ export async function GET(req: NextRequest) {
 
     var reply = await callClaude(systemPrompt, [{ role: 'user', content: userMessage }], { maxTokens: 4096, budget: 'medium' });
 
+    var cleanReply = reply.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+
     try {
-      var jsonMatch = reply.match(/\{[\s\S]*\}/);
+      var jsonMatch = cleanReply.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         var parsed = JSON.parse(jsonMatch[0]);
-        var insights: DailyInsight[] = parsed.insights || [];
+        var insights: DailyInsight[] = (parsed.insights || []).map(function(ins: DailyInsight, i: number) {
+          return {
+            id: ins.id || 'insight-' + i,
+            date: ins.date || new Date().toISOString().slice(0, 10),
+            shopId: ins.shopId,
+            category: ins.category || 'performance',
+            severity: ins.severity || 'info',
+            title: ins.title || 'Nhan xet',
+            content: ins.content || '',
+            action: ins.action,
+          };
+        });
         return NextResponse.json({ insights: insights, summary: parsed.summary || '' });
       }
-    } catch {
-      // fallback
+    } catch (parseErr) {
+      console.error('[AI Insights] JSON parse failed:', parseErr, 'Reply length:', cleanReply.length);
     }
 
     return NextResponse.json({
@@ -43,9 +56,9 @@ export async function GET(req: NextRequest) {
         category: 'performance' as const,
         severity: 'info' as const,
         title: 'Nhan xet AI',
-        content: reply,
+        content: cleanReply.slice(0, 2000),
       }],
-      summary: reply.slice(0, 200),
+      summary: 'AI da phan tich nhung khong tra ve dung dinh dang.',
     });
   } catch (err) {
     console.error('[AI Insights] Error:', err);
