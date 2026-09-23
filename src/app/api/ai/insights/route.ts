@@ -4,6 +4,62 @@ import { getInsightsSystemPrompt } from '@/lib/ai/system-prompts';
 import { buildInsightsContext } from '@/lib/ai/data-context';
 import type { DailyInsight } from '@/lib/ai/types';
 
+function tryParseJSON(raw: string): { summary: string; insights: DailyInsight[] } | null {
+  var clean = raw.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
+
+  // Try direct parse first
+  try {
+    var parsed = JSON.parse(clean);
+    if (parsed.insights) return parsed;
+  } catch {}
+
+  // Try extracting JSON object with regex
+  try {
+    var match = clean.match(/\{[\s\S]*\}/);
+    if (match) {
+      var parsed2 = JSON.parse(match[0]);
+      if (parsed2.insights) return parsed2;
+    }
+  } catch {}
+
+  // JSON might be truncated — try to recover by closing brackets
+  try {
+    var partial = clean;
+    if (!partial.startsWith('{')) {
+      var idx = partial.indexOf('{');
+      if (idx >= 0) partial = partial.slice(idx);
+    }
+    // Try adding closing brackets to fix truncation
+    var attempts = [
+      partial + '}]}',
+      partial + '"}]}',
+      partial + '"}]}',
+      partial + '} ]}',
+    ];
+    for (var a of attempts) {
+      try {
+        var parsed3 = JSON.parse(a);
+        if (parsed3.insights) return parsed3;
+      } catch {}
+    }
+  } catch {}
+
+  return null;
+}
+
+function sanitizeInsight(ins: Record<string, unknown>, i: number): DailyInsight {
+  return {
+    id: (ins.id as string) || 'insight-' + i,
+    date: (ins.date as string) || new Date().toISOString().slice(0, 10),
+    shopId: ins.shopId as string | undefined,
+    category: (ins.category as DailyInsight['category']) || 'performance',
+    severity: (ins.severity as DailyInsight['severity']) || 'info',
+    title: (ins.title as string) || 'Nhan xet',
+    content: (ins.content as string) || '',
+    action: ins.action as string | undefined,
+  };
+}
+
 export async function GET(req: NextRequest) {
   if (!IS_AI_CONFIGURED) {
     return NextResponse.json({ error: 'Chua cau hinh AI', insights: [], summary: '' }, { status: 503 });
@@ -23,31 +79,17 @@ export async function GET(req: NextRequest) {
     var systemPrompt = getInsightsSystemPrompt();
     var userMessage = 'Vai tro: ' + role + '\n\nDu lieu:\n' + context;
 
-    var reply = await callClaude(systemPrompt, [{ role: 'user', content: userMessage }], { maxTokens: 4096, budget: 'medium' });
+    var reply = await callClaude(systemPrompt, [{ role: 'user', content: userMessage }], { maxTokens: 8192 });
 
-    var cleanReply = reply.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
-
-    try {
-      var jsonMatch = cleanReply.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        var parsed = JSON.parse(jsonMatch[0]);
-        var insights: DailyInsight[] = (parsed.insights || []).map(function(ins: DailyInsight, i: number) {
-          return {
-            id: ins.id || 'insight-' + i,
-            date: ins.date || new Date().toISOString().slice(0, 10),
-            shopId: ins.shopId,
-            category: ins.category || 'performance',
-            severity: ins.severity || 'info',
-            title: ins.title || 'Nhan xet',
-            content: ins.content || '',
-            action: ins.action,
-          };
-        });
-        return NextResponse.json({ insights: insights, summary: parsed.summary || '' });
-      }
-    } catch (parseErr) {
-      console.error('[AI Insights] JSON parse failed:', parseErr, 'Reply length:', cleanReply.length);
+    var result = tryParseJSON(reply);
+    if (result && result.insights && result.insights.length > 0) {
+      var insights = result.insights.map(function(ins: DailyInsight, i: number) {
+        return sanitizeInsight(ins as unknown as Record<string, unknown>, i);
+      });
+      return NextResponse.json({ insights: insights, summary: result.summary || '' });
     }
+
+    console.error('[AI Insights] Could not parse JSON. Reply length:', reply.length, 'First 200 chars:', reply.slice(0, 200));
 
     return NextResponse.json({
       insights: [{
@@ -56,7 +98,7 @@ export async function GET(req: NextRequest) {
         category: 'performance' as const,
         severity: 'info' as const,
         title: 'Nhan xet AI',
-        content: cleanReply.slice(0, 2000),
+        content: reply.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim().slice(0, 2000),
       }],
       summary: 'AI da phan tich nhung khong tra ve dung dinh dang.',
     });

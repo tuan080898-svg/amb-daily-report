@@ -50,22 +50,25 @@ Muc do hanh dong:
 - warning: Can xu ly trong 2-3 ngay (vd: ROAS giam, KPI gap lon, ton kho thap)
 - info: Thong tin tot hoac can theo doi (vd: DT tang, dat KPI dung tien do)
 
+GIOI HAN: Chi tra ve TOI DA 5 insights quan trong nhat, uu tien critical truoc.
+Gop cac shop co van de tuong tu vao 1 insight.
+Giu content va action NGAN GON (moi cai duoi 150 chu).
+
 Tra loi bang tieng Viet.
-Tra ve JSON theo format:
+KHONG dung markdown code block. CHI tra ve JSON thuan, khong co backtick.
 {
-  "summary": "Danh gia tong the 1-2 cau, noi bat van de lon nhat va co hoi lon nhat",
+  "summary": "1-2 cau tong ket",
   "insights": [
     {
-      "id": "unique-id",
+      "id": "1",
       "date": "YYYY-MM-DD",
-      "shopId": "shop-id hoac null",
       "category": "performance|anomaly|inventory|cskh|kpi|employee",
       "severity": "info|warning|critical",
-      "title": "Tieu de ngan gon",
-      "content": "Phan tich chi tiet voi so lieu cu the",
-      "action": "Buoc hanh dong cu the: ai can lam gi, khi nao, ky vong ket qua"
+      "title": "Tieu de ngan",
+      "content": "Phan tich ngan voi so lieu",
+      "action": "Hanh dong cu the"
     }
   ]
-}
-CHI tra ve JSON, khong them text ngoai JSON.`;
+}`;
+
 }
