@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import {
-  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 import { DailyReport, Shop } from '@/lib/types';
 
@@ -75,7 +75,7 @@ function CustomTooltip({ active, payload, label }: { active?: boolean; payload?:
   );
 }
 
-function RevenueChart({ data, title }: { data: ChartDataPoint[]; title: string }) {
+function RevenueChart({ data, title, dailyTarget }: { data: ChartDataPoint[]; title: string; dailyTarget?: number }) {
   return (
     <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-5">
       <h3 className="text-sm font-semibold text-gray-200 mb-4">{title}</h3>
@@ -107,6 +107,16 @@ function RevenueChart({ data, title }: { data: ChartDataPoint[]; title: string }
             />
             <Tooltip content={<CustomTooltip />} />
             <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8, color: '#9ca3af' }} />
+            {dailyTarget && dailyTarget > 0 && (
+              <ReferenceLine
+                yAxisId="left"
+                y={dailyTarget}
+                stroke="#facc15"
+                strokeWidth={2}
+                strokeDasharray="6 4"
+                label={{ value: 'Target ' + formatVND(dailyTarget), position: 'right', fill: '#facc15', fontSize: 11, fontWeight: 700 }}
+              />
+            )}
             <Bar
               yAxisId="left"
               dataKey="revenue"
@@ -143,7 +153,7 @@ function RevenueChart({ data, title }: { data: ChartDataPoint[]; title: string }
   );
 }
 
-export default function MonthlyCharts({ reports, shops }: { reports: DailyReport[]; shops: Shop[] }) {
+export default function MonthlyCharts({ reports, shops, dailyTarget }: { reports: DailyReport[]; shops: Shop[]; dailyTarget?: number }) {
   const [showShopCharts, setShowShopCharts] = useState(false);
 
   const totalData = useMemo(function() {
@@ -166,7 +176,7 @@ export default function MonthlyCharts({ reports, shops }: { reports: DailyReport
 
   return (
     <div className="space-y-4">
-      <RevenueChart data={totalData} title="Tổng hợp Doanh thu & % MKT theo ngày" />
+      <RevenueChart data={totalData} title="Tổng hợp Doanh thu & % MKT theo ngày" dailyTarget={dailyTarget} />
 
       <div className="flex justify-center">
         <button
