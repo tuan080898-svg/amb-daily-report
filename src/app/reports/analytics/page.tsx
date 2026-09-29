@@ -153,7 +153,30 @@ export default function AnalyticsPage() {
     return mergedProvince.reduce(function(sum, p) { return sum + p.revenue; }, 0);
   }, [mergedProvince]);
 
-  function setQuickRange(type: 'all' | 'yesterday' | 'thisMonth' | 'lastMonth' | 'last3Months') {
+  const shopFilteredImports = useMemo(function() {
+    return imports.filter(function(imp) {
+      if (filterShop !== 'all' && imp.shopId !== filterShop) return false;
+      if (filterChannel !== 'all') {
+        var shop = shops.find(function(s) { return s.id === imp.shopId; });
+        if (shop && shop.channel !== filterChannel) return false;
+      }
+      return true;
+    });
+  }, [imports, filterShop, filterChannel, shops]);
+
+  const availableDates = useMemo(function() {
+    var dateSet = new Set<string>();
+    shopFilteredImports.forEach(function(imp) {
+      if (imp.dailyProvince) {
+        Object.keys(imp.dailyProvince).forEach(function(d) { dateSet.add(d); });
+      } else if (imp.dailyHourly) {
+        Object.keys(imp.dailyHourly).forEach(function(d) { dateSet.add(d); });
+      }
+    });
+    return Array.from(dateSet).sort().reverse();
+  }, [shopFilteredImports]);
+
+  function setQuickRange(type: 'all' | 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'lastMonth' | 'last3Months') {
     setActiveRange(type);
     const now = new Date();
     if (type === 'all') {
@@ -163,12 +186,21 @@ export default function AnalyticsPage() {
         setDateFrom(allFrom[0]);
         setDateTo(allTo[allTo.length - 1]);
       }
+    } else if (type === 'today') {
+      const d = toDateString(now);
+      setDateFrom(d);
+      setDateTo(d);
     } else if (type === 'yesterday') {
       const y = new Date(now);
       y.setDate(y.getDate() - 1);
       const d = toDateString(y);
       setDateFrom(d);
       setDateTo(d);
+    } else if (type === 'last7days') {
+      const from = new Date(now);
+      from.setDate(from.getDate() - 6);
+      setDateFrom(toDateString(from));
+      setDateTo(toDateString(now));
     } else if (type === 'thisMonth') {
       setDateFrom(getMonthStart(now));
       setDateTo(getMonthEnd(now));
@@ -181,6 +213,12 @@ export default function AnalyticsPage() {
       setDateFrom(getMonthStart(prev3));
       setDateTo(getMonthEnd(now));
     }
+  }
+
+  function selectSingleDate(d: string) {
+    setDateFrom(d);
+    setDateTo(d);
+    setActiveRange('day:' + d);
   }
 
   function handleDeleteImport(idx: number) {
@@ -242,11 +280,45 @@ export default function AnalyticsPage() {
 
       {/* Quick date buttons */}
       {imports.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 mb-6">
+        <div className="flex flex-wrap items-center gap-2 mb-4">
           <span className="text-xs text-gray-500">Nhanh:</span>
-          {([['all', 'Tất cả'], ['yesterday', 'Hôm qua'], ['thisMonth', 'Tháng này'], ['lastMonth', 'Tháng trước'], ['last3Months', '3 tháng']] as const).map(function(item) {
-            return <button key={item[0]} onClick={function() { setQuickRange(item[0]); }} className={'px-3 py-1 text-xs rounded-lg border transition-colors ' + (activeRange === item[0] ? 'bg-blue-600 text-white border-blue-500 font-medium' : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border-slate-700')}>{item[1]}</button>;
+          {([['all', 'Tất cả'], ['today', 'Hôm nay'], ['yesterday', 'Hôm qua'], ['last7days', '7 ngày'], ['thisMonth', 'Tháng này'], ['lastMonth', 'Tháng trước'], ['last3Months', '3 tháng']] as [string, string][]).map(function(item) {
+            return <button key={item[0]} onClick={function() { setQuickRange(item[0] as 'all' | 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'lastMonth' | 'last3Months'); }} className={'px-3 py-1 text-xs rounded-lg border transition-colors ' + (activeRange === item[0] ? 'bg-blue-600 text-white border-blue-500 font-medium' : 'bg-slate-800 text-gray-300 hover:bg-slate-700 border-slate-700')}>{item[1]}</button>;
           })}
+        </div>
+      )}
+
+      {/* Individual date chips */}
+      {imports.length > 0 && availableDates.length > 0 && (
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-xs text-gray-500">Chọn ngày:</span>
+            <span className="text-xs text-gray-600">({availableDates.length} ngày có dữ liệu)</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+            {availableDates.map(function(d) {
+              var parts = d.split('-');
+              var label = parseInt(parts[2]) + '/' + parseInt(parts[1]);
+              var isSelected = activeRange === 'day:' + d;
+              var isInRange = d >= dateFrom && d <= dateTo && activeRange !== 'day:' + d;
+              return (
+                <button
+                  key={d}
+                  onClick={function() { selectSingleDate(d); }}
+                  className={'px-2.5 py-1 text-xs rounded-lg border transition-colors ' + (
+                    isSelected
+                      ? 'bg-emerald-600 text-white border-emerald-500 font-semibold'
+                      : isInRange
+                        ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                        : 'bg-slate-800 text-gray-400 hover:bg-slate-700 border-slate-700 hover:text-gray-200'
+                  )}
+                  title={d}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -281,7 +353,9 @@ export default function AnalyticsPage() {
                 <div>
                   <h2 className="font-semibold text-gray-100">Doanh thu theo giờ</h2>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    Phân bổ doanh thu 24 giờ trong ngày
+                    {dateFrom === dateTo
+                      ? 'Ngày ' + parseInt(dateFrom.split('-')[2]) + '/' + parseInt(dateFrom.split('-')[1])
+                      : 'Phân bổ doanh thu 24 giờ trong ngày'}
                   </p>
                 </div>
                 {peakHours.length > 0 && (
@@ -364,6 +438,11 @@ export default function AnalyticsPage() {
             <div className="px-5 py-4 border-b border-slate-700/50">
               <h2 className="font-semibold text-gray-100">Doanh thu theo tỉnh/thành</h2>
               <p className="text-xs text-gray-500 mt-0.5">
+                {dateFrom === dateTo
+                  ? 'Ngày ' + parseInt(dateFrom.split('-')[2]) + '/' + parseInt(dateFrom.split('-')[1]) + ' — '
+                  : dateFrom && dateTo
+                    ? parseInt(dateFrom.split('-')[2]) + '/' + parseInt(dateFrom.split('-')[1]) + ' → ' + parseInt(dateTo.split('-')[2]) + '/' + parseInt(dateTo.split('-')[1]) + ' — '
+                    : ''}
                 Top {mergedProvince.length} tỉnh/thành phố — tổng {formatCurrency(totalProvinceRevenue)} VND
               </p>
             </div>
@@ -475,13 +554,42 @@ export default function AnalyticsPage() {
         {imports.length > 0 && filteredImports.length === 0 && (
           <div className="text-center py-8">
             <p className="text-gray-400">Không có dữ liệu phân tích trong khoảng thời gian này</p>
-            <p className="text-sm text-gray-500 mt-1">
-              Dữ liệu có sẵn: {imports.map(function(i) { return i.dateFrom; }).sort()[0]} &rarr; {imports.map(function(i) { return i.dateTo; }).sort().reverse()[0]}
-            </p>
-            <button
-              onClick={function() { setQuickRange('all'); }}
-              className="mt-3 px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors"
-            >Xem tất cả dữ liệu</button>
+            {availableDates.length > 0 ? (
+              <div className="mt-3">
+                <p className="text-sm text-gray-500 mb-2">
+                  {filterShop !== 'all'
+                    ? 'Shop này có dữ liệu các ngày:'
+                    : 'Dữ liệu có sẵn các ngày:'}
+                </p>
+                <div className="flex flex-wrap justify-center gap-1.5">
+                  {availableDates.slice(0, 14).map(function(d) {
+                    var parts = d.split('-');
+                    var label = parseInt(parts[2]) + '/' + parseInt(parts[1]);
+                    return (
+                      <button
+                        key={d}
+                        onClick={function() { selectSingleDate(d); }}
+                        className="px-2.5 py-1 text-xs rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors"
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className="mt-3">
+                <p className="text-sm text-gray-500">
+                  {filterShop !== 'all'
+                    ? 'Shop này chưa có dữ liệu phân tích. Hãy import đơn hàng cho shop này.'
+                    : 'Dữ liệu có sẵn: ' + imports.map(function(i) { return i.dateFrom; }).sort()[0] + ' → ' + imports.map(function(i) { return i.dateTo; }).sort().reverse()[0]}
+                </p>
+                <button
+                  onClick={function() { setFilterShop('all'); setQuickRange('all'); }}
+                  className="mt-3 px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-500 transition-colors"
+                >Xem tất cả</button>
+              </div>
+            )}
           </div>
         )}
       </div>

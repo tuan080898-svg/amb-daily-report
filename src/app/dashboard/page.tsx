@@ -110,6 +110,31 @@ export default function DashboardPage() {
     };
   }, [filteredShops, reports, dateFrom, dateTo]);
 
+  // Previous period per shop for trend comparison
+  const prevByShop = useMemo(() => {
+    var from = new Date(dateFrom + 'T00:00:00');
+    var to = new Date(dateTo + 'T00:00:00');
+    var days = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
+    var prevTo = new Date(from);
+    prevTo.setDate(prevTo.getDate() - 1);
+    var prevFrom = new Date(prevTo);
+    prevFrom.setDate(prevFrom.getDate() - days + 1);
+    var pf = toDateString(prevFrom);
+    var pt = toDateString(prevTo);
+    var map = new Map<string, { revenue: number; ads: number; orders: number; cancelled: number }>();
+    for (var r of reports) {
+      if (r.date >= pf && r.date <= pt) {
+        var cur = map.get(r.shopId) || { revenue: 0, ads: 0, orders: 0, cancelled: 0 };
+        cur.revenue += r.actualRevenue;
+        cur.ads += r.adSpend;
+        cur.orders += r.totalOrders;
+        cur.cancelled += r.cancelledOrders + r.returnedOrders;
+        map.set(r.shopId, cur);
+      }
+    }
+    return map;
+  }, [reports, dateFrom, dateTo]);
+
   const summary = useMemo(() => {
     const withReports = dailyData.filter(d => d.report);
     const totalTarget = withReports.reduce((s, d) => s + (d.report?.targetRevenue || 0), 0);
@@ -185,9 +210,27 @@ export default function DashboardPage() {
       const pctTarget = totalTarget > 0 ? totalRevenue / totalTarget : 0;
       const pctMkt = totalRevenue > 0 ? totalAds / totalRevenue : 0;
       const pctCancelReturn = totalOrders > 0 ? (totalCancelled + totalReturned) / totalOrders : 0;
-      return { emp, shopCount: empShops.length, reportedCount: withData.length, totalTarget, totalRevenue, totalAds, totalOrders, totalCancelled, totalReturned, pctTarget, pctMkt, pctCancelReturn };
+      const roas = totalAds > 0 ? totalRevenue / totalAds : 0;
+      // Previous period for this employee
+      var prevRevenue = 0; var prevAds = 0; var prevOrders = 0; var prevCancelled = 0;
+      empShops.forEach(s => {
+        var p = prevByShop.get(s.id);
+        if (p) { prevRevenue += p.revenue; prevAds += p.ads; prevOrders += p.orders; prevCancelled += p.cancelled; }
+      });
+      var dtTrend = prevRevenue > 0 ? ((totalRevenue - prevRevenue) / prevRevenue) * 100 : 0;
+      var mktTrend = prevAds > 0 ? ((totalAds - prevAds) / prevAds) * 100 : 0;
+      // Action note based on specific issues
+      var actions: string[] = [];
+      if (pctTarget < 0.5 && totalTarget > 0) actions.push('DT chi dat ' + (pctTarget * 100).toFixed(0) + '% target');
+      else if (dtTrend < -20 && prevRevenue > 0) actions.push('DT giam ' + Math.abs(dtTrend).toFixed(0) + '% vs truoc');
+      if (roas > 0 && roas < 3) actions.push('ROAS ' + roas.toFixed(1) + ' - toi uu QC');
+      if (pctCancelReturn > 0.12) actions.push('Huy/hoan ' + (pctCancelReturn * 100).toFixed(0) + '% - kiem tra');
+      if (mktTrend > 30 && prevAds > 0) actions.push('QC tang ' + mktTrend.toFixed(0) + '% vs truoc');
+      var actionText = actions.length > 0 ? actions[0] : (pctTarget >= 1 ? 'Dat target' : (dtTrend > 10 && prevRevenue > 0 ? 'DT tang ' + dtTrend.toFixed(0) + '%' : 'On dinh'));
+      var actionColor = actions.length > 0 ? (pctTarget < 0.5 || (roas > 0 && roas < 2) || pctCancelReturn > 0.15 ? 'text-red-400' : 'text-amber-400') : (pctTarget >= 1 || dtTrend > 10 ? 'text-emerald-400' : 'text-gray-400');
+      return { emp, shopCount: empShops.length, reportedCount: withData.length, totalTarget, totalRevenue, totalAds, totalOrders, totalCancelled, totalReturned, pctTarget, pctMkt, pctCancelReturn, roas, prevRevenue, prevAds, prevOrders, prevCancelled, dtTrend, actionText, actionColor };
     }).filter(e => e.shopCount > 0).sort((a, b) => b.totalRevenue - a.totalRevenue);
-  }, [employees, filteredShops, reports, dateFrom, dateTo]);
+  }, [employees, filteredShops, reports, dateFrom, dateTo, prevByShop]);
 
   function handleExportCSV() {
     const headers = ['Shop', 'Kênh', 'Target', 'Doanh thu', '%Đạt', 'CP QC', '%MKT', 'ROAS', 'CPO', 'Tổng đơn', 'Huỷ', 'Hoàn', '%Hoàn/Huỷ', 'Cảnh báo'];
@@ -606,7 +649,7 @@ export default function DashboardPage() {
         </div>
         {/* Mobile cards */}
         <div className="md:hidden divide-y divide-slate-800">
-          {employeeSummary.map(({ emp, shopCount, reportedCount, totalTarget, totalRevenue, totalAds, totalOrders, pctTarget, pctMkt, pctCancelReturn }) => {
+          {employeeSummary.map(({ emp, shopCount, reportedCount, totalRevenue, totalAds, pctTarget, pctMkt, pctCancelReturn, roas, prevRevenue, dtTrend, actionText, actionColor }) => {
             const revenueAlert: AlertColor = pctTarget >= 1 ? 'green' : pctTarget >= 0.7 ? 'yellow' : 'red';
             const adsAlert: AlertColor = pctMkt <= config.adsThresholdGreen ? 'green' : pctMkt <= config.adsThresholdYellow ? 'yellow' : 'red';
             const cancelAlert: AlertColor = pctCancelReturn <= config.cancelReturnThresholdYellow ? 'green' : pctCancelReturn <= config.cancelReturnThresholdRed ? 'yellow' : 'red';
@@ -614,41 +657,37 @@ export default function DashboardPage() {
               <div key={emp.id}
                 className={`px-3 py-3 active:bg-slate-800 cursor-pointer ${employeeFilter === emp.id ? 'bg-blue-500/10' : ''}`}
                 onClick={() => setEmployeeFilter(employeeFilter === emp.id ? 'all' : emp.id)}>
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-gray-200">{emp.name}</span>
                     <span className="text-[10px] text-gray-500">({reportedCount}/{shopCount} shop)</span>
                   </div>
-                  <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(revenueAlert)}`}>
-                    {formatPercent(pctTarget)}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <TrendArrow current={totalRevenue} previous={prevRevenue} />
+                    <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(revenueAlert)}`}>
+                      {formatPercent(pctTarget)}
+                    </span>
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs mb-1.5">
                   <div className="flex justify-between">
                     <span className="text-gray-500">Doanh thu</span>
                     <span className="text-gray-200 font-medium">{formatCurrency(totalRevenue)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Target</span>
-                    <span className="text-gray-400">{formatCurrency(totalTarget)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500">CP QC</span>
-                    <span className="text-gray-400">{formatCurrency(totalAds)}</span>
+                    <span className="text-gray-500">ROAS</span>
+                    <span className={'font-medium ' + (roas > 0 && roas < 3 ? 'text-red-400' : 'text-gray-200')}>{roas > 0 ? roas.toFixed(1) : '—'}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-500">%MKT</span>
                     <span className={`font-medium ${getAlertBg(adsAlert)} px-1.5 rounded`}>{formatPercent(pctMkt)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Đơn hàng</span>
-                    <span className="text-gray-400">{totalOrders}</span>
-                  </div>
-                  <div className="flex justify-between">
                     <span className="text-gray-500">Hoàn/Huỷ</span>
                     <span className={`font-medium ${getAlertBg(cancelAlert)} px-1.5 rounded`}>{formatPercent(pctCancelReturn)}</span>
                   </div>
                 </div>
+                <div className={`text-[10px] font-medium ${actionColor}`}>{actionText}</div>
               </div>
             );
           })}
@@ -659,19 +698,18 @@ export default function DashboardPage() {
             <thead>
               <tr className="bg-slate-800 border-b border-slate-700/50">
                 <th className="text-left px-4 py-3 font-medium text-gray-400">Nhân viên</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-400">Shop</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-400">Target</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-400">Doanh thu</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-400">%Đạt</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-400">CP QC</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-400">%MKT</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-400">Đánh giá</th>
-                <th className="text-right px-4 py-3 font-medium text-gray-400">Đơn</th>
-                <th className="text-center px-4 py-3 font-medium text-gray-400">%Hoàn/Huỷ</th>
+                <th className="text-center px-3 py-3 font-medium text-gray-400">Shop</th>
+                <th className="text-right px-3 py-3 font-medium text-gray-400">Doanh thu</th>
+                <th className="text-center px-3 py-3 font-medium text-gray-400">vs Trước</th>
+                <th className="text-center px-3 py-3 font-medium text-gray-400">%Đạt</th>
+                <th className="text-center px-3 py-3 font-medium text-gray-400">%MKT</th>
+                <th className="text-center px-3 py-3 font-medium text-gray-400">ROAS</th>
+                <th className="text-center px-3 py-3 font-medium text-gray-400">%Hoàn/Huỷ</th>
+                <th className="text-left px-3 py-3 font-medium text-gray-400">Hành động</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {employeeSummary.map(({ emp, shopCount, reportedCount, totalTarget, totalRevenue, totalAds, totalOrders, pctTarget, pctMkt, pctCancelReturn }) => {
+              {employeeSummary.map(({ emp, shopCount, reportedCount, totalRevenue, pctTarget, pctMkt, pctCancelReturn, roas, prevRevenue, dtTrend, actionText, actionColor }) => {
                 const revenueAlert: AlertColor = pctTarget >= 1 ? 'green' : pctTarget >= 0.7 ? 'yellow' : 'red';
                 const adsAlert: AlertColor = pctMkt <= config.adsThresholdGreen ? 'green' : pctMkt <= config.adsThresholdYellow ? 'yellow' : 'red';
                 const cancelAlert: AlertColor = pctCancelReturn <= config.cancelReturnThresholdYellow ? 'green' : pctCancelReturn <= config.cancelReturnThresholdRed ? 'yellow' : 'red';
@@ -685,36 +723,39 @@ export default function DashboardPage() {
                       {emp.name}
                       <span className="text-xs text-gray-500 ml-1">({reportedCount}/{shopCount})</span>
                     </td>
-                    <td className="px-4 py-3 text-center text-gray-400">{shopCount}</td>
-                    <td className="px-4 py-3 text-right text-gray-400">{formatCurrency(totalTarget)}</td>
-                    <td className="px-4 py-3 text-right font-medium text-gray-200">{formatCurrency(totalRevenue)}</td>
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-3 py-3 text-center text-gray-400">{shopCount}</td>
+                    <td className="px-3 py-3 text-right">
+                      <span className="font-medium text-gray-200">{formatCurrency(totalRevenue)}</span>
+                    </td>
+                    <td className="px-3 py-3 text-center">
+                      {prevRevenue > 0 ? (
+                        <span className={'inline-flex items-center gap-0.5 text-xs font-medium ' + (dtTrend >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                          {dtTrend >= 0 ? '▲' : '▼'} {Math.abs(dtTrend).toFixed(0)}%
+                        </span>
+                      ) : <span className="text-xs text-gray-600">—</span>}
+                    </td>
+                    <td className="px-3 py-3 text-center">
                       <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(revenueAlert)}`}>
                         {formatPercent(pctTarget)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right text-gray-400">{formatCurrency(totalAds)}</td>
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-3 py-3 text-center">
                       <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(adsAlert)}`}>
                         {formatPercent(pctMkt)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-left">
-                      <span className={`text-xs font-medium ${
-                        pctMkt >= config.adsThresholdYellow ? 'text-red-400'
-                        : pctMkt >= config.adsThresholdGreen ? 'text-amber-400'
-                        : 'text-emerald-400'
-                      }`}>
-                        {pctMkt >= config.adsThresholdYellow ? 'Cảnh báo chi phí cao'
-                        : pctMkt >= config.adsThresholdGreen ? 'Trong ngưỡng cho phép'
-                        : 'Hiệu quả'}
+                    <td className="px-3 py-3 text-center">
+                      <span className={'text-xs font-medium ' + (roas > 0 && roas < 3 ? 'text-red-400' : roas > 0 && roas < 5 ? 'text-amber-400' : 'text-emerald-400')}>
+                        {roas > 0 ? roas.toFixed(1) : '—'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right text-gray-400">{totalOrders}</td>
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-3 py-3 text-center">
                       <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(cancelAlert)}`}>
                         {formatPercent(pctCancelReturn)}
                       </span>
+                    </td>
+                    <td className="px-3 py-3 text-left max-w-[200px]">
+                      <span className={`text-xs font-medium ${actionColor}`}>{actionText}</span>
                     </td>
                   </tr>
                 );
@@ -738,7 +779,16 @@ export default function DashboardPage() {
               .filter(r => r.shopId === shop.id && r.date >= dateFrom && r.date <= dateTo)
               .sort((a, b) => a.date.localeCompare(b.date)) : [];
             var roas = report && report.adSpend > 0 ? (report.actualRevenue / report.adSpend).toFixed(1) : '-';
-            var cpo = report && report.totalOrders > 0 ? formatCurrency(Math.round(report.adSpend / report.totalOrders)) : '-';
+            var prev = prevByShop.get(shop.id);
+            var shopDtTrend = report && prev && prev.revenue > 0 ? ((report.actualRevenue - prev.revenue) / prev.revenue) * 100 : null;
+            var mobileActions: string[] = [];
+            if (report && metrics) {
+              if (metrics.targetAchievement < 0.5) mobileActions.push('DT qua thap');
+              if (roas !== '-' && parseFloat(roas) < 3) mobileActions.push('ROAS thap');
+              if (metrics.cancelReturnRate > 0.12) mobileActions.push('Huy cao');
+              else if (shopDtTrend !== null && shopDtTrend < -20) mobileActions.push('DT giam ' + Math.abs(shopDtTrend).toFixed(0) + '%');
+            }
+            var mAction = mobileActions.length > 0 ? mobileActions[0] : '';
             return (
               <div key={shop.id}>
                 <div
@@ -757,35 +807,37 @@ export default function DashboardPage() {
                     ) : null}
                   </div>
                   {report && metrics ? (
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Doanh thu</span>
-                        <span className="text-gray-200 font-medium">{formatCurrency(report.actualRevenue)}</span>
+                    <div>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                        <div className="flex justify-between items-center">
+                          <span className="text-gray-500">Doanh thu</span>
+                          <span className="flex items-center gap-1">
+                            <span className="text-gray-200 font-medium">{formatCurrency(report.actualRevenue)}</span>
+                            {prev && prev.revenue > 0 && <TrendArrow current={report.actualRevenue} previous={prev.revenue} />}
+                          </span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">%Đạt</span>
+                          <span className={`font-medium ${getAlertBg(metrics.revenueAlert)} px-1.5 rounded`}>{formatPercent(metrics.targetAchievement)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">ROAS</span>
+                          <span className={'font-medium ' + (roas !== '-' && parseFloat(roas) < 3 ? 'text-amber-400' : 'text-gray-200')}>{roas}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">%MKT</span>
+                          <span className={`font-medium ${getAlertBg(metrics.adsAlert)} px-1.5 rounded`}>{formatPercent(metrics.adsToRevenueRatio)}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Đơn</span>
+                          <span className="text-gray-400">{report.totalOrders}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-gray-500">Hoàn/Huỷ</span>
+                          <span className={`font-medium ${getAlertBg(metrics.cancelReturnAlert)} px-1.5 rounded`}>{formatPercent(metrics.cancelReturnRate)}</span>
+                        </div>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">%Đạt</span>
-                        <span className={`font-medium ${getAlertBg(metrics.revenueAlert)} px-1.5 rounded`}>{formatPercent(metrics.targetAchievement)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">CP QC</span>
-                        <span className="text-gray-400">{formatCurrency(report.adSpend)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">ROAS</span>
-                        <span className={'font-medium ' + (roas !== '-' && parseFloat(roas) < 3 ? 'text-amber-400' : 'text-gray-200')}>{roas}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Đơn</span>
-                        <span className="text-gray-400">{report.totalOrders}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">CPO</span>
-                        <span className="text-gray-400">{cpo}</span>
-                      </div>
-                      <div className="flex justify-between col-span-2">
-                        <span className="text-gray-500">Hoàn/Huỷ</span>
-                        <span className={`font-medium ${getAlertBg(metrics.cancelReturnAlert)} px-1.5 rounded`}>{formatPercent(metrics.cancelReturnRate)} ({report.cancelledOrders + report.returnedOrders} đơn)</span>
-                      </div>
+                      {mAction && <div className="text-[10px] font-medium text-red-400 mt-1">{mAction}</div>}
                     </div>
                   ) : (
                     <p className="text-xs text-gray-500 italic">Chưa có báo cáo</p>
@@ -833,14 +885,13 @@ export default function DashboardPage() {
                 <th className="text-left px-3 py-3 font-medium text-gray-400">Kênh</th>
                 <th className="text-right px-3 py-3 font-medium text-gray-400">Target</th>
                 <th className="text-right px-3 py-3 font-medium text-gray-400">Doanh thu</th>
+                <th className="text-center px-2 py-3 font-medium text-gray-400">vs Trước</th>
                 <th className="text-center px-3 py-3 font-medium text-gray-400">%Đạt</th>
-                <th className="text-right px-3 py-3 font-medium text-gray-400">CP QC</th>
                 <th className="text-center px-3 py-3 font-medium text-gray-400">%MKT</th>
                 <th className="text-center px-3 py-3 font-medium text-gray-400">ROAS</th>
-                <th className="text-right px-3 py-3 font-medium text-gray-400">CPO</th>
                 <th className="text-right px-3 py-3 font-medium text-gray-400">Đơn</th>
                 <th className="text-center px-3 py-3 font-medium text-gray-400">%Hoàn/Huỷ</th>
-                <th className="text-center px-3 py-3 font-medium text-gray-400 w-10"></th>
+                <th className="text-left px-3 py-3 font-medium text-gray-400">Hành động</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
@@ -850,7 +901,17 @@ export default function DashboardPage() {
                   .filter(r => r.shopId === shop.id && r.date >= dateFrom && r.date <= dateTo)
                   .sort((a, b) => a.date.localeCompare(b.date)) : [];
                 var roas = report && report.adSpend > 0 ? (report.actualRevenue / report.adSpend).toFixed(1) : '-';
-                var cpo = report && report.totalOrders > 0 ? formatCurrency(Math.round(report.adSpend / report.totalOrders)) : '-';
+                var prevShop = prevByShop.get(shop.id);
+                var shopDtTrend = report && prevShop && prevShop.revenue > 0 ? ((report.actualRevenue - prevShop.revenue) / prevShop.revenue) * 100 : null;
+                var shopActions: string[] = [];
+                if (report && metrics) {
+                  if (metrics.targetAchievement < 0.5) shopActions.push('DT qua thap');
+                  else if (shopDtTrend !== null && shopDtTrend < -20) shopActions.push('DT giam ' + Math.abs(shopDtTrend).toFixed(0) + '%');
+                  if (roas !== '-' && parseFloat(roas) < 3) shopActions.push('ROAS thap');
+                  if (metrics.cancelReturnRate > 0.12) shopActions.push('Huy cao');
+                }
+                var shopAction = shopActions.length > 0 ? shopActions.join(', ') : (metrics && metrics.targetAchievement >= 1 ? 'Dat target' : (shopDtTrend !== null && shopDtTrend > 10 ? 'DT tang ' + shopDtTrend.toFixed(0) + '%' : ''));
+                var shopActionColor = shopActions.length > 0 ? 'text-red-400' : (metrics && metrics.targetAchievement >= 1 || (shopDtTrend !== null && shopDtTrend > 10) ? 'text-emerald-400' : 'text-gray-500');
                 return (
                   <Fragment key={shop.id}>
                     <tr
@@ -876,14 +937,19 @@ export default function DashboardPage() {
                       </td>
                       {report && metrics ? (
                         <>
-                          <td className="px-3 py-3 text-right text-gray-400">{formatCurrency(report.targetRevenue)}</td>
                           <td className="px-3 py-3 text-right font-medium text-gray-200">{formatCurrency(report.actualRevenue)}</td>
+                          <td className="px-2 py-3 text-center">
+                            {shopDtTrend !== null ? (
+                              <span className={'inline-flex items-center gap-0.5 text-[10px] font-medium ' + (shopDtTrend >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                                {shopDtTrend >= 0 ? '▲' : '▼'}{Math.abs(shopDtTrend).toFixed(0)}%
+                              </span>
+                            ) : <span className="text-[10px] text-gray-600">{'—'}</span>}
+                          </td>
                           <td className="px-3 py-3 text-center">
                             <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(metrics.revenueAlert)}`}>
                               {formatPercent(metrics.targetAchievement)}
                             </span>
                           </td>
-                          <td className="px-3 py-3 text-right text-gray-400">{formatCurrency(report.adSpend)}</td>
                           <td className="px-3 py-3 text-center">
                             <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(metrics.adsAlert)}`}>
                               {formatPercent(metrics.adsToRevenueRatio)}
@@ -894,58 +960,52 @@ export default function DashboardPage() {
                               {roas}
                             </span>
                           </td>
-                          <td className="px-3 py-3 text-right text-gray-400 text-xs">{cpo}</td>
                           <td className="px-3 py-3 text-right text-gray-400">{report.totalOrders}</td>
                           <td className="px-3 py-3 text-center">
                             <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(metrics.cancelReturnAlert)}`}>
                               {formatPercent(metrics.cancelReturnRate)}
                             </span>
                           </td>
-                          <td className="px-3 py-3 text-center">
-                            <span className={`w-3 h-3 rounded-full inline-block ${getAlertDot(metrics.revenueAlert)}`}></span>
+                          <td className="px-3 py-3 text-left max-w-[160px]">
+                            {shopAction && <span className={`text-[10px] font-medium ${shopActionColor}`}>{shopAction}</span>}
                           </td>
                         </>
                       ) : (
-                        <td colSpan={10} className="px-3 py-3 text-center text-gray-500 italic">Chưa có báo cáo</td>
+                        <td colSpan={8} className="px-3 py-3 text-center text-gray-500 italic">Chưa có báo cáo</td>
                       )}
                     </tr>
                     {isSelected && detail.length > 0 && detail.map(r => {
                       const m = calculateMetrics(r, config);
                       var dRoas = r.adSpend > 0 ? (r.actualRevenue / r.adSpend).toFixed(1) : '-';
-                      var dCpo = r.totalOrders > 0 ? formatCurrency(Math.round(r.adSpend / r.totalOrders)) : '-';
                       return (
                         <tr key={`${shop.id}-${r.date}`} className="bg-slate-800/40 border-l-2 border-l-blue-500">
                           <td colSpan={4} className="px-4 py-2 pl-10 text-sm text-blue-300">{r.date}</td>
-                          <td className="px-3 py-2 text-right text-gray-400 text-sm">{formatCurrency(r.targetRevenue)}</td>
                           <td className="px-3 py-2 text-right font-medium text-gray-200 text-sm">{formatCurrency(r.actualRevenue)}</td>
+                          <td className="px-2 py-2"></td>
                           <td className="px-3 py-2 text-center">
                             <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(m.revenueAlert)}`}>
                               {formatPercent(m.targetAchievement)}
                             </span>
                           </td>
-                          <td className="px-3 py-2 text-right text-gray-400 text-sm">{formatCurrency(r.adSpend)}</td>
                           <td className="px-3 py-2 text-center">
                             <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(m.adsAlert)}`}>
                               {formatPercent(m.adsToRevenueRatio)}
                             </span>
                           </td>
                           <td className="px-3 py-2 text-center text-xs text-gray-400">{dRoas}</td>
-                          <td className="px-3 py-2 text-right text-xs text-gray-400">{dCpo}</td>
                           <td className="px-3 py-2 text-right text-gray-400 text-sm">{r.totalOrders}</td>
                           <td className="px-3 py-2 text-center">
                             <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${getAlertBg(m.cancelReturnAlert)}`}>
                               {formatPercent(m.cancelReturnRate)}
                             </span>
                           </td>
-                          <td className="px-3 py-2 text-center">
-                            <span className={`w-3 h-3 rounded-full inline-block ${getAlertDot(m.revenueAlert)}`}></span>
-                          </td>
+                          <td className="px-3 py-2"></td>
                         </tr>
                       );
                     })}
                     {isSelected && detail.length === 0 && (
                       <tr className="bg-slate-800/40 border-l-2 border-l-blue-500">
-                        <td colSpan={14} className="px-4 py-3 pl-10 text-center text-gray-500 italic text-sm">Chưa có dữ liệu từng ngày</td>
+                        <td colSpan={12} className="px-4 py-3 pl-10 text-center text-gray-500 italic text-sm">Chưa có dữ liệu từng ngày</td>
                       </tr>
                     )}
                   </Fragment>
