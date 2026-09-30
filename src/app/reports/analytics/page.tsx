@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useAppState } from '@/lib/store';
 import { toDateString, formatCurrency } from '@/lib/utils';
 import { Channel } from '@/lib/types';
+import { getSkuProducts } from '@/lib/sku';
 
 function getMonthStart(d: Date): string {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-01';
@@ -31,6 +32,10 @@ export default function AnalyticsPage() {
   const [dateTo, setDateTo] = useState('');
   const [activeRange, setActiveRange] = useState<string>('all');
   const [initialized, setInitialized] = useState(false);
+  const [showAllImports, setShowAllImports] = useState(false);
+  const [showAllProvinces, setShowAllProvinces] = useState(false);
+  const [showAllProducts, setShowAllProducts] = useState(false);
+  const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
 
   useEffect(function() {
     if (initialized || imports.length === 0) return;
@@ -153,6 +158,54 @@ export default function AnalyticsPage() {
     return mergedProvince.reduce(function(sum, p) { return sum + p.revenue; }, 0);
   }, [mergedProvince]);
 
+  const mergedProductProvince = useMemo(function() {
+    const ppMap: Record<string, { revenue: number; orders: number }> = {};
+    filteredImports.forEach(function(imp) {
+      if (imp.dailyProductProvince && dateFrom && dateTo) {
+        Object.keys(imp.dailyProductProvince).forEach(function(day) {
+          if (day >= dateFrom && day <= dateTo) {
+            imp.dailyProductProvince![day].forEach(function(pp) {
+              var key = pp.sku + '||' + pp.province;
+              if (!ppMap[key]) ppMap[key] = { revenue: 0, orders: 0 };
+              ppMap[key].revenue += pp.revenue;
+              ppMap[key].orders += pp.orders;
+            });
+          }
+        });
+      } else if (imp.productProvinceData) {
+        imp.productProvinceData.forEach(function(pp) {
+          var key = pp.sku + '||' + pp.province;
+          if (!ppMap[key]) ppMap[key] = { revenue: 0, orders: 0 };
+          ppMap[key].revenue += pp.revenue;
+          ppMap[key].orders += pp.orders;
+        });
+      }
+    });
+    const productMap: Record<string, { totalRevenue: number; totalOrders: number; provinces: { province: string; revenue: number; orders: number }[] }> = {};
+    Object.entries(ppMap).forEach(function(entry) {
+      var parts = entry[0].split('||');
+      var sku = parts[0]; var province = parts[1];
+      var items = getSkuProducts(sku);
+      var productName = items.length > 0 ? items.map(function(it) { return it.product; }).join(' + ') : sku;
+      if (!productMap[productName]) productMap[productName] = { totalRevenue: 0, totalOrders: 0, provinces: [] };
+      productMap[productName].totalRevenue += entry[1].revenue;
+      productMap[productName].totalOrders += entry[1].orders;
+      var existing = productMap[productName].provinces.find(function(p) { return p.province === province; });
+      if (existing) {
+        existing.revenue += entry[1].revenue;
+        existing.orders += entry[1].orders;
+      } else {
+        productMap[productName].provinces.push({ province: province, revenue: entry[1].revenue, orders: entry[1].orders });
+      }
+    });
+    return Object.entries(productMap)
+      .map(function(entry) {
+        entry[1].provinces.sort(function(a, b) { return b.revenue - a.revenue; });
+        return { product: entry[0], totalRevenue: entry[1].totalRevenue, totalOrders: entry[1].totalOrders, provinces: entry[1].provinces };
+      })
+      .sort(function(a, b) { return b.totalRevenue - a.totalRevenue; });
+  }, [filteredImports, dateFrom, dateTo]);
+
   const shopFilteredImports = useMemo(function() {
     return imports.filter(function(imp) {
       if (filterShop !== 'all' && imp.shopId !== filterShop) return false;
@@ -178,6 +231,7 @@ export default function AnalyticsPage() {
 
   function setQuickRange(type: 'all' | 'today' | 'yesterday' | 'last7days' | 'thisMonth' | 'lastMonth' | 'last3Months') {
     setActiveRange(type);
+    setShowAllProvinces(false);
     const now = new Date();
     if (type === 'all') {
       if (imports.length > 0) {
@@ -219,6 +273,7 @@ export default function AnalyticsPage() {
     setDateFrom(d);
     setDateTo(d);
     setActiveRange('day:' + d);
+    setShowAllProvinces(false);
   }
 
   function handleDeleteImport(idx: number) {
@@ -458,8 +513,8 @@ export default function AnalyticsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {mergedProvince.map(function(item, i) {
-                    const pct = totalProvinceRevenue > 0 ? item.revenue / totalProvinceRevenue : 0;
+                  {(showAllProvinces ? mergedProvince : mergedProvince.slice(0, 20)).map(function(item, i) {
+                    var pct = totalProvinceRevenue > 0 ? item.revenue / totalProvinceRevenue : 0;
                     return (
                       <tr key={i} className="hover:bg-slate-800/50">
                         <td className="px-4 py-3 text-center">
@@ -496,24 +551,137 @@ export default function AnalyticsPage() {
                   })}
                 </tbody>
               </table>
+              {mergedProvince.length > 20 && (
+                <div className="px-5 py-3 border-t border-slate-700/50 text-center">
+                  <button
+                    onClick={function() { setShowAllProvinces(!showAllProvinces); }}
+                    className="text-sm text-blue-400 hover:text-blue-300"
+                  >{showAllProvinces ? 'Thu gọn' : 'Xem tất cả ' + mergedProvince.length + ' tỉnh/thành'}</button>
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* Section 3: Import history */}
-        {imports.length > 0 && (
+        {/* Section 3: Product × Province */}
+        {mergedProductProvince.length > 0 && (
           <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-700/50">
-              <h2 className="font-semibold text-gray-100 text-sm">Lịch sử import phân tích</h2>
+              <h2 className="font-semibold text-gray-100">Sản phẩm bán chạy theo tỉnh/thành</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {mergedProductProvince.length} sản phẩm — Bấm vào sản phẩm để xem chi tiết tỉnh/thành
+              </p>
             </div>
             <div className="divide-y divide-slate-800">
-              {imports.map(function(imp, i) {
-                const shop = shops.find(function(s) { return s.id === imp.shopId; });
-                const isFiltered = filteredImports.includes(imp);
-                const totalRev = imp.hourlyData.reduce(function(s, h) { return s + h.revenue; }, 0);
-                const totalOrd = imp.hourlyData.reduce(function(s, h) { return s + h.orders; }, 0);
+              {(showAllProducts ? mergedProductProvince : mergedProductProvince.slice(0, 10)).map(function(item, i) {
+                var isExpanded = expandedProduct === item.product;
+                var topProvince = item.provinces[0];
                 return (
-                  <div key={i} className={'flex items-center justify-between px-5 py-3 ' + (isFiltered ? '' : 'opacity-40')}>
+                  <div key={i}>
+                    <button
+                      onClick={function() { setExpandedProduct(isExpanded ? null : item.product); }}
+                      className="w-full flex items-center gap-4 px-5 py-3 hover:bg-slate-800/50 transition-colors text-left"
+                    >
+                      <span className="w-8 text-center shrink-0">
+                        {i < 3 ? (
+                          <span className={'inline-flex w-7 h-7 rounded-full items-center justify-center text-xs font-bold ' + (
+                            i === 0 ? 'bg-yellow-500/15 text-yellow-400' :
+                            i === 1 ? 'bg-gray-400/15 text-gray-300' :
+                            'bg-amber-700/15 text-amber-600'
+                          )}>{i + 1}</span>
+                        ) : (
+                          <span className="text-gray-500 text-sm">{i + 1}</span>
+                        )}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className={'font-medium truncate ' + (i < 3 ? 'text-gray-100' : 'text-gray-300')}>{item.product}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          {item.provinces.length} tỉnh/thành — Top: <span className="text-emerald-400">{topProvince?.province}</span>
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className={'font-semibold ' + (i < 3 ? 'text-emerald-400' : 'text-gray-200')}>{formatCurrency(item.totalRevenue)}</p>
+                        <p className="text-xs text-gray-500">{item.totalOrders.toLocaleString()} đơn</p>
+                      </div>
+                      <svg className={'w-4 h-4 text-gray-500 transition-transform shrink-0 ' + (isExpanded ? 'rotate-180' : '')} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                    </button>
+                    {isExpanded && (
+                      <div className="bg-slate-800/30 px-5 pb-3">
+                        <div className="ml-8">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="text-xs text-gray-500">
+                                <th className="text-left py-1.5 font-medium">#</th>
+                                <th className="text-left py-1.5 font-medium">Tỉnh/Thành</th>
+                                <th className="text-right py-1.5 font-medium">Doanh thu</th>
+                                <th className="text-right py-1.5 font-medium">Đơn</th>
+                                <th className="text-center py-1.5 font-medium w-28">Tỷ trọng</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {item.provinces.slice(0, 10).map(function(pv, j) {
+                                var pvPct = item.totalRevenue > 0 ? pv.revenue / item.totalRevenue : 0;
+                                return (
+                                  <tr key={j} className="border-t border-slate-700/30">
+                                    <td className="py-1.5 text-gray-500 text-xs">{j + 1}</td>
+                                    <td className="py-1.5 text-gray-300">{pv.province}</td>
+                                    <td className="py-1.5 text-right text-gray-200">{formatCurrency(pv.revenue)}</td>
+                                    <td className="py-1.5 text-right text-gray-400">{pv.orders.toLocaleString()}</td>
+                                    <td className="py-1.5">
+                                      <div className="flex items-center gap-1.5">
+                                        <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                                          <div className="h-full rounded-full bg-violet-500" style={{ width: Math.max(pvPct * 100, 1) + '%' }} />
+                                        </div>
+                                        <span className="text-xs text-gray-500 w-10 text-right">{(pvPct * 100).toFixed(1)}%</span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                              {item.provinces.length > 10 && (
+                                <tr className="border-t border-slate-700/30">
+                                  <td colSpan={5} className="py-1.5 text-center text-xs text-gray-500">
+                                    +{item.provinces.length - 10} tỉnh/thành khác
+                                  </td>
+                                </tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {mergedProductProvince.length > 10 && (
+              <div className="px-5 py-3 border-t border-slate-700/50 text-center">
+                <button
+                  onClick={function() { setShowAllProducts(!showAllProducts); }}
+                  className="text-sm text-blue-400 hover:text-blue-300"
+                >{showAllProducts ? 'Thu gọn' : 'Xem tất cả ' + mergedProductProvince.length + ' sản phẩm'}</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Section 4: Import history */}
+        {imports.length > 0 && (
+          <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-700/50 flex items-center justify-between">
+              <h2 className="font-semibold text-gray-100 text-sm">Lịch sử import phân tích ({imports.length})</h2>
+              {imports.length > 10 && (
+                <button
+                  onClick={function() { setShowAllImports(!showAllImports); }}
+                  className="text-xs text-blue-400 hover:text-blue-300"
+                >{showAllImports ? 'Thu gọn' : 'Xem tất cả'}</button>
+              )}
+            </div>
+            <div className="divide-y divide-slate-800">
+              {(showAllImports ? imports : imports.slice(0, 10)).map(function(imp, i) {
+                var shop = shops.find(function(s) { return s.id === imp.shopId; });
+                return (
+                  <div key={imp.id || i} className="flex items-center justify-between px-5 py-3">
                     <div className="flex items-center gap-3">
                       <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + (
                         shop?.channel === 'TikTok' ? 'bg-pink-500/15 text-pink-400' : 'bg-orange-500/15 text-orange-400'
@@ -521,7 +689,7 @@ export default function AnalyticsPage() {
                       <div>
                         <p className="text-sm text-gray-200">{shop?.name || imp.shopName}</p>
                         <p className="text-xs text-gray-500">
-                          {imp.dateFrom} &rarr; {imp.dateTo} | {formatCurrency(totalRev)} | {totalOrd} đơn | {imp.provinceData.length} tỉnh
+                          {imp.dateFrom} &rarr; {imp.dateTo} | {imp.provinceData.length} tỉnh
                         </p>
                       </div>
                     </div>

@@ -109,6 +109,8 @@ function FileUploadForm() {
   const [collectedProvince, setCollectedProvince] = useState<Record<string, { revenue: number; orders: Set<string> }>>({});
   const [collectedDailyHourly, setCollectedDailyHourly] = useState<Record<string, Record<number, { revenue: number; orders: Set<string> }>>>({});
   const [collectedDailyProvince, setCollectedDailyProvince] = useState<Record<string, Record<string, { revenue: number; orders: Set<string> }>>>({});
+  const [collectedProductProvince, setCollectedProductProvince] = useState<Record<string, { revenue: number; orders: Set<string> }>>({});
+  const [collectedDailyProductProvince, setCollectedDailyProductProvince] = useState<Record<string, Record<string, { revenue: number; orders: Set<string> }>>>({});
 
   const cogsMap = useMemo(function() {
     var m = new Map<string, number>();
@@ -201,6 +203,8 @@ function FileUploadForm() {
     const provinceMap: Record<string, { revenue: number; orders: Set<string> }> = {};
     const dailyHourlyMap: Record<string, Record<number, { revenue: number; orders: Set<string> }>> = {};
     const dailyProvinceMap: Record<string, Record<string, { revenue: number; orders: Set<string> }>> = {};
+    const productProvinceMap: Record<string, { revenue: number; orders: Set<string> }> = {};
+    const dailyProductProvinceMap: Record<string, Record<string, { revenue: number; orders: Set<string> }>> = {};
 
     for (const row of data) {
       const orderId = String(row['Mã đơn hàng'] || '').trim();
@@ -253,6 +257,17 @@ function FileUploadForm() {
           if (!dailyProvinceMap[date][province]) dailyProvinceMap[date][province] = { revenue: 0, orders: new Set() };
           dailyProvinceMap[date][province].revenue += lineRev;
           dailyProvinceMap[date][province].orders.add(orderId);
+
+          if (sku) {
+            var ppKey = sku + '||' + province;
+            if (!productProvinceMap[ppKey]) productProvinceMap[ppKey] = { revenue: 0, orders: new Set() };
+            productProvinceMap[ppKey].revenue += lineRev;
+            productProvinceMap[ppKey].orders.add(orderId);
+            if (!dailyProductProvinceMap[date]) dailyProductProvinceMap[date] = {};
+            if (!dailyProductProvinceMap[date][ppKey]) dailyProductProvinceMap[date][ppKey] = { revenue: 0, orders: new Set() };
+            dailyProductProvinceMap[date][ppKey].revenue += lineRev;
+            dailyProductProvinceMap[date][ppKey].orders.add(orderId);
+          }
         }
       }
 
@@ -272,6 +287,8 @@ function FileUploadForm() {
     setCollectedProvince(provinceMap);
     setCollectedDailyHourly(dailyHourlyMap);
     setCollectedDailyProvince(dailyProvinceMap);
+    setCollectedProductProvince(productProvinceMap);
+    setCollectedDailyProductProvince(dailyProductProvinceMap);
     return Array.from(dailyMap.values()).sort(function(a, b) { return a.date.localeCompare(b.date); });
   }
 
@@ -285,6 +302,8 @@ function FileUploadForm() {
     const provinceMap: Record<string, { revenue: number; orders: Set<string> }> = {};
     const dailyHourlyMap: Record<string, Record<number, { revenue: number; orders: Set<string> }>> = {};
     const dailyProvinceMap: Record<string, Record<string, { revenue: number; orders: Set<string> }>> = {};
+    const productProvinceMap: Record<string, { revenue: number; orders: Set<string> }> = {};
+    const dailyProductProvinceMap: Record<string, Record<string, { revenue: number; orders: Set<string> }>> = {};
 
     for (const row of data) {
       const orderId = String(row['Order ID'] || '').trim();
@@ -344,6 +363,17 @@ function FileUploadForm() {
           if (!dailyProvinceMap[date][province]) dailyProvinceMap[date][province] = { revenue: 0, orders: new Set() };
           dailyProvinceMap[date][province].revenue += skuRevenue;
           dailyProvinceMap[date][province].orders.add(orderId);
+
+          if (sku) {
+            var ppKey = sku + '||' + province;
+            if (!productProvinceMap[ppKey]) productProvinceMap[ppKey] = { revenue: 0, orders: new Set() };
+            productProvinceMap[ppKey].revenue += skuRevenue;
+            productProvinceMap[ppKey].orders.add(orderId);
+            if (!dailyProductProvinceMap[date]) dailyProductProvinceMap[date] = {};
+            if (!dailyProductProvinceMap[date][ppKey]) dailyProductProvinceMap[date][ppKey] = { revenue: 0, orders: new Set() };
+            dailyProductProvinceMap[date][ppKey].revenue += skuRevenue;
+            dailyProductProvinceMap[date][ppKey].orders.add(orderId);
+          }
         }
       }
 
@@ -364,6 +394,8 @@ function FileUploadForm() {
     setCollectedProvince(provinceMap);
     setCollectedDailyHourly(dailyHourlyMap);
     setCollectedDailyProvince(dailyProvinceMap);
+    setCollectedProductProvince(productProvinceMap);
+    setCollectedDailyProductProvince(dailyProductProvinceMap);
     return Array.from(dailyMap.values()).sort(function(a, b) { return a.date.localeCompare(b.date); });
   }
 
@@ -864,6 +896,18 @@ function FileUploadForm() {
           return { province: pe[0], revenue: Math.round(pe[1].revenue), orders: pe[1].orders.size };
         }).sort(function(a, b) { return b.revenue - a.revenue; });
       });
+      const productProvinceData = Object.entries(collectedProductProvince).map(function(entry) {
+        const parts = entry[0].split('||');
+        return { sku: parts[0], province: parts[1], revenue: Math.round(entry[1].revenue), orders: entry[1].orders.size };
+      }).sort(function(a, b) { return b.revenue - a.revenue; });
+      const dailyProductProvince: Record<string, { sku: string; province: string; revenue: number; orders: number }[]> = {};
+      Object.entries(collectedDailyProductProvince).forEach(function(entry) {
+        const d = entry[0]; const ppMap = entry[1];
+        dailyProductProvince[d] = Object.entries(ppMap).map(function(pe) {
+          const parts = pe[0].split('||');
+          return { sku: parts[0], province: parts[1], revenue: Math.round(pe[1].revenue), orders: pe[1].orders.size };
+        }).sort(function(a, b) { return b.revenue - a.revenue; });
+      });
       addAnalytics({
         id: 'analytics-' + selectedShopId + '-' + (sortedDates[0] || validRows[0].date),
         shopId: selectedShopId,
@@ -874,6 +918,8 @@ function FileUploadForm() {
         provinceData: provinceData,
         dailyHourly: dailyHourly,
         dailyProvince: dailyProvince,
+        productProvinceData: productProvinceData,
+        dailyProductProvince: dailyProductProvince,
         importedAt: new Date().toISOString(),
       });
     }
