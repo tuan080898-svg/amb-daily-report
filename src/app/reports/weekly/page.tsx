@@ -53,7 +53,7 @@ function TrendArrow({ current, previous, suffix, inverse }: { current: number; p
 }
 
 export default function WeeklyPage() {
-  var { currentUser, shops, reports, monthlyKPIs, monthlyPlans, getUserShops, weeklyActions, addWeeklyAction, updateWeeklyAction, deleteWeeklyAction, monthlyPlanNotes, saveMonthlyPlanNote } = useAppState();
+  var { currentUser, shops, reports, monthlyKPIs, monthlyPlans, getUserShops, weeklyActions, addWeeklyAction, updateWeeklyAction, deleteWeeklyAction, monthlyPlanNotes, saveMonthlyPlanNote, updatePlan, updateKPI } = useAppState();
 
   var userShops = useMemo(function() {
     if (!currentUser) return [];
@@ -365,6 +365,121 @@ export default function WeeklyPage() {
     saveMonthlyPlanNote(note);
   }
 
+  // Smart plan calculator state
+  var [calcTarget, setCalcTarget] = useState('');
+  var [calcAds, setCalcAds] = useState('');
+  var [calcSaleDouble, setCalcSaleDouble] = useState('');
+  var [calcSaleDoubleAds, setCalcSaleDoubleAds] = useState('');
+  var [calcSaleFixed, setCalcSaleFixed] = useState('');
+  var [calcSaleFixedAds, setCalcSaleFixedAds] = useState('');
+  var [calcSaved, setCalcSaved] = useState(false);
+
+  // Count day types in selected month
+  var dayTypeCounts = useMemo(function() {
+    if (!selectedShopId) return { regular: 0, saleDouble: 0, saleFixed: 0, total: 0 };
+    var daysInMonth = new Date(year, month, 0).getDate();
+    var regular = 0;
+    var saleDouble = 0;
+    var saleFixed = 0;
+    for (var d = 1; d <= daysInMonth; d++) {
+      var dateStr = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      var dt = getDayType(dateStr);
+      if (dt === 'sale_double') saleDouble++;
+      else if (dt === 'sale_fixed') saleFixed++;
+      else regular++;
+    }
+    return { regular: regular, saleDouble: saleDouble, saleFixed: saleFixed, total: daysInMonth };
+  }, [selectedShopId, year, month]);
+
+  // Auto-calculate regular day targets
+  var calcResults = useMemo(function() {
+    var totalTarget = parseFloat(calcTarget) || 0;
+    var totalAds = parseFloat(calcAds) || 0;
+    var saleDoublePerDay = parseFloat(calcSaleDouble) || 0;
+    var saleDoubleAdsPerDay = parseFloat(calcSaleDoubleAds) || 0;
+    var saleFixedPerDay = parseFloat(calcSaleFixed) || 0;
+    var saleFixedAdsPerDay = parseFloat(calcSaleFixedAds) || 0;
+
+    var totalSaleRevenue = (saleDoublePerDay * dayTypeCounts.saleDouble) + (saleFixedPerDay * dayTypeCounts.saleFixed);
+    var totalSaleAds = (saleDoubleAdsPerDay * dayTypeCounts.saleDouble) + (saleFixedAdsPerDay * dayTypeCounts.saleFixed);
+
+    var remainingRevenue = totalTarget - totalSaleRevenue;
+    var remainingAds = totalAds - totalSaleAds;
+
+    var regularDayTarget = dayTypeCounts.regular > 0 ? Math.round(remainingRevenue / dayTypeCounts.regular) : 0;
+    var regularDayAds = dayTypeCounts.regular > 0 ? Math.round(remainingAds / dayTypeCounts.regular) : 0;
+
+    var saleDayMkt = dayTypeCounts.saleDouble > 0 || dayTypeCounts.saleFixed > 0
+      ? Math.round(totalSaleAds / (dayTypeCounts.saleDouble + dayTypeCounts.saleFixed))
+      : 0;
+
+    return {
+      totalSaleRevenue: totalSaleRevenue,
+      totalSaleAds: totalSaleAds,
+      remainingRevenue: remainingRevenue,
+      remainingAds: remainingAds,
+      regularDayTarget: regularDayTarget,
+      regularDayAds: regularDayAds,
+      saleDayMkt: saleDayMkt,
+      isValid: totalTarget > 0 && regularDayTarget > 0,
+    };
+  }, [calcTarget, calcAds, calcSaleDouble, calcSaleDoubleAds, calcSaleFixed, calcSaleFixedAds, dayTypeCounts]);
+
+  // Load existing plan into calculator
+  useEffect(function() {
+    if (plan) {
+      var totalRevenue = (plan.regularDayTarget * dayTypeCounts.regular)
+        + (plan.saleDoubleDayTarget * dayTypeCounts.saleDouble)
+        + (plan.saleFixedDayTarget * dayTypeCounts.saleFixed);
+      setCalcTarget(totalRevenue > 0 ? String(totalRevenue) : '');
+      setCalcAds(plan.totalMktBudget > 0 ? String(plan.totalMktBudget) : '');
+      setCalcSaleDouble(plan.saleDoubleDayTarget > 0 ? String(plan.saleDoubleDayTarget) : '');
+      setCalcSaleFixed(plan.saleFixedDayTarget > 0 ? String(plan.saleFixedDayTarget) : '');
+      var saleDoubleAds = plan.saleDayMkt || 0;
+      setCalcSaleDoubleAds(saleDoubleAds > 0 ? String(saleDoubleAds) : '');
+      setCalcSaleFixedAds(saleDoubleAds > 0 ? String(saleDoubleAds) : '');
+    } else {
+      setCalcTarget(kpi ? String(kpi.kpiAmount) : '');
+      setCalcAds('');
+      setCalcSaleDouble('');
+      setCalcSaleDoubleAds('');
+      setCalcSaleFixed('');
+      setCalcSaleFixedAds('');
+    }
+    setCalcSaved(false);
+  }, [plan, kpi, selectedShopId, selectedMonth, dayTypeCounts]);
+
+  function handleSavePlan() {
+    if (!selectedShopId || !calcResults.isValid) return;
+    var totalTarget = parseFloat(calcTarget) || 0;
+    var totalAds = parseFloat(calcAds) || 0;
+    var saleDoublePerDay = parseFloat(calcSaleDouble) || 0;
+    var saleFixedPerDay = parseFloat(calcSaleFixed) || 0;
+
+    var newPlan = {
+      shopId: selectedShopId,
+      month: selectedMonth,
+      regularDayTarget: calcResults.regularDayTarget,
+      saleDoubleDayTarget: saleDoublePerDay,
+      saleFixedDayTarget: saleFixedPerDay,
+      totalMktBudget: totalAds,
+      regularDayMkt: calcResults.regularDayAds,
+      saleDayMkt: calcResults.saleDayMkt,
+      dailyOverrides: plan?.dailyOverrides || {},
+    };
+    updatePlan(newPlan);
+
+    var newKpi = {
+      shopId: selectedShopId,
+      month: selectedMonth,
+      kpiAmount: totalTarget,
+    };
+    updateKPI(newKpi);
+
+    setCalcSaved(true);
+    setTimeout(function() { setCalcSaved(false); }, 2000);
+  }
+
   function handleAddTask(weekStart: string) {
     if (!newTaskTitle.trim() || !currentUser) return;
     var action: WeeklyAction = {
@@ -432,8 +547,7 @@ export default function WeeklyPage() {
         <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-6">
           <p className="text-amber-400 text-sm font-medium">Chưa có kế hoạch tháng cho shop này</p>
           <p className="text-amber-400/70 text-xs mt-1">
-            Vào &quot;Kế hoạch tháng&quot; để thiết lập target ngày thường, ngày sale và budget quảng cáo.
-            Hiện chỉ hiển thị dữ liệu thực tế.
+            Mở phần &quot;Lập kế hoạch tháng&quot; bên dưới để nhập mục tiêu và tự động phân bổ.
           </p>
         </div>
       )}
@@ -452,7 +566,7 @@ export default function WeeklyPage() {
               <div className="text-left">
                 <p className="text-sm font-medium text-gray-200">Lập kế hoạch tháng {month}/{year}</p>
                 <p className="text-xs text-gray-500">
-                  {currentNote ? 'Đã lập kế hoạch' : 'Chưa lập — bấm để bắt đầu'}
+                  {plan ? 'Đã có kế hoạch · ' + formatCurrency(plan.regularDayTarget) + '/ngày thường' : 'Chưa lập — bấm để bắt đầu'}
                   {prevMonthRecap ? ' · T' + prevMonthRecap.month + ': ' + formatCurrency(prevMonthRecap.revenue) : ''}
                 </p>
               </div>
@@ -532,16 +646,196 @@ export default function WeeklyPage() {
                 </div>
               )}
 
-              {/* Planning guide */}
+              {/* Smart plan calculator */}
               <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-5">
-                <h3 className="text-sm font-medium text-gray-300 mb-3">Hướng dẫn lập kế hoạch</h3>
-                <div className="space-y-2 text-xs text-gray-400">
-                  <div className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">B1.</span><span>Xem kết quả tháng trước: top sản phẩm nào bán chạy? Tỷ lệ phân bổ doanh số ra sao?</span></div>
-                  <div className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">B2.</span><span>Xác định sản phẩm focus tháng này — dựa vào doanh số, tồn kho, trend thị trường</span></div>
-                  <div className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">B3.</span><span>Phân bổ target theo tuần: tuần nào có sale đôi thì đẩy mạnh, tuần thường duy trì ổn định</span></div>
-                  <div className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">B4.</span><span>Lập lịch promotion: ngày nào chạy flash sale, voucher, combo — ghi rõ vào ô bên dưới</span></div>
-                  <div className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">B5.</span><span>Budget QC: phân bổ theo tuần, ưu tiên tuần sale, giảm tuần đầu tháng nếu cần</span></div>
-                  <div className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">B6.</span><span>Đặt task hành động cụ thể cho từng tuần bên dưới — mỗi task có deadline rõ ràng</span></div>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-medium text-gray-300">
+                    Tính toán kế hoạch tháng {month}/{year}
+                  </h3>
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    <span className="px-2 py-0.5 rounded bg-slate-800 text-gray-400">{dayTypeCounts.total} ngày</span>
+                    <span className="px-2 py-0.5 rounded bg-slate-800 text-gray-400">{dayTypeCounts.regular} thường</span>
+                    {dayTypeCounts.saleDouble > 0 && (
+                      <span className="px-2 py-0.5 rounded bg-red-500/10 text-red-400">{dayTypeCounts.saleDouble} sale đôi ({month}/{month})</span>
+                    )}
+                    <span className="px-2 py-0.5 rounded bg-orange-500/10 text-orange-400">{dayTypeCounts.saleFixed} sale (15, 25)</span>
+                  </div>
+                </div>
+
+                {/* Input section */}
+                <div className="space-y-4">
+                  {/* Row 1: Total target + Total ads */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1.5 font-medium">Mục tiêu doanh thu tháng {month}</label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={calcTarget ? Number(calcTarget).toLocaleString('vi-VN') : ''}
+                          onChange={function(e) { setCalcTarget(e.target.value.replace(/[^\d]/g, '')); }}
+                          placeholder="VD: 500,000,000"
+                          className="w-full px-3 py-2.5 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 pr-8"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">đ</span>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1.5 font-medium">Tổng chi phí QC tháng {month}</label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={calcAds ? Number(calcAds).toLocaleString('vi-VN') : ''}
+                          onChange={function(e) { setCalcAds(e.target.value.replace(/[^\d]/g, '')); }}
+                          placeholder="VD: 100,000,000"
+                          className="w-full px-3 py-2.5 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 pr-8"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">đ</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sale days input */}
+                  <div className="border-t border-slate-700/50 pt-4">
+                    <p className="text-xs text-gray-500 mb-3 font-medium">Nhập mục tiêu từng loại ngày sale (mỗi ngày):</p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Sale double */}
+                      {dayTypeCounts.saleDouble > 0 && (
+                        <>
+                          <div>
+                            <label className="block text-xs text-red-400/80 mb-1.5 font-medium">
+                              DT ngày sale đôi ({month}/{month}) — {dayTypeCounts.saleDouble} ngày
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={calcSaleDouble ? Number(calcSaleDouble).toLocaleString('vi-VN') : ''}
+                                onChange={function(e) { setCalcSaleDouble(e.target.value.replace(/[^\d]/g, '')); }}
+                                placeholder="DT mỗi ngày sale đôi"
+                                className="w-full px-3 py-2.5 text-sm border border-red-500/30 rounded-lg bg-red-500/5 text-gray-200 placeholder:text-gray-600 pr-8"
+                              />
+                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">đ/ngày</span>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-red-400/80 mb-1.5 font-medium">
+                              QC ngày sale đôi — {dayTypeCounts.saleDouble} ngày
+                            </label>
+                            <div className="relative">
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={calcSaleDoubleAds ? Number(calcSaleDoubleAds).toLocaleString('vi-VN') : ''}
+                                onChange={function(e) { setCalcSaleDoubleAds(e.target.value.replace(/[^\d]/g, '')); }}
+                                placeholder="QC mỗi ngày sale đôi"
+                                className="w-full px-3 py-2.5 text-sm border border-red-500/30 rounded-lg bg-red-500/5 text-gray-200 placeholder:text-gray-600 pr-8"
+                              />
+                              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">đ/ngày</span>
+                            </div>
+                          </div>
+                        </>
+                      )}
+
+                      {/* Sale fixed (15, 25) */}
+                      <div>
+                        <label className="block text-xs text-orange-400/80 mb-1.5 font-medium">
+                          DT ngày sale 15 &amp; 25 — {dayTypeCounts.saleFixed} ngày
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={calcSaleFixed ? Number(calcSaleFixed).toLocaleString('vi-VN') : ''}
+                            onChange={function(e) { setCalcSaleFixed(e.target.value.replace(/[^\d]/g, '')); }}
+                            placeholder="DT mỗi ngày sale cố định"
+                            className="w-full px-3 py-2.5 text-sm border border-orange-500/30 rounded-lg bg-orange-500/5 text-gray-200 placeholder:text-gray-600 pr-8"
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">đ/ngày</span>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs text-orange-400/80 mb-1.5 font-medium">
+                          QC ngày sale 15 &amp; 25 — {dayTypeCounts.saleFixed} ngày
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={calcSaleFixedAds ? Number(calcSaleFixedAds).toLocaleString('vi-VN') : ''}
+                            onChange={function(e) { setCalcSaleFixedAds(e.target.value.replace(/[^\d]/g, '')); }}
+                            placeholder="QC mỗi ngày sale cố định"
+                            className="w-full px-3 py-2.5 text-sm border border-orange-500/30 rounded-lg bg-orange-500/5 text-gray-200 placeholder:text-gray-600 pr-8"
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">đ/ngày</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Auto-calculated results */}
+                  {(parseFloat(calcTarget) > 0) && (
+                    <div className="border-t border-slate-700/50 pt-4">
+                      <p className="text-xs text-emerald-400/80 mb-3 font-medium">Tự động tính — Ngày thường ({dayTypeCounts.regular} ngày):</p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3">
+                          <p className="text-[10px] text-gray-500 uppercase tracking-wider">DT / ngày thường</p>
+                          <p className={'text-lg font-bold ' + (calcResults.regularDayTarget > 0 ? 'text-emerald-400' : 'text-red-400')}>
+                            {calcResults.regularDayTarget > 0 ? formatCurrency(calcResults.regularDayTarget) : 'Thiếu!'}
+                          </p>
+                        </div>
+                        <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-lg p-3">
+                          <p className="text-[10px] text-gray-500 uppercase tracking-wider">QC / ngày thường</p>
+                          <p className={'text-lg font-bold ' + (calcResults.regularDayAds >= 0 ? 'text-blue-400' : 'text-red-400')}>
+                            {calcResults.regularDayAds >= 0 ? formatCurrency(calcResults.regularDayAds) : 'Lỗi'}
+                          </p>
+                        </div>
+                        <div className="bg-slate-800/50 rounded-lg p-3">
+                          <p className="text-[10px] text-gray-500 uppercase tracking-wider">Tổng DT sale</p>
+                          <p className="text-sm font-semibold text-gray-300">{formatCurrency(calcResults.totalSaleRevenue)}</p>
+                          <p className="text-[10px] text-gray-500">
+                            {dayTypeCounts.saleDouble > 0 && dayTypeCounts.saleDouble + ' đôi'}
+                            {dayTypeCounts.saleDouble > 0 && dayTypeCounts.saleFixed > 0 && ' + '}
+                            {dayTypeCounts.saleFixed > 0 && dayTypeCounts.saleFixed + ' cố định'}
+                          </p>
+                        </div>
+                        <div className="bg-slate-800/50 rounded-lg p-3">
+                          <p className="text-[10px] text-gray-500 uppercase tracking-wider">Còn lại cho ngày thường</p>
+                          <p className={'text-sm font-semibold ' + (calcResults.remainingRevenue > 0 ? 'text-gray-300' : 'text-red-400')}>
+                            {formatCurrency(calcResults.remainingRevenue)}
+                          </p>
+                          <p className="text-[10px] text-gray-500">÷ {dayTypeCounts.regular} ngày</p>
+                        </div>
+                      </div>
+
+                      {calcResults.remainingRevenue < 0 && (
+                        <div className="mt-3 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-lg">
+                          <p className="text-xs text-red-400">Target ngày sale đã vượt tổng mục tiêu tháng — hãy giảm target sale hoặc tăng mục tiêu tháng.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Save button */}
+                  <div className="flex items-center justify-between pt-2">
+                    <p className="text-[10px] text-gray-600">
+                      Bấm &quot;Lưu kế hoạch&quot; để áp dụng vào toàn bộ bảng theo dõi tuần
+                    </p>
+                    <button
+                      onClick={handleSavePlan}
+                      disabled={!calcResults.isValid}
+                      className={'px-5 py-2.5 text-sm rounded-lg font-medium transition-all ' + (
+                        calcSaved
+                          ? 'bg-emerald-600 text-white'
+                          : calcResults.isValid
+                            ? 'bg-violet-600 text-white hover:bg-violet-500'
+                            : 'bg-slate-700 text-gray-500 cursor-not-allowed'
+                      )}
+                    >
+                      {calcSaved ? 'Đã lưu!' : 'Lưu kế hoạch'}
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -561,14 +855,14 @@ export default function WeeklyPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1.5 font-medium">Sản phẩm focus (top SP, tỷ lệ phân bổ)</label>
+                    <label className="block text-xs text-gray-500 mb-1.5 font-medium">Sản phẩm focus</label>
                     <textarea
                       value={noteProductFocus}
                       onChange={function(e) { setNoteProductFocus(e.target.value); }}
                       onBlur={handleSaveNote}
-                      placeholder="VD: SP A - 40% DT (500 đơn/tháng), SP B - 25% DT (300 đơn/tháng)..."
+                      placeholder="VD: SP A - 40% DT, SP B - 25% DT..."
                       className="w-full px-3 py-2 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 resize-none"
-                      rows={3}
+                      rows={2}
                     />
                   </div>
                   <div>
@@ -577,9 +871,9 @@ export default function WeeklyPage() {
                       value={notePromoPlan}
                       onChange={function(e) { setNotePromoPlan(e.target.value); }}
                       onBlur={handleSaveNote}
-                      placeholder="VD: 1-3/10 flash sale SP mới, 10/10 sale đôi chạy combo giảm 15%, 15/10 voucher freeship..."
+                      placeholder="VD: 10/10 sale đôi combo 15%, 15/10 freeship..."
                       className="w-full px-3 py-2 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 resize-none"
-                      rows={3}
+                      rows={2}
                     />
                   </div>
                 </div>
