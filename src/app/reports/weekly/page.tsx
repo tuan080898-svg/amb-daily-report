@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useAppState } from '@/lib/store';
 import { formatCurrency, getDayType, getTargetForDate, getMktForDate, toDateString } from '@/lib/utils';
-import { DayType, WeeklyAction, ActionStatus } from '@/lib/types';
+import { DayType, WeeklyAction, ActionStatus, MonthlyPlanNote } from '@/lib/types';
 
 interface WeekData {
   weekNum: number;
@@ -53,7 +53,7 @@ function TrendArrow({ current, previous, suffix, inverse }: { current: number; p
 }
 
 export default function WeeklyPage() {
-  var { currentUser, shops, reports, monthlyKPIs, monthlyPlans, getUserShops, weeklyActions, addWeeklyAction, updateWeeklyAction, deleteWeeklyAction } = useAppState();
+  var { currentUser, shops, reports, monthlyKPIs, monthlyPlans, getUserShops, weeklyActions, addWeeklyAction, updateWeeklyAction, deleteWeeklyAction, monthlyPlanNotes, saveMonthlyPlanNote } = useAppState();
 
   var userShops = useMemo(function() {
     if (!currentUser) return [];
@@ -272,6 +272,99 @@ export default function WeeklyPage() {
     return { overdue: overdue, upcoming: upcoming, todayDue: todayDue };
   }, [weeklyActions, selectedShopId, todayStr]);
 
+  // Previous month recap
+  var prevMonthStr = useMemo(function() {
+    var m = month - 1;
+    var y = year;
+    if (m < 1) { m = 12; y--; }
+    return y + '-' + String(m).padStart(2, '0');
+  }, [year, month]);
+
+  var prevMonthRecap = useMemo(function() {
+    if (!selectedShopId) return null;
+    var prevReports = reports.filter(function(r) { return r.shopId === selectedShopId && r.date.startsWith(prevMonthStr); });
+    if (prevReports.length === 0) return null;
+
+    var totalRevenue = 0;
+    var totalMkt = 0;
+    var totalOrders = 0;
+    var totalCancelled = 0;
+    var totalReturned = 0;
+    prevReports.forEach(function(r) {
+      totalRevenue += r.actualRevenue;
+      totalMkt += r.adSpend;
+      totalOrders += r.totalOrders;
+      totalCancelled += r.cancelledOrders;
+      totalReturned += r.returnedOrders;
+    });
+
+    var roas = totalMkt > 0 ? totalRevenue / totalMkt : 0;
+    var cpo = totalOrders > 0 ? totalMkt / totalOrders : 0;
+    var cancelReturnRate = totalOrders > 0 ? (totalCancelled + totalReturned) / totalOrders : 0;
+    var avgDaily = prevReports.length > 0 ? totalRevenue / prevReports.length : 0;
+    var prevM = parseInt(prevMonthStr.split('-')[1]);
+
+    return {
+      month: prevM,
+      revenue: totalRevenue,
+      mkt: totalMkt,
+      orders: totalOrders,
+      cancelled: totalCancelled,
+      returned: totalReturned,
+      roas: roas,
+      cpo: cpo,
+      cancelReturnRate: cancelReturnRate,
+      avgDaily: avgDaily,
+      daysWithReport: prevReports.length,
+    };
+  }, [reports, selectedShopId, prevMonthStr]);
+
+  var growthNeeded = useMemo(function() {
+    if (!prevMonthRecap || !monthlyTarget) return null;
+    var pct = prevMonthRecap.revenue > 0 ? ((monthlyTarget - prevMonthRecap.revenue) / prevMonthRecap.revenue) * 100 : 0;
+    var suggestedMkt = prevMonthRecap.roas > 0 ? monthlyTarget / prevMonthRecap.roas : 0;
+    return { pct: pct, suggestedMkt: suggestedMkt };
+  }, [prevMonthRecap, monthlyTarget]);
+
+  // Planning note
+  var currentNote = useMemo(function() {
+    if (!selectedShopId) return null;
+    return monthlyPlanNotes.find(function(n) { return n.shopId === selectedShopId && n.month === selectedMonth; }) || null;
+  }, [monthlyPlanNotes, selectedShopId, selectedMonth]);
+
+  var [showPlanning, setShowPlanning] = useState(false);
+  var [noteStrategy, setNoteStrategy] = useState('');
+  var [noteProductFocus, setNoteProductFocus] = useState('');
+  var [notePromoPlan, setNotePromoPlan] = useState('');
+
+  useEffect(function() {
+    if (currentNote) {
+      setNoteStrategy(currentNote.strategy);
+      setNoteProductFocus(currentNote.productFocus);
+      setNotePromoPlan(currentNote.promoPlan);
+    } else {
+      setNoteStrategy('');
+      setNoteProductFocus('');
+      setNotePromoPlan('');
+    }
+  }, [currentNote]);
+
+  function handleSaveNote() {
+    if (!currentUser || !selectedShopId) return;
+    var note: MonthlyPlanNote = {
+      id: currentNote?.id || ('mpn-' + selectedShopId + '-' + selectedMonth),
+      shopId: selectedShopId,
+      month: selectedMonth,
+      strategy: noteStrategy,
+      productFocus: noteProductFocus,
+      promoPlan: notePromoPlan,
+      createdBy: currentNote?.createdBy || currentUser.id,
+      createdAt: currentNote?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    saveMonthlyPlanNote(note);
+  }
+
   function handleAddTask(weekStart: string) {
     if (!newTaskTitle.trim() || !currentUser) return;
     var action: WeeklyAction = {
@@ -342,6 +435,158 @@ export default function WeeklyPage() {
             Vào &quot;Kế hoạch tháng&quot; để thiết lập target ngày thường, ngày sale và budget quảng cáo.
             Hiện chỉ hiển thị dữ liệu thực tế.
           </p>
+        </div>
+      )}
+
+      {/* Monthly planning section */}
+      {selectedShopId && (
+        <div className="mb-6">
+          <button
+            onClick={function() { setShowPlanning(!showPlanning); }}
+            className="w-full flex items-center justify-between px-5 py-3 bg-slate-900 border border-slate-700/50 rounded-xl hover:bg-slate-800/70 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-violet-500/15 flex items-center justify-center">
+                <span className="text-sm">📋</span>
+              </div>
+              <div className="text-left">
+                <p className="text-sm font-medium text-gray-200">Lập kế hoạch tháng {month}/{year}</p>
+                <p className="text-xs text-gray-500">
+                  {currentNote ? 'Đã lập kế hoạch' : 'Chưa lập — bấm để bắt đầu'}
+                  {prevMonthRecap ? ' · T' + prevMonthRecap.month + ': ' + formatCurrency(prevMonthRecap.revenue) : ''}
+                </p>
+              </div>
+            </div>
+            <svg className={'w-4 h-4 text-gray-500 transition-transform ' + (showPlanning ? 'rotate-180' : '')} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
+          </button>
+
+          {showPlanning && (
+            <div className="mt-3 space-y-4">
+              {/* Previous month recap */}
+              {prevMonthRecap && (
+                <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-5">
+                  <h3 className="text-sm font-medium text-gray-300 mb-3">
+                    Kết quả tháng {prevMonthRecap.month} (tháng trước)
+                  </h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                    <div>
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Doanh thu</p>
+                      <p className="text-lg font-bold text-gray-100">{formatCurrency(prevMonthRecap.revenue)}</p>
+                      <p className="text-xs text-gray-500">TB {formatCurrency(Math.round(prevMonthRecap.avgDaily))}/ngày</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Đơn hàng</p>
+                      <p className="text-lg font-bold text-gray-100">{prevMonthRecap.orders.toLocaleString()}</p>
+                      <p className="text-xs text-gray-500">{prevMonthRecap.daysWithReport} ngày báo cáo</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">ROAS</p>
+                      <p className={'text-lg font-bold ' + (prevMonthRecap.roas >= 4 ? 'text-emerald-400' : prevMonthRecap.roas >= 2.5 ? 'text-yellow-400' : 'text-red-400')}>
+                        {prevMonthRecap.roas > 0 ? prevMonthRecap.roas.toFixed(1) + 'x' : '—'}
+                      </p>
+                      <p className="text-xs text-gray-500">Chi QC: {formatCurrency(prevMonthRecap.mkt)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Huỷ + Hoàn</p>
+                      <p className={'text-lg font-bold ' + (prevMonthRecap.cancelReturnRate > 0.1 ? 'text-red-400' : 'text-emerald-400')}>
+                        {(prevMonthRecap.cancelReturnRate * 100).toFixed(1)}%
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {prevMonthRecap.cancelled} huỷ + {prevMonthRecap.returned} hoàn
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Growth comparison */}
+                  {growthNeeded && monthlyTarget > 0 && (
+                    <div className={'px-4 py-3 rounded-lg border ' + (
+                      growthNeeded.pct > 30 ? 'bg-red-500/10 border-red-500/20' :
+                      growthNeeded.pct > 10 ? 'bg-amber-500/10 border-amber-500/20' :
+                      growthNeeded.pct > 0 ? 'bg-blue-500/10 border-blue-500/20' :
+                      'bg-emerald-500/10 border-emerald-500/20'
+                    )}>
+                      <div className="flex flex-wrap items-center gap-4">
+                        <div>
+                          <p className="text-xs text-gray-500">KPI tháng {month}</p>
+                          <p className="text-sm font-bold text-gray-100">{formatCurrency(monthlyTarget)}</p>
+                        </div>
+                        <div className="text-gray-600">→</div>
+                        <div>
+                          <p className="text-xs text-gray-500">So với T{prevMonthRecap.month}</p>
+                          <p className={'text-sm font-bold ' + (growthNeeded.pct > 0 ? 'text-amber-400' : 'text-emerald-400')}>
+                            {growthNeeded.pct > 0 ? '+' : ''}{growthNeeded.pct.toFixed(1)}%
+                          </p>
+                        </div>
+                        {growthNeeded.suggestedMkt > 0 && (
+                          <>
+                            <div className="text-gray-600">·</div>
+                            <div>
+                              <p className="text-xs text-gray-500">QC gợi ý (giữ ROAS)</p>
+                              <p className="text-sm font-bold text-blue-400">{formatCurrency(Math.round(growthNeeded.suggestedMkt))}</p>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Planning guide */}
+              <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-5">
+                <h3 className="text-sm font-medium text-gray-300 mb-3">Hướng dẫn lập kế hoạch</h3>
+                <div className="space-y-2 text-xs text-gray-400">
+                  <div className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">B1.</span><span>Xem kết quả tháng trước: top sản phẩm nào bán chạy? Tỷ lệ phân bổ doanh số ra sao?</span></div>
+                  <div className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">B2.</span><span>Xác định sản phẩm focus tháng này — dựa vào doanh số, tồn kho, trend thị trường</span></div>
+                  <div className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">B3.</span><span>Phân bổ target theo tuần: tuần nào có sale đôi thì đẩy mạnh, tuần thường duy trì ổn định</span></div>
+                  <div className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">B4.</span><span>Lập lịch promotion: ngày nào chạy flash sale, voucher, combo — ghi rõ vào ô bên dưới</span></div>
+                  <div className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">B5.</span><span>Budget QC: phân bổ theo tuần, ưu tiên tuần sale, giảm tuần đầu tháng nếu cần</span></div>
+                  <div className="flex gap-2"><span className="text-violet-400 font-bold shrink-0">B6.</span><span>Đặt task hành động cụ thể cho từng tuần bên dưới — mỗi task có deadline rõ ràng</span></div>
+                </div>
+              </div>
+
+              {/* Planning notes form */}
+              <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-5">
+                <h3 className="text-sm font-medium text-gray-300 mb-4">Ghi chú kế hoạch tháng {month}</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1.5 font-medium">Chiến lược tổng thể</label>
+                    <textarea
+                      value={noteStrategy}
+                      onChange={function(e) { setNoteStrategy(e.target.value); }}
+                      onBlur={handleSaveNote}
+                      placeholder="VD: Tập trung đẩy doanh số ngày sale đôi 10/10, tăng giỏ hàng TB bằng combo..."
+                      className="w-full px-3 py-2 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 resize-none"
+                      rows={2}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1.5 font-medium">Sản phẩm focus (top SP, tỷ lệ phân bổ)</label>
+                    <textarea
+                      value={noteProductFocus}
+                      onChange={function(e) { setNoteProductFocus(e.target.value); }}
+                      onBlur={handleSaveNote}
+                      placeholder="VD: SP A - 40% DT (500 đơn/tháng), SP B - 25% DT (300 đơn/tháng)..."
+                      className="w-full px-3 py-2 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 resize-none"
+                      rows={3}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1.5 font-medium">Lịch promotion & sale</label>
+                    <textarea
+                      value={notePromoPlan}
+                      onChange={function(e) { setNotePromoPlan(e.target.value); }}
+                      onBlur={handleSaveNote}
+                      placeholder="VD: 1-3/10 flash sale SP mới, 10/10 sale đôi chạy combo giảm 15%, 15/10 voucher freeship..."
+                      className="w-full px-3 py-2 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 resize-none"
+                      rows={3}
+                    />
+                  </div>
+                </div>
+                <p className="text-[10px] text-gray-600 mt-3">Tự động lưu khi bạn rời ô nhập</p>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

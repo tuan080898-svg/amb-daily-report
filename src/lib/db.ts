@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry, WeeklyAction } from './types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry, WeeklyAction, MonthlyPlanNote } from './types';
 import type { InventoryData, InventoryTransaction, InventoryConfig, Warehouse } from './inventory';
 import { DEFAULT_CONFIG } from './utils';
 import bcrypt from 'bcryptjs';
@@ -883,4 +883,39 @@ export async function dbUpdateWeeklyAction(action: WeeklyAction): Promise<void> 
 export async function dbDeleteWeeklyAction(id: string): Promise<void> {
   const { error } = await db().from('weekly_actions').delete().eq('id', id);
   if (error) throw new Error('Xoa hanh dong that bai: ' + error.message);
+}
+
+// ==================== Monthly Plan Notes ====================
+
+export async function dbGetMonthlyPlanNotes(): Promise<MonthlyPlanNote[]> {
+  const { data } = await db().from('monthly_plan_notes').select('*');
+  if (!data) return [];
+  return data.map(function(r) {
+    return {
+      id: r.id,
+      shopId: r.shop_id,
+      month: r.month,
+      strategy: r.strategy || '',
+      productFocus: r.product_focus || '',
+      promoPlan: r.promo_plan || '',
+      createdBy: r.created_by,
+      createdAt: r.created_at || '',
+      updatedAt: r.updated_at || undefined,
+    };
+  });
+}
+
+export async function dbSaveMonthlyPlanNote(note: MonthlyPlanNote): Promise<void> {
+  const { error } = await db().from('monthly_plan_notes').upsert({
+    id: note.id,
+    shop_id: note.shopId,
+    month: note.month,
+    strategy: note.strategy,
+    product_focus: note.productFocus,
+    promo_plan: note.promoPlan,
+    created_by: note.createdBy,
+    created_at: note.createdAt,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw new Error('Luu ke hoach that bai: ' + error.message);
 }

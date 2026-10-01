@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, ReactNode } from 'react';
 import { AppContext, createInitialState } from '@/lib/store';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry, WeeklyAction } from '@/lib/types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry, WeeklyAction, MonthlyPlanNote } from '@/lib/types';
 import { IS_SUPABASE_CONFIGURED } from '@/lib/supabase';
 import {
   dbGetUsers, dbAddUser, dbUpdateUser, dbDeleteUser,
@@ -21,6 +21,7 @@ import {
   dbGetChecklistEntries, dbSaveChecklistEntries,
   dbGetInventory,
   dbGetWeeklyActions, dbAddWeeklyAction, dbUpdateWeeklyAction, dbDeleteWeeklyAction,
+  dbGetMonthlyPlanNotes, dbSaveMonthlyPlanNote,
 } from '@/lib/db';
 import { hydrateInventory } from '@/lib/inventory';
 import { initSkuMapFromSupabase } from '@/lib/sku';
@@ -50,10 +51,11 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss, cogsData, pnlCfg, pnlImps, clTasks, clEntries, invData, wkActions] = await Promise.all([
+        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss, cogsData, pnlCfg, pnlImps, clTasks, clEntries, invData, wkActions, planNotes] = await Promise.all([
           dbGetUsers(), dbGetShops(), dbGetReports(), dbGetKPIs(), dbGetPlans(), dbGetConfig(), dbGetSkuImports(), dbGetAnalytics(),
           dbGetCskhReviews(), dbGetCskhIssues(), dbGetCogs(), dbGetPnlConfig(), dbGetPnlImports(),
           dbGetChecklistTasks(), dbGetChecklistEntries(), dbGetInventory(), dbGetWeeklyActions(),
+          dbGetMonthlyPlanNotes(),
         ]);
         if (invData && (invData.transactions.length > 0 || Object.keys(invData.products).length > 0)) {
           hydrateInventory(invData);
@@ -116,6 +118,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           checklistTasks: clTasks,
           checklistEntries: clEntries,
           weeklyActions: wkActions,
+          monthlyPlanNotes: planNotes,
           config,
           currentUser: savedUser,
         }));
@@ -404,6 +407,16 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     if (IS_SUPABASE) dbDeleteWeeklyAction(id).catch(function(err) { console.error(err); alert('Lỗi xoá: ' + err.message); if (prev) setState(function(s) { return { ...s, weeklyActions: prev! }; }); });
   }, []);
 
+  const saveMonthlyPlanNoteCb = useCallback(function(note: MonthlyPlanNote) {
+    let prev: MonthlyPlanNote[] | null = null;
+    setState(function(s) {
+      prev = s.monthlyPlanNotes;
+      var exists = s.monthlyPlanNotes.some(function(n) { return n.id === note.id; });
+      return { ...s, monthlyPlanNotes: exists ? s.monthlyPlanNotes.map(function(n) { return n.id === note.id ? note : n; }) : [...s.monthlyPlanNotes, note] };
+    });
+    if (IS_SUPABASE) dbSaveMonthlyPlanNote(note).catch(function(err) { console.error(err); alert('Lỗi lưu kế hoạch: ' + err.message); if (prev) setState(function(s) { return { ...s, monthlyPlanNotes: prev! }; }); });
+  }, []);
+
   const getUserShops = useCallback((userId: string): Shop[] => {
     const user = state.users.find(u => u.id === userId);
     if (!user) return [];
@@ -436,6 +449,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       saveCogs: saveCogsCb, savePnlConfig: savePnlConfigCb, savePnlImports: savePnlImportsCb, addPnlImport: addPnlImportCb,
       saveChecklistTasks: saveChecklistTasksCb, saveChecklistEntries: saveChecklistEntriesCb,
       addWeeklyAction: addWeeklyActionCb, updateWeeklyAction: updateWeeklyActionCb, deleteWeeklyAction: deleteWeeklyActionCb,
+      saveMonthlyPlanNote: saveMonthlyPlanNoteCb,
     }}>
       {children}
     </AppContext.Provider>

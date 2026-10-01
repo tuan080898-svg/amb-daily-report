@@ -169,6 +169,18 @@ export interface ChecklistEntry {
   note: string;
 }
 
+export interface MonthlyPlanNote {
+  id: string;
+  shopId: string;
+  month: string;
+  strategy: string;
+  productFocus: string;
+  promoPlan: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export type ActionStatus = 'pending' | 'in_progress' | 'done';
 
 export interface WeeklyAction {
