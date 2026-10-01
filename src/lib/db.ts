@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry } from './types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry, WeeklyAction } from './types';
 import type { InventoryData, InventoryTransaction, InventoryConfig, Warehouse } from './inventory';
 import { DEFAULT_CONFIG } from './utils';
 import bcrypt from 'bcryptjs';
@@ -831,4 +831,56 @@ export async function dbSaveInventory(data: InventoryData): Promise<void> {
       }
     }
   }
+}
+
+// ==================== Weekly Actions ====================
+
+export async function dbGetWeeklyActions(): Promise<WeeklyAction[]> {
+  const { data } = await db().from('weekly_actions').select('*').order('created_at', { ascending: false });
+  if (!data) return [];
+  return data.map(function(r) {
+    return {
+      id: r.id,
+      shopId: r.shop_id,
+      weekStart: r.week_start,
+      month: r.month,
+      title: r.title,
+      deadline: r.deadline || '',
+      status: r.status || 'pending',
+      createdBy: r.created_by,
+      createdAt: r.created_at || '',
+      updatedAt: r.updated_at || undefined,
+    };
+  });
+}
+
+export async function dbAddWeeklyAction(action: WeeklyAction): Promise<void> {
+  const { error } = await db().from('weekly_actions').upsert({
+    id: action.id,
+    shop_id: action.shopId,
+    week_start: action.weekStart,
+    month: action.month,
+    title: action.title,
+    deadline: action.deadline,
+    status: action.status,
+    created_by: action.createdBy,
+    created_at: action.createdAt,
+    updated_at: action.updatedAt,
+  });
+  if (error) throw new Error('Luu hanh dong that bai: ' + error.message);
+}
+
+export async function dbUpdateWeeklyAction(action: WeeklyAction): Promise<void> {
+  const { error } = await db().from('weekly_actions').update({
+    title: action.title,
+    deadline: action.deadline,
+    status: action.status,
+    updated_at: new Date().toISOString(),
+  }).eq('id', action.id);
+  if (error) throw new Error('Cap nhat hanh dong that bai: ' + error.message);
+}
+
+export async function dbDeleteWeeklyAction(id: string): Promise<void> {
+  const { error } = await db().from('weekly_actions').delete().eq('id', id);
+  if (error) throw new Error('Xoa hanh dong that bai: ' + error.message);
 }

@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useAppState } from '@/lib/store';
 import { formatCurrency, getDayType, getTargetForDate, getMktForDate, toDateString } from '@/lib/utils';
-import { DayType, MonthlyPlan } from '@/lib/types';
+import { DayType, MonthlyPlan, WeeklyAction, ActionStatus } from '@/lib/types';
 
 interface WeekData {
   weekNum: number;
@@ -40,7 +40,7 @@ function getDayLabel(dt: DayType): string {
 }
 
 export default function WeeklyPage() {
-  var { currentUser, shops, reports, monthlyKPIs, monthlyPlans, getUserShops } = useAppState();
+  var { currentUser, shops, reports, monthlyKPIs, monthlyPlans, getUserShops, weeklyActions, addWeeklyAction, updateWeeklyAction, deleteWeeklyAction } = useAppState();
 
   var userShops = useMemo(function() {
     if (!currentUser) return [];
@@ -192,6 +192,108 @@ export default function WeeklyPage() {
   }, [weeks, monthlyTarget, plan]);
 
   var [expandedWeek, setExpandedWeek] = useState<number | null>(null);
+  var [aiAnalysis, setAiAnalysis] = useState('');
+  var [aiLoading, setAiLoading] = useState(false);
+  var [newTaskTitle, setNewTaskTitle] = useState('');
+  var [newTaskDeadline, setNewTaskDeadline] = useState('');
+  var [activeWeekForTasks, setActiveWeekForTasks] = useState('');
+
+  var weekActions = useMemo(function() {
+    if (!activeWeekForTasks || !selectedShopId) return [];
+    return weeklyActions.filter(function(a) {
+      return a.shopId === selectedShopId && a.weekStart === activeWeekForTasks;
+    });
+  }, [weeklyActions, selectedShopId, activeWeekForTasks]);
+
+  var allMonthActions = useMemo(function() {
+    if (!selectedShopId) return [];
+    return weeklyActions.filter(function(a) {
+      return a.shopId === selectedShopId && a.month === selectedMonth;
+    });
+  }, [weeklyActions, selectedShopId, selectedMonth]);
+
+  function buildWeekDataText(w: WeekData): string {
+    var lines = [
+      'Shop: ' + (selectedShop?.name || selectedShopId),
+      'Thang: ' + selectedMonth,
+      w.label,
+      'Ngay thuong: ' + w.plan.regularDays + ', ngay sale: ' + w.plan.saleDays,
+    ];
+    if (plan) {
+      lines.push('KH doanh thu tuan: ' + formatCurrency(w.plan.revenue));
+      lines.push('KH quang cao tuan: ' + formatCurrency(w.plan.mkt));
+    }
+    if (w.daysWithReport > 0) {
+      lines.push('TT doanh thu: ' + formatCurrency(w.actual.revenue) + ' (' + (w.plan.revenue > 0 ? ((w.actual.revenue / w.plan.revenue * 100).toFixed(0) + '% KH') : 'chua co KH') + ')');
+      lines.push('TT quang cao: ' + formatCurrency(w.actual.mkt));
+      lines.push('Tong don: ' + w.actual.orders + ', huy: ' + w.actual.cancelled + ', hoan: ' + w.actual.returned);
+      if (w.actual.revenue > 0) {
+        lines.push('QC/DT: ' + (w.actual.mkt / w.actual.revenue * 100).toFixed(1) + '%');
+      }
+    }
+    lines.push('');
+    lines.push('KPI thang: ' + formatCurrency(monthlyTarget));
+    lines.push('Da dat thang: ' + formatCurrency(monthSummary.totalActualRevenue) + ' (' + (monthSummary.pctAchieved * 100).toFixed(1) + '%)');
+    lines.push('Con thieu: ' + formatCurrency(monthSummary.gap));
+    if (monthSummary.futureDays > 0) {
+      lines.push('Ngay con lai: ' + monthSummary.futureDays + ' (' + monthSummary.futureRegular + ' thuong + ' + monthSummary.futureSale + ' sale)');
+      lines.push('Can trung binh: ' + formatCurrency(Math.round(monthSummary.avgNeeded)) + '/ngay');
+    }
+    lines.push('');
+    lines.push('Chi tiet tung ngay:');
+    w.days.forEach(function(d) {
+      var r = reportMap[d.date];
+      var dayLabel = d.dayType === 'regular' ? 'thuong' : d.dayType === 'sale_double' ? 'sale doi' : 'sale';
+      if (r) {
+        lines.push(d.date + ' (' + dayLabel + '): DT=' + formatCurrency(r.actualRevenue) + ', QC=' + formatCurrency(r.adSpend) + ', don=' + r.totalOrders + ', huy=' + r.cancelledOrders);
+      } else {
+        lines.push(d.date + ' (' + dayLabel + '): chua co bao cao');
+      }
+    });
+    return lines.join('\n');
+  }
+
+  function handleAiAnalysis(w: WeekData) {
+    setAiLoading(true);
+    setAiAnalysis('');
+    setActiveWeekForTasks(w.days[0].date);
+    var weekDataText = buildWeekDataText(w);
+    fetch('/api/ai/weekly-analysis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ weekData: weekDataText }),
+    })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (data.analysis) setAiAnalysis(data.analysis);
+        else setAiAnalysis('Khong the phan tich. ' + (data.error || ''));
+      })
+      .catch(function() { setAiAnalysis('Loi ket noi AI.'); })
+      .finally(function() { setAiLoading(false); });
+  }
+
+  function handleAddTask() {
+    if (!newTaskTitle.trim() || !activeWeekForTasks || !currentUser) return;
+    var action: WeeklyAction = {
+      id: 'wa-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      shopId: selectedShopId,
+      weekStart: activeWeekForTasks,
+      month: selectedMonth,
+      title: newTaskTitle.trim(),
+      deadline: newTaskDeadline,
+      status: 'pending',
+      createdBy: currentUser.id,
+      createdAt: new Date().toISOString(),
+    };
+    addWeeklyAction(action);
+    setNewTaskTitle('');
+    setNewTaskDeadline('');
+  }
+
+  function cycleStatus(action: WeeklyAction) {
+    var next: ActionStatus = action.status === 'pending' ? 'in_progress' : action.status === 'in_progress' ? 'done' : 'pending';
+    updateWeeklyAction({ ...action, status: next });
+  }
 
   if (!currentUser) return null;
 
@@ -521,6 +623,201 @@ export default function WeeklyPage() {
               );
             })}
           </div>
+
+          {/* AI Analysis + Action Plan */}
+          {weeks.length > 0 && (
+            <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-700/50">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="font-semibold text-gray-100">AI Phân tích & Kế hoạch hành động</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">AI phân tích số liệu, bạn tự đưa ra hành động</p>
+                  </div>
+                </div>
+              </div>
+              <div className="p-5 space-y-4">
+                {/* Select week + Analyze button */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-sm text-gray-400">Chọn tuần:</span>
+                  {weeks.map(function(w) {
+                    var isActive = activeWeekForTasks === w.days[0].date;
+                    return (
+                      <button
+                        key={w.weekNum}
+                        onClick={function() { setActiveWeekForTasks(w.days[0].date); setAiAnalysis(''); }}
+                        className={'px-3 py-1.5 text-xs rounded-lg border transition-colors ' + (
+                          isActive ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-gray-400 border-slate-700 hover:bg-slate-700'
+                        )}
+                      >
+                        T{w.weekNum}
+                      </button>
+                    );
+                  })}
+                  {activeWeekForTasks && (
+                    <button
+                      onClick={function() {
+                        var w = weeks.find(function(w) { return w.days[0].date === activeWeekForTasks; });
+                        if (w) handleAiAnalysis(w);
+                      }}
+                      disabled={aiLoading}
+                      className="px-4 py-1.5 text-xs rounded-lg bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+                    >
+                      {aiLoading ? 'Đang phân tích...' : '🤖 AI Phân tích'}
+                    </button>
+                  )}
+                </div>
+
+                {/* AI Analysis result */}
+                {aiAnalysis && (
+                  <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-violet-400 text-sm font-medium">🤖 Phân tích từ AI Coach</span>
+                      <span className="text-[10px] text-violet-400/60 bg-violet-500/10 px-2 py-0.5 rounded-full">Chỉ gợi ý, bạn tự quyết</span>
+                    </div>
+                    <div className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{aiAnalysis}</div>
+                  </div>
+                )}
+
+                {aiLoading && (
+                  <div className="flex items-center gap-3 py-4">
+                    <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
+                    <span className="text-sm text-gray-400">AI đang phân tích số liệu tuần...</span>
+                  </div>
+                )}
+
+                {/* Action plan section */}
+                {activeWeekForTasks && (
+                  <div className="border-t border-slate-700/50 pt-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-medium text-gray-200">
+                        Kế hoạch hành động — Tuần {weeks.find(function(w) { return w.days[0].date === activeWeekForTasks; })?.weekNum || ''}
+                      </h3>
+                      <span className="text-xs text-gray-500">
+                        {weekActions.filter(function(a) { return a.status === 'done'; }).length}/{weekActions.length} hoàn thành
+                      </span>
+                    </div>
+
+                    {/* Add new task */}
+                    <div className="flex gap-2 mb-3">
+                      <input
+                        type="text"
+                        value={newTaskTitle}
+                        onChange={function(e) { setNewTaskTitle(e.target.value); }}
+                        onKeyDown={function(e) { if (e.key === 'Enter') handleAddTask(); }}
+                        placeholder="Viết hành động cụ thể bạn sẽ làm..."
+                        className="flex-1 px-3 py-2 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600"
+                      />
+                      <input
+                        type="date"
+                        value={newTaskDeadline}
+                        onChange={function(e) { setNewTaskDeadline(e.target.value); }}
+                        className="px-3 py-2 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 w-36"
+                      />
+                      <button
+                        onClick={handleAddTask}
+                        disabled={!newTaskTitle.trim()}
+                        className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors font-medium shrink-0"
+                      >
+                        Thêm
+                      </button>
+                    </div>
+
+                    {/* Task list */}
+                    {weekActions.length > 0 ? (
+                      <div className="space-y-1.5">
+                        {weekActions.map(function(action) {
+                          var statusColors = {
+                            pending: 'bg-gray-500/15 text-gray-400 border-gray-500/30',
+                            in_progress: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+                            done: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+                          };
+                          var statusLabels = { pending: 'Chưa làm', in_progress: 'Đang làm', done: 'Xong' };
+                          var isOverdue = action.deadline && action.deadline < todayStr && action.status !== 'done';
+
+                          return (
+                            <div key={action.id} className={'flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ' + (
+                              action.status === 'done' ? 'bg-slate-800/30 border-slate-700/30' : 'bg-slate-800/50 border-slate-700/50'
+                            )}>
+                              <button
+                                onClick={function() { cycleStatus(action); }}
+                                className={'w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ' + (
+                                  action.status === 'done' ? 'border-emerald-500 bg-emerald-500' :
+                                  action.status === 'in_progress' ? 'border-blue-500' : 'border-gray-500'
+                                )}
+                                title="Bấm để đổi trạng thái"
+                              >
+                                {action.status === 'done' && (
+                                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                )}
+                                {action.status === 'in_progress' && (
+                                  <div className="w-2 h-2 rounded-full bg-blue-500" />
+                                )}
+                              </button>
+                              <div className="flex-1 min-w-0">
+                                <p className={'text-sm ' + (action.status === 'done' ? 'text-gray-500 line-through' : 'text-gray-200')}>
+                                  {action.title}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                {action.deadline && (
+                                  <span className={'text-[10px] px-2 py-0.5 rounded ' + (isOverdue ? 'bg-red-500/15 text-red-400' : 'text-gray-500')}>
+                                    {parseInt(action.deadline.split('-')[2]) + '/' + parseInt(action.deadline.split('-')[1])}
+                                  </span>
+                                )}
+                                <span className={'text-[10px] px-2 py-0.5 rounded border ' + statusColors[action.status]}>
+                                  {statusLabels[action.status]}
+                                </span>
+                                <button
+                                  onClick={function() { deleteWeeklyAction(action.id); }}
+                                  className="p-1 text-gray-600 hover:text-red-400 transition-colors"
+                                  title="Xoá"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-center text-gray-600 text-sm py-4">
+                        Chưa có hành động nào. Hãy suy nghĩ dựa trên số liệu và tự đặt task cho mình.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {!activeWeekForTasks && (
+                  <p className="text-center text-gray-600 text-sm py-4">
+                    Chọn một tuần ở trên để xem phân tích AI và tạo kế hoạch hành động
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Monthly action summary */}
+          {allMonthActions.length > 0 && (
+            <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-5">
+              <h3 className="text-sm font-medium text-gray-200 mb-3">
+                Tổng kết hành động tháng {month}/{year}
+              </h3>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-gray-100">{allMonthActions.length}</p>
+                  <p className="text-xs text-gray-500">Tổng task</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-blue-400">{allMonthActions.filter(function(a) { return a.status === 'in_progress'; }).length}</p>
+                  <p className="text-xs text-gray-500">Đang làm</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-emerald-400">{allMonthActions.filter(function(a) { return a.status === 'done'; }).length}</p>
+                  <p className="text-xs text-gray-500">Hoàn thành</p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

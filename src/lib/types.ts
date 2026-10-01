@@ -169,6 +169,21 @@ export interface ChecklistEntry {
   note: string;
 }
 
+export type ActionStatus = 'pending' | 'in_progress' | 'done';
+
+export interface WeeklyAction {
+  id: string;
+  shopId: string;
+  weekStart: string;
+  month: string;
+  title: string;
+  deadline: string;
+  status: ActionStatus;
+  createdBy: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export interface CskhIssue {
   id: string;
   date: string;

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, ReactNode } from 'react';
 import { AppContext, createInitialState } from '@/lib/store';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry } from '@/lib/types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry, WeeklyAction } from '@/lib/types';
 import { IS_SUPABASE_CONFIGURED } from '@/lib/supabase';
 import {
   dbGetUsers, dbAddUser, dbUpdateUser, dbDeleteUser,
@@ -20,6 +20,7 @@ import {
   dbGetChecklistTasks, dbSaveChecklistTasks,
   dbGetChecklistEntries, dbSaveChecklistEntries,
   dbGetInventory,
+  dbGetWeeklyActions, dbAddWeeklyAction, dbUpdateWeeklyAction, dbDeleteWeeklyAction,
 } from '@/lib/db';
 import { hydrateInventory } from '@/lib/inventory';
 import { initSkuMapFromSupabase } from '@/lib/sku';
@@ -49,10 +50,10 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss, cogsData, pnlCfg, pnlImps, clTasks, clEntries, invData] = await Promise.all([
+        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss, cogsData, pnlCfg, pnlImps, clTasks, clEntries, invData, wkActions] = await Promise.all([
           dbGetUsers(), dbGetShops(), dbGetReports(), dbGetKPIs(), dbGetPlans(), dbGetConfig(), dbGetSkuImports(), dbGetAnalytics(),
           dbGetCskhReviews(), dbGetCskhIssues(), dbGetCogs(), dbGetPnlConfig(), dbGetPnlImports(),
-          dbGetChecklistTasks(), dbGetChecklistEntries(), dbGetInventory(),
+          dbGetChecklistTasks(), dbGetChecklistEntries(), dbGetInventory(), dbGetWeeklyActions(),
         ]);
         if (invData && (invData.transactions.length > 0 || Object.keys(invData.products).length > 0)) {
           hydrateInventory(invData);
@@ -114,6 +115,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           pnlImports: pnlImps,
           checklistTasks: clTasks,
           checklistEntries: clEntries,
+          weeklyActions: wkActions,
           config,
           currentUser: savedUser,
         }));
@@ -373,6 +375,35 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     if (IS_SUPABASE) dbSaveChecklistEntries(entries).catch(function(err) { console.error(err); alert('Lỗi lưu checklist: ' + err.message); if (prev) setState(function(s) { return { ...s, checklistEntries: prev! }; }); });
   }, []);
 
+  const addWeeklyActionCb = useCallback(function(action: WeeklyAction) {
+    let prev: WeeklyAction[] | null = null;
+    setState(function(s) {
+      prev = s.weeklyActions;
+      var exists = s.weeklyActions.some(function(a) { return a.id === action.id; });
+      return { ...s, weeklyActions: exists ? s.weeklyActions.map(function(a) { return a.id === action.id ? action : a; }) : [...s.weeklyActions, action] };
+    });
+    if (IS_SUPABASE) dbAddWeeklyAction(action).catch(function(err) { console.error(err); alert('Lỗi lưu hành động: ' + err.message); if (prev) setState(function(s) { return { ...s, weeklyActions: prev! }; }); });
+  }, []);
+
+  const updateWeeklyActionCb = useCallback(function(action: WeeklyAction) {
+    var updated = { ...action, updatedAt: new Date().toISOString() };
+    let prev: WeeklyAction[] | null = null;
+    setState(function(s) {
+      prev = s.weeklyActions;
+      return { ...s, weeklyActions: s.weeklyActions.map(function(a) { return a.id === action.id ? updated : a; }) };
+    });
+    if (IS_SUPABASE) dbUpdateWeeklyAction(updated).catch(function(err) { console.error(err); alert('Lỗi cập nhật: ' + err.message); if (prev) setState(function(s) { return { ...s, weeklyActions: prev! }; }); });
+  }, []);
+
+  const deleteWeeklyActionCb = useCallback(function(id: string) {
+    let prev: WeeklyAction[] | null = null;
+    setState(function(s) {
+      prev = s.weeklyActions;
+      return { ...s, weeklyActions: s.weeklyActions.filter(function(a) { return a.id !== id; }) };
+    });
+    if (IS_SUPABASE) dbDeleteWeeklyAction(id).catch(function(err) { console.error(err); alert('Lỗi xoá: ' + err.message); if (prev) setState(function(s) { return { ...s, weeklyActions: prev! }; }); });
+  }, []);
+
   const getUserShops = useCallback((userId: string): Shop[] => {
     const user = state.users.find(u => u.id === userId);
     if (!user) return [];
@@ -404,6 +435,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       addCskhIssue: addCskhIssueCb, updateCskhIssue: updateCskhIssueCb,
       saveCogs: saveCogsCb, savePnlConfig: savePnlConfigCb, savePnlImports: savePnlImportsCb, addPnlImport: addPnlImportCb,
       saveChecklistTasks: saveChecklistTasksCb, saveChecklistEntries: saveChecklistEntriesCb,
+      addWeeklyAction: addWeeklyActionCb, updateWeeklyAction: updateWeeklyActionCb, deleteWeeklyAction: deleteWeeklyActionCb,
     }}>
       {children}
     </AppContext.Provider>

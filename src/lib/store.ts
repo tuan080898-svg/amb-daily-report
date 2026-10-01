@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext } from 'react';
-import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry } from './types';
+import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry, WeeklyAction } from './types';
 import { DEFAULT_CONFIG } from './utils';
 import { MOCK_SHOPS, MOCK_USERS, MOCK_REPORTS, MOCK_KPIS, MOCK_PLANS } from './mock-data';
 
@@ -21,6 +21,7 @@ export interface AppState {
   pnlImports: PnlImport[];
   checklistTasks: ChecklistTask[];
   checklistEntries: ChecklistEntry[];
+  weeklyActions: WeeklyAction[];
   config: AppConfig;
   login: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
@@ -50,9 +51,12 @@ export interface AppState {
   addPnlImport: (imp: PnlImport) => void;
   saveChecklistTasks: (tasks: ChecklistTask[]) => void;
   saveChecklistEntries: (entries: ChecklistEntry[]) => void;
+  addWeeklyAction: (action: WeeklyAction) => void;
+  updateWeeklyAction: (action: WeeklyAction) => void;
+  deleteWeeklyAction: (id: string) => void;
 }
 
-export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addReport' | 'updateReport' | 'addShop' | 'updateShop' | 'deleteShop' | 'updateKPI' | 'updatePlan' | 'updateConfig' | 'addUser' | 'updateUser' | 'deleteUser' | 'getUserShops' | 'addSkuImport' | 'deleteSkuImport' | 'addAnalytics' | 'deleteAnalytics' | 'addCskhReview' | 'updateCskhReview' | 'addCskhIssue' | 'updateCskhIssue' | 'saveCogs' | 'savePnlConfig' | 'savePnlImports' | 'addPnlImport' | 'saveChecklistTasks' | 'saveChecklistEntries'> {
+export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addReport' | 'updateReport' | 'addShop' | 'updateShop' | 'deleteShop' | 'updateKPI' | 'updatePlan' | 'updateConfig' | 'addUser' | 'updateUser' | 'deleteUser' | 'getUserShops' | 'addSkuImport' | 'deleteSkuImport' | 'addAnalytics' | 'deleteAnalytics' | 'addCskhReview' | 'updateCskhReview' | 'addCskhIssue' | 'updateCskhIssue' | 'saveCogs' | 'savePnlConfig' | 'savePnlImports' | 'addPnlImport' | 'saveChecklistTasks' | 'saveChecklistEntries' | 'addWeeklyAction' | 'updateWeeklyAction' | 'deleteWeeklyAction'> {
   return {
     currentUser: null,
     users: [...MOCK_USERS],
@@ -69,6 +73,7 @@ export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addRe
     pnlImports: [],
     checklistTasks: [],
     checklistEntries: [],
+    weeklyActions: [],
     config: { ...DEFAULT_CONFIG },
   };
 }
