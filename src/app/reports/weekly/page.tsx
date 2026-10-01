@@ -192,8 +192,6 @@ export default function WeeklyPage() {
   }, [weeks, monthlyTarget, plan]);
 
   var [expandedWeek, setExpandedWeek] = useState<number | null>(null);
-  var [aiAnalysis, setAiAnalysis] = useState('');
-  var [aiLoading, setAiLoading] = useState(false);
   var [newTaskTitle, setNewTaskTitle] = useState('');
   var [newTaskDeadline, setNewTaskDeadline] = useState('');
   var [activeWeekForTasks, setActiveWeekForTasks] = useState('');
@@ -211,66 +209,6 @@ export default function WeeklyPage() {
       return a.shopId === selectedShopId && a.month === selectedMonth;
     });
   }, [weeklyActions, selectedShopId, selectedMonth]);
-
-  function buildWeekDataText(w: WeekData): string {
-    var lines = [
-      'Shop: ' + (selectedShop?.name || selectedShopId),
-      'Thang: ' + selectedMonth,
-      w.label,
-      'Ngay thuong: ' + w.plan.regularDays + ', ngay sale: ' + w.plan.saleDays,
-    ];
-    if (plan) {
-      lines.push('KH doanh thu tuan: ' + formatCurrency(w.plan.revenue));
-      lines.push('KH quang cao tuan: ' + formatCurrency(w.plan.mkt));
-    }
-    if (w.daysWithReport > 0) {
-      lines.push('TT doanh thu: ' + formatCurrency(w.actual.revenue) + ' (' + (w.plan.revenue > 0 ? ((w.actual.revenue / w.plan.revenue * 100).toFixed(0) + '% KH') : 'chua co KH') + ')');
-      lines.push('TT quang cao: ' + formatCurrency(w.actual.mkt));
-      lines.push('Tong don: ' + w.actual.orders + ', huy: ' + w.actual.cancelled + ', hoan: ' + w.actual.returned);
-      if (w.actual.revenue > 0) {
-        lines.push('QC/DT: ' + (w.actual.mkt / w.actual.revenue * 100).toFixed(1) + '%');
-      }
-    }
-    lines.push('');
-    lines.push('KPI thang: ' + formatCurrency(monthlyTarget));
-    lines.push('Da dat thang: ' + formatCurrency(monthSummary.totalActualRevenue) + ' (' + (monthSummary.pctAchieved * 100).toFixed(1) + '%)');
-    lines.push('Con thieu: ' + formatCurrency(monthSummary.gap));
-    if (monthSummary.futureDays > 0) {
-      lines.push('Ngay con lai: ' + monthSummary.futureDays + ' (' + monthSummary.futureRegular + ' thuong + ' + monthSummary.futureSale + ' sale)');
-      lines.push('Can trung binh: ' + formatCurrency(Math.round(monthSummary.avgNeeded)) + '/ngay');
-    }
-    lines.push('');
-    lines.push('Chi tiet tung ngay:');
-    w.days.forEach(function(d) {
-      var r = reportMap[d.date];
-      var dayLabel = d.dayType === 'regular' ? 'thuong' : d.dayType === 'sale_double' ? 'sale doi' : 'sale';
-      if (r) {
-        lines.push(d.date + ' (' + dayLabel + '): DT=' + formatCurrency(r.actualRevenue) + ', QC=' + formatCurrency(r.adSpend) + ', don=' + r.totalOrders + ', huy=' + r.cancelledOrders);
-      } else {
-        lines.push(d.date + ' (' + dayLabel + '): chua co bao cao');
-      }
-    });
-    return lines.join('\n');
-  }
-
-  function handleAiAnalysis(w: WeekData) {
-    setAiLoading(true);
-    setAiAnalysis('');
-    setActiveWeekForTasks(w.days[0].date);
-    var weekDataText = buildWeekDataText(w);
-    fetch('/api/ai/weekly-analysis', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ weekData: weekDataText }),
-    })
-      .then(function(res) { return res.json(); })
-      .then(function(data) {
-        if (data.analysis) setAiAnalysis(data.analysis);
-        else setAiAnalysis('Khong the phan tich. ' + (data.error || ''));
-      })
-      .catch(function() { setAiAnalysis('Loi ket noi AI.'); })
-      .finally(function() { setAiLoading(false); });
-  }
 
   function handleAddTask() {
     if (!newTaskTitle.trim() || !activeWeekForTasks || !currentUser) return;
@@ -624,19 +562,18 @@ export default function WeeklyPage() {
             })}
           </div>
 
-          {/* AI Analysis + Action Plan */}
+          {/* Action Plan */}
           {weeks.length > 0 && (
             <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden">
               <div className="px-5 py-4 border-b border-slate-700/50">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="font-semibold text-gray-100">AI Phân tích & Kế hoạch hành động</h2>
-                    <p className="text-xs text-gray-500 mt-0.5">AI phân tích số liệu, bạn tự đưa ra hành động</p>
+                    <h2 className="font-semibold text-gray-100">Kế hoạch hành động</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">Nhìn số liệu, tự suy nghĩ và đặt task cho mình</p>
                   </div>
                 </div>
               </div>
               <div className="p-5 space-y-4">
-                {/* Select week + Analyze button */}
                 <div className="flex flex-wrap items-center gap-3">
                   <span className="text-sm text-gray-400">Chọn tuần:</span>
                   {weeks.map(function(w) {
@@ -644,7 +581,7 @@ export default function WeeklyPage() {
                     return (
                       <button
                         key={w.weekNum}
-                        onClick={function() { setActiveWeekForTasks(w.days[0].date); setAiAnalysis(''); }}
+                        onClick={function() { setActiveWeekForTasks(w.days[0].date); }}
                         className={'px-3 py-1.5 text-xs rounded-lg border transition-colors ' + (
                           isActive ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-gray-400 border-slate-700 hover:bg-slate-700'
                         )}
@@ -653,44 +590,13 @@ export default function WeeklyPage() {
                       </button>
                     );
                   })}
-                  {activeWeekForTasks && (
-                    <button
-                      onClick={function() {
-                        var w = weeks.find(function(w) { return w.days[0].date === activeWeekForTasks; });
-                        if (w) handleAiAnalysis(w);
-                      }}
-                      disabled={aiLoading}
-                      className="px-4 py-1.5 text-xs rounded-lg bg-violet-600 text-white hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
-                    >
-                      {aiLoading ? 'Đang phân tích...' : '🤖 AI Phân tích'}
-                    </button>
-                  )}
                 </div>
 
-                {/* AI Analysis result */}
-                {aiAnalysis && (
-                  <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="text-violet-400 text-sm font-medium">🤖 Phân tích từ AI Coach</span>
-                      <span className="text-[10px] text-violet-400/60 bg-violet-500/10 px-2 py-0.5 rounded-full">Chỉ gợi ý, bạn tự quyết</span>
-                    </div>
-                    <div className="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">{aiAnalysis}</div>
-                  </div>
-                )}
-
-                {aiLoading && (
-                  <div className="flex items-center gap-3 py-4">
-                    <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
-                    <span className="text-sm text-gray-400">AI đang phân tích số liệu tuần...</span>
-                  </div>
-                )}
-
-                {/* Action plan section */}
                 {activeWeekForTasks && (
-                  <div className="border-t border-slate-700/50 pt-4">
+                  <div>
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="text-sm font-medium text-gray-200">
-                        Kế hoạch hành động — Tuần {weeks.find(function(w) { return w.days[0].date === activeWeekForTasks; })?.weekNum || ''}
+                        Tuần {weeks.find(function(w) { return w.days[0].date === activeWeekForTasks; })?.weekNum || ''}
                       </h3>
                       <span className="text-xs text-gray-500">
                         {weekActions.filter(function(a) { return a.status === 'done'; }).length}/{weekActions.length} hoàn thành
@@ -789,7 +695,7 @@ export default function WeeklyPage() {
 
                 {!activeWeekForTasks && (
                   <p className="text-center text-gray-600 text-sm py-4">
-                    Chọn một tuần ở trên để xem phân tích AI và tạo kế hoạch hành động
+                    Chọn tuần để tạo kế hoạch hành động
                   </p>
                 )}
               </div>
