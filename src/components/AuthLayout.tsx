@@ -45,6 +45,7 @@ function getPageTitle(pathname: string): string {
     '/reports': 'Nhập báo cáo',
     '/reports/history': 'Lịch sử',
     '/reports/sku': 'SP bán chạy',
+    '/reports/weekly': 'Kế hoạch tuần',
     '/reports/analytics': 'Phân tích',
     '/cskh': 'CSKH Dashboard',
     '/cskh/report': 'Báo cáo CSKH',

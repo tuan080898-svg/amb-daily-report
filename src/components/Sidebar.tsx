@@ -37,6 +37,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/reports', label: 'Nhập báo cáo', icon: '📝', roles: ['admin', 'employee'] },
       { href: '/reports/history', label: 'Lịch sử', icon: '📋', roles: ['admin', 'employee'] },
       { href: '/reports/sku', label: 'SP bán chạy', icon: '🏆', roles: ['admin', 'employee'] },
+      { href: '/reports/weekly', label: 'Kế hoạch tuần', icon: '📅', roles: ['admin', 'employee'] },
       { href: '/reports/analytics', label: 'Phân tích', icon: '📈', roles: ['admin', 'employee'] },
     ],
   },
