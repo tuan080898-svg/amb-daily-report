@@ -3,7 +3,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useAppState } from '@/lib/store';
 import { formatCurrency, getDayType, getTargetForDate, getMktForDate, toDateString } from '@/lib/utils';
-import { DayType, WeeklyAction, ActionStatus, MonthlyPlanNote } from '@/lib/types';
+import { DayType, WeeklyAction, ActionStatus, MonthlyPlanNote, ProductTarget } from '@/lib/types';
+import { aggregateProducts } from '@/lib/sku';
 
 interface WeekData {
   weekNum: number;
@@ -53,7 +54,7 @@ function TrendArrow({ current, previous, suffix, inverse }: { current: number; p
 }
 
 export default function WeeklyPage() {
-  var { currentUser, shops, reports, monthlyKPIs, monthlyPlans, getUserShops, weeklyActions, addWeeklyAction, updateWeeklyAction, deleteWeeklyAction, monthlyPlanNotes, saveMonthlyPlanNote, updatePlan, updateKPI } = useAppState();
+  var { currentUser, shops, reports, monthlyKPIs, monthlyPlans, getUserShops, weeklyActions, addWeeklyAction, updateWeeklyAction, deleteWeeklyAction, monthlyPlanNotes, saveMonthlyPlanNote, updatePlan, updateKPI, skuImports } = useAppState();
 
   var userShops = useMemo(function() {
     if (!currentUser) return [];
@@ -358,6 +359,7 @@ export default function WeeklyPage() {
       strategy: noteStrategy,
       productFocus: noteProductFocus,
       promoPlan: notePromoPlan,
+      productTargets: currentNote?.productTargets || [],
       createdBy: currentNote?.createdBy || currentUser.id,
       createdAt: currentNote?.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -478,6 +480,94 @@ export default function WeeklyPage() {
 
     setCalcSaved(true);
     setTimeout(function() { setCalcSaved(false); }, 2000);
+  }
+
+  // Product breakdown: T9 results + T10 plan
+  var prevMonthProducts = useMemo(function() {
+    if (!selectedShopId || !prevMonthStr) return [];
+    var shopSkuImports = skuImports.filter(function(s) {
+      return s.shopId === selectedShopId && s.dateFrom <= prevMonthStr + '-31' && s.dateTo >= prevMonthStr + '-01';
+    });
+    if (shopSkuImports.length === 0) return [];
+
+    var allCodes: string[] = [];
+    var lastDay = new Date(parseInt(prevMonthStr.split('-')[0]), parseInt(prevMonthStr.split('-')[1]), 0).getDate();
+    shopSkuImports.forEach(function(imp) {
+      for (var d = 1; d <= lastDay; d++) {
+        var dateStr = prevMonthStr + '-' + String(d).padStart(2, '0');
+        var codes = imp.dailySku[dateStr];
+        if (codes) allCodes = allCodes.concat(codes);
+      }
+    });
+
+    if (allCodes.length === 0) return [];
+    var products = aggregateProducts(allCodes);
+    var totalQty = products.reduce(function(s, p) { return s + p.totalQuantity; }, 0);
+    var prevRevenue = prevMonthRecap ? prevMonthRecap.revenue : 0;
+
+    return products.slice(0, 20).map(function(p) {
+      var share = totalQty > 0 ? p.totalQuantity / totalQty : 0;
+      return {
+        product: p.product,
+        qty: p.totalQuantity,
+        orders: p.orderCount,
+        share: share,
+        estRevenue: Math.round(prevRevenue * share),
+      };
+    });
+  }, [skuImports, selectedShopId, prevMonthStr, prevMonthRecap]);
+
+  // Editable product targets for next month
+  var [productTargets, setProductTargets] = useState<Record<string, { targetQty: string; targetRevenue: string }>>({});
+  var [productTargetsSaved, setProductTargetsSaved] = useState(false);
+
+  // Initialize product targets from saved note or from suggestions
+  useEffect(function() {
+    var targets: Record<string, { targetQty: string; targetRevenue: string }> = {};
+    if (currentNote && currentNote.productTargets && currentNote.productTargets.length > 0) {
+      currentNote.productTargets.forEach(function(pt) {
+        targets[pt.product] = { targetQty: String(pt.targetQty || ''), targetRevenue: String(pt.targetRevenue || '') };
+      });
+    } else if (prevMonthProducts.length > 0) {
+      var totalTarget = monthlyTarget || 0;
+      prevMonthProducts.forEach(function(p) {
+        targets[p.product] = {
+          targetQty: String(Math.round(p.qty * 1.1)),
+          targetRevenue: totalTarget > 0 ? String(Math.round(totalTarget * p.share)) : '',
+        };
+      });
+    }
+    setProductTargets(targets);
+    setProductTargetsSaved(false);
+  }, [currentNote, prevMonthProducts, monthlyTarget]);
+
+  function handleSaveProductTargets() {
+    if (!currentUser || !selectedShopId) return;
+    var ptArr: ProductTarget[] = prevMonthProducts.map(function(p) {
+      var t = productTargets[p.product] || { targetQty: '', targetRevenue: '' };
+      return {
+        product: p.product,
+        prevQty: p.qty,
+        prevRevenue: p.estRevenue,
+        targetQty: parseInt(t.targetQty) || 0,
+        targetRevenue: parseInt(t.targetRevenue) || 0,
+      };
+    });
+    var note: MonthlyPlanNote = {
+      id: currentNote?.id || ('mpn-' + selectedShopId + '-' + selectedMonth),
+      shopId: selectedShopId,
+      month: selectedMonth,
+      strategy: noteStrategy,
+      productFocus: noteProductFocus,
+      promoPlan: notePromoPlan,
+      productTargets: ptArr,
+      createdBy: currentNote?.createdBy || currentUser.id,
+      createdAt: currentNote?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    saveMonthlyPlanNote(note);
+    setProductTargetsSaved(true);
+    setTimeout(function() { setProductTargetsSaved(false); }, 2000);
   }
 
   function handleAddTask(weekStart: string) {
@@ -839,45 +929,197 @@ export default function WeeklyPage() {
                 </div>
               </div>
 
-              {/* Planning notes form */}
+              {/* Product breakdown: T9 results + T10 plan */}
+              {prevMonthProducts.length > 0 && (
+                <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-5">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-medium text-gray-300">
+                      Phân bổ theo sản phẩm — T{parseInt(prevMonthStr.split('-')[1])} → T{month}
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      {(parseFloat(calcTarget) > 0) && (
+                        <span className="text-[10px] text-gray-500">KPI T{month}: {formatCurrency(parseFloat(calcTarget) || 0)}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-slate-800/50 text-[10px] text-gray-500 uppercase tracking-wider">
+                          <th className="text-left px-3 py-2 font-medium">Sản phẩm</th>
+                          <th className="text-right px-3 py-2 font-medium">SL T{parseInt(prevMonthStr.split('-')[1])}</th>
+                          <th className="text-right px-3 py-2 font-medium">DT ước T{parseInt(prevMonthStr.split('-')[1])}</th>
+                          <th className="text-center px-3 py-2 font-medium">Tỷ trọng</th>
+                          <th className="text-right px-3 py-2 font-medium">SL KH T{month}</th>
+                          <th className="text-right px-3 py-2 font-medium">DT KH T{month}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/50">
+                        {prevMonthProducts.map(function(p, idx) {
+                          var t = productTargets[p.product] || { targetQty: '', targetRevenue: '' };
+                          var targetRev = parseInt(t.targetRevenue) || 0;
+                          var totalTarget = parseFloat(calcTarget) || 0;
+                          var targetShare = totalTarget > 0 ? targetRev / totalTarget : 0;
+
+                          return (
+                            <tr key={p.product} className={idx % 2 === 0 ? 'bg-slate-800/10' : ''}>
+                              <td className="px-3 py-2.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-medium text-gray-500 w-5">{idx + 1}</span>
+                                  <span className="text-sm text-gray-200 truncate max-w-[180px]" title={p.product}>{p.product}</span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5 text-right text-gray-400">{p.qty.toLocaleString()}</td>
+                              <td className="px-3 py-2.5 text-right text-gray-400">{formatCurrency(p.estRevenue)}</td>
+                              <td className="px-3 py-2.5 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <div className="w-12 h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                                    <div className="h-full bg-violet-500 rounded-full" style={{ width: Math.min(p.share * 100, 100) + '%' }} />
+                                  </div>
+                                  <span className="text-xs text-gray-500">{(p.share * 100).toFixed(1)}%</span>
+                                </div>
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={t.targetQty ? Number(t.targetQty).toLocaleString('vi-VN') : ''}
+                                  onChange={function(e) {
+                                    var val = e.target.value.replace(/[^\d]/g, '');
+                                    setProductTargets(function(prev) {
+                                      var next = { ...prev };
+                                      next[p.product] = { ...next[p.product], targetQty: val };
+                                      return next;
+                                    });
+                                  }}
+                                  className="w-20 px-2 py-1 text-xs text-right border border-slate-600 rounded bg-slate-800 text-gray-200"
+                                />
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    value={t.targetRevenue ? Number(t.targetRevenue).toLocaleString('vi-VN') : ''}
+                                    onChange={function(e) {
+                                      var val = e.target.value.replace(/[^\d]/g, '');
+                                      setProductTargets(function(prev) {
+                                        var next = { ...prev };
+                                        next[p.product] = { ...next[p.product], targetRevenue: val };
+                                        return next;
+                                      });
+                                    }}
+                                    className="w-24 px-2 py-1 text-xs text-right border border-slate-600 rounded bg-slate-800 text-gray-200"
+                                  />
+                                  {targetShare > 0 && (
+                                    <span className="text-[10px] text-gray-500 shrink-0">{(targetShare * 100).toFixed(0)}%</span>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-slate-800/50 font-medium">
+                          <td className="px-3 py-2.5 text-sm text-gray-300">Tổng</td>
+                          <td className="px-3 py-2.5 text-right text-gray-300 text-sm">
+                            {prevMonthProducts.reduce(function(s, p) { return s + p.qty; }, 0).toLocaleString()}
+                          </td>
+                          <td className="px-3 py-2.5 text-right text-gray-300 text-sm">
+                            {formatCurrency(prevMonthProducts.reduce(function(s, p) { return s + p.estRevenue; }, 0))}
+                          </td>
+                          <td className="px-3 py-2.5 text-center text-gray-300 text-xs">100%</td>
+                          <td className="px-3 py-2.5 text-right text-gray-300 text-sm">
+                            {Object.values(productTargets).reduce(function(s, t) { return s + (parseInt(t.targetQty) || 0); }, 0).toLocaleString()}
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            {(function() {
+                              var sumTarget = Object.values(productTargets).reduce(function(s, t) { return s + (parseInt(t.targetRevenue) || 0); }, 0);
+                              var totalT = parseFloat(calcTarget) || 0;
+                              var diff = totalT - sumTarget;
+                              return (
+                                <div>
+                                  <span className="text-sm text-gray-300">{formatCurrency(sumTarget)}</span>
+                                  {totalT > 0 && Math.abs(diff) > 1000 && (
+                                    <p className={'text-[10px] ' + (diff > 0 ? 'text-amber-400' : 'text-red-400')}>
+                                      {diff > 0 ? 'Thiếu ' + formatCurrency(diff) : 'Dư ' + formatCurrency(Math.abs(diff))}
+                                    </p>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+
+                  <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-700/50">
+                    <p className="text-[10px] text-gray-600">
+                      DT ước T{parseInt(prevMonthStr.split('-')[1])} = tỷ trọng SL × DT tổng shop. Gợi ý T{month} = T{parseInt(prevMonthStr.split('-')[1])} + 10%.
+                    </p>
+                    <button
+                      onClick={handleSaveProductTargets}
+                      className={'px-4 py-2 text-sm rounded-lg font-medium transition-all ' + (
+                        productTargetsSaved
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-violet-600 text-white hover:bg-violet-500'
+                      )}
+                    >
+                      {productTargetsSaved ? 'Đã lưu!' : 'Lưu KH sản phẩm'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {prevMonthProducts.length === 0 && (
+                <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-5">
+                  <p className="text-sm text-gray-500 text-center py-4">
+                    Chưa có dữ liệu SKU tháng trước cho shop này — import file đơn hàng để thấy phân tích sản phẩm.
+                  </p>
+                </div>
+              )}
+
+              {/* Quick notes */}
               <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-5">
-                <h3 className="text-sm font-medium text-gray-300 mb-4">Ghi chú kế hoạch tháng {month}</h3>
-                <div className="space-y-4">
+                <h3 className="text-sm font-medium text-gray-300 mb-3">Ghi chú nhanh</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1.5 font-medium">Chiến lược tổng thể</label>
+                    <label className="block text-[10px] text-gray-500 mb-1 font-medium uppercase tracking-wider">Chiến lược</label>
                     <textarea
                       value={noteStrategy}
                       onChange={function(e) { setNoteStrategy(e.target.value); }}
                       onBlur={handleSaveNote}
-                      placeholder="VD: Tập trung đẩy doanh số ngày sale đôi 10/10, tăng giỏ hàng TB bằng combo..."
-                      className="w-full px-3 py-2 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 resize-none"
+                      placeholder="VD: Đẩy sale đôi 10/10..."
+                      className="w-full px-3 py-2 text-xs border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 resize-none"
                       rows={2}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1.5 font-medium">Sản phẩm focus</label>
+                    <label className="block text-[10px] text-gray-500 mb-1 font-medium uppercase tracking-wider">SP focus</label>
                     <textarea
                       value={noteProductFocus}
                       onChange={function(e) { setNoteProductFocus(e.target.value); }}
                       onBlur={handleSaveNote}
-                      placeholder="VD: SP A - 40% DT, SP B - 25% DT..."
-                      className="w-full px-3 py-2 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 resize-none"
+                      placeholder="VD: SP A - 40% DT..."
+                      className="w-full px-3 py-2 text-xs border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 resize-none"
                       rows={2}
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1.5 font-medium">Lịch promotion & sale</label>
+                    <label className="block text-[10px] text-gray-500 mb-1 font-medium uppercase tracking-wider">Promotion</label>
                     <textarea
                       value={notePromoPlan}
                       onChange={function(e) { setNotePromoPlan(e.target.value); }}
                       onBlur={handleSaveNote}
-                      placeholder="VD: 10/10 sale đôi combo 15%, 15/10 freeship..."
-                      className="w-full px-3 py-2 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 resize-none"
+                      placeholder="VD: 10/10 combo 15%..."
+                      className="w-full px-3 py-2 text-xs border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 resize-none"
                       rows={2}
                     />
                   </div>
                 </div>
-                <p className="text-[10px] text-gray-600 mt-3">Tự động lưu khi bạn rời ô nhập</p>
               </div>
             </div>
           )}

@@ -169,6 +169,14 @@ export interface ChecklistEntry {
   note: string;
 }
 
+export interface ProductTarget {
+  product: string;
+  prevQty: number;
+  prevRevenue: number;
+  targetQty: number;
+  targetRevenue: number;
+}
+
 export interface MonthlyPlanNote {
   id: string;
   shopId: string;
@@ -176,6 +184,7 @@ export interface MonthlyPlanNote {
   strategy: string;
   productFocus: string;
   promoPlan: string;
+  productTargets: ProductTarget[];
   createdBy: string;
   createdAt: string;
   updatedAt?: string;
