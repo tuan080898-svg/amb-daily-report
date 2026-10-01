@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAppState } from '@/lib/store';
 import { formatCurrency, getDayType, getTargetForDate, getMktForDate, toDateString } from '@/lib/utils';
-import { DayType, MonthlyPlan, WeeklyAction, ActionStatus } from '@/lib/types';
+import { DayType, WeeklyAction, ActionStatus } from '@/lib/types';
 
 interface WeekData {
   weekNum: number;
@@ -12,6 +12,12 @@ interface WeekData {
   plan: { revenue: number; mkt: number; regularDays: number; saleDays: number };
   actual: { revenue: number; mkt: number; orders: number; cancelled: number; returned: number };
   daysWithReport: number;
+  roas: number;
+  cpo: number;
+  cancelReturnRate: number;
+  avgRegularRevenue: number;
+  avgSaleRevenue: number;
+  missingReportDays: string[];
 }
 
 function getWeeksInMonth(year: number, month: number): { date: string; dayType: DayType }[][] {
@@ -33,10 +39,17 @@ function getWeeksInMonth(year: number, month: number): { date: string; dayType: 
   return weeks;
 }
 
-function getDayLabel(dt: DayType): string {
-  if (dt === 'sale_double') return 'Sale đôi';
-  if (dt === 'sale_fixed') return 'Sale cố định';
-  return 'Thường';
+function TrendArrow({ current, previous, suffix, inverse }: { current: number; previous: number; suffix?: string; inverse?: boolean }) {
+  if (!previous || !current) return null;
+  var pct = ((current - previous) / previous) * 100;
+  var isUp = pct > 0;
+  var isGood = inverse ? !isUp : isUp;
+  if (Math.abs(pct) < 1) return null;
+  return (
+    <span className={'text-[10px] font-medium ' + (isGood ? 'text-emerald-400' : 'text-red-400')}>
+      {isUp ? '▲' : '▼'} {Math.abs(pct).toFixed(0)}%{suffix || ''}
+    </span>
+  );
 }
 
 export default function WeeklyPage() {
@@ -98,6 +111,11 @@ export default function WeeklyPage() {
       var actualCancelled = 0;
       var actualReturned = 0;
       var daysWithReport = 0;
+      var regularRevenue = 0;
+      var regularReportDays = 0;
+      var saleRevenue = 0;
+      var saleReportDays = 0;
+      var missingReportDays: string[] = [];
 
       var days = weekDays.map(function(wd) {
         var isFuture = wd.date > todayStr;
@@ -116,6 +134,10 @@ export default function WeeklyPage() {
           actualCancelled += report.cancelledOrders;
           actualReturned += report.returnedOrders;
           daysWithReport++;
+          if (wd.dayType === 'regular') { regularRevenue += report.actualRevenue; regularReportDays++; }
+          else { saleRevenue += report.actualRevenue; saleReportDays++; }
+        } else if (!isFuture) {
+          missingReportDays.push(wd.date);
         }
         return { date: wd.date, dayType: wd.dayType, isFuture: isFuture };
       });
@@ -125,6 +147,10 @@ export default function WeeklyPage() {
       var d1 = parseInt(firstDate.split('-')[2]);
       var d2 = parseInt(lastDate.split('-')[2]);
 
+      var roas = actualMkt > 0 ? actualRevenue / actualMkt : 0;
+      var cpo = actualOrders > 0 ? actualMkt / actualOrders : 0;
+      var totalProcessed = actualOrders > 0 ? (actualCancelled + actualReturned) / actualOrders : 0;
+
       return {
         weekNum: i + 1,
         label: 'Tuần ' + (i + 1) + ' (' + d1 + '/' + month + ' - ' + d2 + '/' + month + ')',
@@ -132,6 +158,12 @@ export default function WeeklyPage() {
         plan: { revenue: planRevenue, mkt: planMkt, regularDays: regularDays, saleDays: saleDays },
         actual: { revenue: actualRevenue, mkt: actualMkt, orders: actualOrders, cancelled: actualCancelled, returned: actualReturned },
         daysWithReport: daysWithReport,
+        roas: roas,
+        cpo: cpo,
+        cancelReturnRate: totalProcessed,
+        avgRegularRevenue: regularReportDays > 0 ? regularRevenue / regularReportDays : 0,
+        avgSaleRevenue: saleReportDays > 0 ? saleRevenue / saleReportDays : 0,
+        missingReportDays: missingReportDays,
       };
     });
   }, [selectedShopId, year, month, plan, reportMap, todayStr]);
@@ -194,14 +226,23 @@ export default function WeeklyPage() {
   var [expandedWeek, setExpandedWeek] = useState<number | null>(null);
   var [newTaskTitle, setNewTaskTitle] = useState('');
   var [newTaskDeadline, setNewTaskDeadline] = useState('');
-  var [activeWeekForTasks, setActiveWeekForTasks] = useState('');
 
-  var weekActions = useMemo(function() {
-    if (!activeWeekForTasks || !selectedShopId) return [];
+  // Auto-expand current week
+  useEffect(function() {
+    if (weeks.length > 0 && expandedWeek === null) {
+      var currentWeek = weeks.find(function(w) {
+        return w.days.some(function(d) { return d.date === todayStr; });
+      });
+      if (currentWeek) setExpandedWeek(currentWeek.weekNum);
+    }
+  }, [weeks, todayStr]);
+
+  var weekActionsForWeek = function(weekStart: string) {
+    if (!selectedShopId) return [];
     return weeklyActions.filter(function(a) {
-      return a.shopId === selectedShopId && a.weekStart === activeWeekForTasks;
+      return a.shopId === selectedShopId && a.weekStart === weekStart;
     });
-  }, [weeklyActions, selectedShopId, activeWeekForTasks]);
+  };
 
   var allMonthActions = useMemo(function() {
     if (!selectedShopId) return [];
@@ -210,12 +251,33 @@ export default function WeeklyPage() {
     });
   }, [weeklyActions, selectedShopId, selectedMonth]);
 
-  function handleAddTask() {
-    if (!newTaskTitle.trim() || !activeWeekForTasks || !currentUser) return;
+  var taskAlerts = useMemo(function() {
+    if (!selectedShopId) return { overdue: [] as WeeklyAction[], upcoming: [] as WeeklyAction[], todayDue: [] as WeeklyAction[] };
+    var threeDaysLater = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+    var threeDaysStr = toDateString(threeDaysLater);
+    var overdue: WeeklyAction[] = [];
+    var upcoming: WeeklyAction[] = [];
+    var todayDue: WeeklyAction[] = [];
+
+    weeklyActions.filter(function(a) {
+      return a.shopId === selectedShopId && a.status !== 'done' && a.deadline;
+    }).forEach(function(a) {
+      if (a.deadline < todayStr) overdue.push(a);
+      else if (a.deadline === todayStr) todayDue.push(a);
+      else if (a.deadline <= threeDaysStr) upcoming.push(a);
+    });
+
+    overdue.sort(function(a, b) { return a.deadline.localeCompare(b.deadline); });
+    upcoming.sort(function(a, b) { return a.deadline.localeCompare(b.deadline); });
+    return { overdue: overdue, upcoming: upcoming, todayDue: todayDue };
+  }, [weeklyActions, selectedShopId, todayStr]);
+
+  function handleAddTask(weekStart: string) {
+    if (!newTaskTitle.trim() || !currentUser) return;
     var action: WeeklyAction = {
       id: 'wa-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
       shopId: selectedShopId,
-      weekStart: activeWeekForTasks,
+      weekStart: weekStart,
       month: selectedMonth,
       title: newTaskTitle.trim(),
       deadline: newTaskDeadline,
@@ -280,6 +342,78 @@ export default function WeeklyPage() {
             Vào &quot;Kế hoạch tháng&quot; để thiết lập target ngày thường, ngày sale và budget quảng cáo.
             Hiện chỉ hiển thị dữ liệu thực tế.
           </p>
+        </div>
+      )}
+
+      {/* Task alerts — shown immediately when staff opens page */}
+      {selectedShopId && (taskAlerts.overdue.length > 0 || taskAlerts.todayDue.length > 0 || taskAlerts.upcoming.length > 0) && (
+        <div className="mb-6 space-y-3">
+          {taskAlerts.overdue.length > 0 && (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                <h3 className="text-sm font-bold text-red-400">TRỄ DEADLINE — {taskAlerts.overdue.length} việc</h3>
+              </div>
+              <div className="space-y-1.5">
+                {taskAlerts.overdue.map(function(t) {
+                  var daysLate = Math.floor((now.getTime() - new Date(t.deadline).getTime()) / (24 * 60 * 60 * 1000));
+                  return (
+                    <div key={t.id} className="flex items-center justify-between px-3 py-2 bg-red-500/5 rounded-lg">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <button onClick={function() { cycleStatus(t); }} className={'w-4 h-4 rounded-full border-2 shrink-0 ' + (t.status === 'in_progress' ? 'border-blue-500' : 'border-gray-500')} />
+                        <span className="text-sm text-gray-200 truncate">{t.title}</span>
+                      </div>
+                      <span className="text-xs text-red-400 font-medium shrink-0 ml-2">Trễ {daysLate} ngày</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {taskAlerts.todayDue.length > 0 && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-2 h-2 rounded-full bg-amber-500" />
+                <h3 className="text-sm font-bold text-amber-400">HẾT HẠN HÔM NAY — {taskAlerts.todayDue.length} việc</h3>
+              </div>
+              <div className="space-y-1.5">
+                {taskAlerts.todayDue.map(function(t) {
+                  return (
+                    <div key={t.id} className="flex items-center justify-between px-3 py-2 bg-amber-500/5 rounded-lg">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <button onClick={function() { cycleStatus(t); }} className={'w-4 h-4 rounded-full border-2 shrink-0 ' + (t.status === 'in_progress' ? 'border-blue-500' : 'border-gray-500')} />
+                        <span className="text-sm text-gray-200 truncate">{t.title}</span>
+                      </div>
+                      <span className={'text-xs px-2 py-0.5 rounded ' + (t.status === 'in_progress' ? 'bg-blue-500/15 text-blue-400' : 'bg-gray-500/15 text-gray-400')}>
+                        {t.status === 'in_progress' ? 'Đang làm' : 'Chưa làm'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {taskAlerts.upcoming.length > 0 && (
+            <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <h3 className="text-sm font-medium text-blue-400">Sắp tới hạn (3 ngày tới) — {taskAlerts.upcoming.length} việc</h3>
+              </div>
+              <div className="space-y-1.5">
+                {taskAlerts.upcoming.map(function(t) {
+                  var daysLeft = Math.ceil((new Date(t.deadline).getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+                  return (
+                    <div key={t.id} className="flex items-center justify-between px-3 py-2 bg-blue-500/5 rounded-lg">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <button onClick={function() { cycleStatus(t); }} className={'w-4 h-4 rounded-full border-2 shrink-0 ' + (t.status === 'in_progress' ? 'border-blue-500' : 'border-gray-500')} />
+                        <span className="text-sm text-gray-200 truncate">{t.title}</span>
+                      </div>
+                      <span className="text-xs text-blue-400 shrink-0 ml-2">Còn {daysLeft} ngày</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -378,12 +512,14 @@ export default function WeeklyPage() {
 
           {/* Weekly breakdown */}
           <div className="space-y-3">
-            {weeks.map(function(w) {
+            {weeks.map(function(w, wi) {
               var isExpanded = expandedWeek === w.weekNum;
               var weekPct = w.plan.revenue > 0 ? w.actual.revenue / w.plan.revenue : 0;
               var allFuture = w.days.every(function(d) { return d.isFuture; });
-              var allPast = w.days.every(function(d) { return !d.isFuture; });
               var isCurrentWeek = w.days.some(function(d) { return d.date === todayStr; });
+              var prevWeek = wi > 0 ? weeks[wi - 1] : null;
+              var wActions = weekActionsForWeek(w.days[0].date);
+              var pendingTasks = wActions.filter(function(a) { return a.status !== 'done'; }).length;
 
               return (
                 <div key={w.weekNum} className={'bg-slate-900 border rounded-xl overflow-hidden ' + (
@@ -411,16 +547,40 @@ export default function WeeklyPage() {
                       </div>
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-medium text-gray-200 text-sm">{w.label}</p>
                         {isCurrentWeek && (
                           <span className="px-2 py-0.5 text-[10px] rounded-full bg-blue-500/20 text-blue-400 font-medium">Tuần này</span>
                         )}
+                        {w.missingReportDays.length > 0 && (
+                          <span className="px-2 py-0.5 text-[10px] rounded-full bg-amber-500/15 text-amber-400 font-medium">
+                            Thiếu {w.missingReportDays.length} BC
+                          </span>
+                        )}
+                        {pendingTasks > 0 && (
+                          <span className="px-2 py-0.5 text-[10px] rounded-full bg-violet-500/15 text-violet-400 font-medium">
+                            {pendingTasks} task
+                          </span>
+                        )}
                       </div>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        {w.plan.regularDays} ngày thường + {w.plan.saleDays} ngày sale
-                        {w.daysWithReport > 0 ? ' — ' + w.daysWithReport + '/' + w.days.length + ' ngày có báo cáo' : ''}
-                      </p>
+                      <div className="flex items-center gap-3 mt-0.5">
+                        <p className="text-xs text-gray-500">
+                          {w.plan.regularDays} thường + {w.plan.saleDays} sale
+                          {w.daysWithReport > 0 ? ' · ' + w.daysWithReport + '/' + w.days.length + ' ngày' : ''}
+                        </p>
+                        {w.daysWithReport > 0 && prevWeek && prevWeek.daysWithReport > 0 && (
+                          <TrendArrow current={w.actual.revenue} previous={prevWeek.actual.revenue} />
+                        )}
+                      </div>
+                      {/* Mini progress bar */}
+                      {w.plan.revenue > 0 && w.daysWithReport > 0 && (
+                        <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden mt-2 max-w-48">
+                          <div
+                            className={'h-full rounded-full ' + (weekPct >= 0.9 ? 'bg-emerald-500' : weekPct >= 0.7 ? 'bg-yellow-500' : 'bg-red-500')}
+                            style={{ width: Math.min(weekPct * 100, 100) + '%' }}
+                          />
+                        </div>
+                      )}
                     </div>
                     <div className="text-right shrink-0">
                       {plan && (
@@ -446,9 +606,65 @@ export default function WeeklyPage() {
 
                   {isExpanded && (
                     <div className="border-t border-slate-700/50">
-                      {/* Week summary row */}
-                      {plan && (
+                      {/* Week KPI cards: ROAS, CPO, Huỷ/Hoàn, TB ngày thường vs sale */}
+                      {w.daysWithReport > 0 && (
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 px-5 py-3 bg-slate-800/30">
+                          <div>
+                            <p className="text-[10px] text-gray-500 uppercase tracking-wider">ROAS</p>
+                            <div className="flex items-center gap-2">
+                              <p className={'text-sm font-semibold ' + (w.roas >= 4 ? 'text-emerald-400' : w.roas >= 2.5 ? 'text-yellow-400' : w.roas > 0 ? 'text-red-400' : 'text-gray-500')}>
+                                {w.roas > 0 ? w.roas.toFixed(1) + 'x' : '—'}
+                              </p>
+                              {prevWeek && prevWeek.roas > 0 && <TrendArrow current={w.roas} previous={prevWeek.roas} />}
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-gray-500 uppercase tracking-wider">CPO</p>
+                            <div className="flex items-center gap-2">
+                              <p className={'text-sm font-semibold ' + (w.cpo > 0 && w.cpo < 30000 ? 'text-emerald-400' : w.cpo <= 60000 ? 'text-yellow-400' : 'text-red-400')}>
+                                {w.cpo > 0 ? formatCurrency(Math.round(w.cpo)) : '—'}
+                              </p>
+                              {prevWeek && prevWeek.cpo > 0 && <TrendArrow current={w.cpo} previous={prevWeek.cpo} inverse />}
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Huỷ + Hoàn</p>
+                            <p className={'text-sm font-semibold ' + (w.cancelReturnRate > 0.1 ? 'text-red-400' : w.cancelReturnRate > 0.05 ? 'text-yellow-400' : 'text-emerald-400')}>
+                              {w.actual.orders > 0 ? (w.cancelReturnRate * 100).toFixed(1) + '%' : '—'}
+                              {w.actual.orders > 0 && (
+                                <span className="text-[10px] text-gray-500 font-normal ml-1">
+                                  ({w.actual.cancelled + w.actual.returned}/{w.actual.orders})
+                                </span>
+                              )}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-gray-500 uppercase tracking-wider">TB Thường / Sale</p>
+                            <p className="text-sm font-semibold text-gray-300">
+                              {w.avgRegularRevenue > 0 ? formatCurrency(Math.round(w.avgRegularRevenue)) : '—'}
+                              <span className="text-gray-600 mx-1">/</span>
+                              <span className={w.avgSaleRevenue > 0 ? 'text-orange-400' : 'text-gray-500'}>
+                                {w.avgSaleRevenue > 0 ? formatCurrency(Math.round(w.avgSaleRevenue)) : '—'}
+                              </span>
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Missing report warning */}
+                      {w.missingReportDays.length > 0 && (
+                        <div className="mx-5 mt-3 px-3 py-2 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                          <p className="text-xs text-amber-400">
+                            Chưa có báo cáo: {w.missingReportDays.map(function(d) {
+                              return parseInt(d.split('-')[2]) + '/' + parseInt(d.split('-')[1]);
+                            }).join(', ')}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Plan vs actual summary */}
+                      {plan && (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 px-5 py-3">
                           <div>
                             <p className="text-[10px] text-gray-500 uppercase tracking-wider">KH Doanh thu</p>
                             <p className="text-sm font-medium text-gray-300">{formatCurrency(w.plan.revenue)}</p>
@@ -498,18 +714,20 @@ export default function WeeklyPage() {
                               var dayNames = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
                               var dayOfWeek = new Date(parseInt(dayParts[0]), parseInt(dayParts[1]) - 1, parseInt(dayParts[2])).getDay();
                               var isToday = d.date === todayStr;
+                              var isMissing = !d.isFuture && !report;
 
                               return (
                                 <tr key={d.date} className={
-                                  isToday ? 'bg-blue-500/5' : d.isFuture ? 'opacity-50' : 'hover:bg-slate-800/30'
+                                  isToday ? 'bg-blue-500/5' : isMissing ? 'bg-amber-500/5' : d.isFuture ? 'opacity-50' : 'hover:bg-slate-800/30'
                                 }>
                                   <td className="px-4 py-2">
                                     <div className="flex items-center gap-2">
                                       <span className={'text-xs font-medium w-6 ' + (dayOfWeek === 0 ? 'text-red-400' : dayOfWeek === 6 ? 'text-orange-400' : 'text-gray-500')}>
                                         {dayNames[dayOfWeek]}
                                       </span>
-                                      <span className={'font-medium ' + (isToday ? 'text-blue-400' : 'text-gray-300')}>{dateLabel}</span>
+                                      <span className={'font-medium ' + (isToday ? 'text-blue-400' : isMissing ? 'text-amber-400' : 'text-gray-300')}>{dateLabel}</span>
                                       {isToday && <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />}
+                                      {isMissing && <span className="text-[10px] text-amber-400/70">thiếu</span>}
                                     </div>
                                   </td>
                                   <td className="px-3 py-2 text-center">
@@ -555,152 +773,110 @@ export default function WeeklyPage() {
                           </tbody>
                         </table>
                       </div>
+
+                      {/* Inline action plan for this week */}
+                      <div className="border-t border-slate-700/50 px-5 py-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-sm font-medium text-gray-200">
+                            Kế hoạch hành động
+                          </h3>
+                          <span className="text-xs text-gray-500">
+                            {wActions.filter(function(a) { return a.status === 'done'; }).length}/{wActions.length} xong
+                          </span>
+                        </div>
+
+                        <div className="flex gap-2 mb-3">
+                          <input
+                            type="text"
+                            value={newTaskTitle}
+                            onChange={function(e) { setNewTaskTitle(e.target.value); }}
+                            onKeyDown={function(e) { if (e.key === 'Enter') handleAddTask(w.days[0].date); }}
+                            placeholder="Viết hành động cụ thể bạn sẽ làm..."
+                            className="flex-1 px-3 py-2 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600"
+                          />
+                          <input
+                            type="date"
+                            value={newTaskDeadline}
+                            onChange={function(e) { setNewTaskDeadline(e.target.value); }}
+                            className="px-3 py-2 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 w-36"
+                          />
+                          <button
+                            onClick={function() { handleAddTask(w.days[0].date); }}
+                            disabled={!newTaskTitle.trim()}
+                            className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors font-medium shrink-0"
+                          >
+                            Thêm
+                          </button>
+                        </div>
+
+                        {wActions.length > 0 ? (
+                          <div className="space-y-1.5">
+                            {wActions.map(function(action) {
+                              var statusColors: Record<string, string> = {
+                                pending: 'bg-gray-500/15 text-gray-400 border-gray-500/30',
+                                in_progress: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+                                done: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+                              };
+                              var statusLabels: Record<string, string> = { pending: 'Chưa làm', in_progress: 'Đang làm', done: 'Xong' };
+                              var isOverdue = action.deadline && action.deadline < todayStr && action.status !== 'done';
+
+                              return (
+                                <div key={action.id} className={'flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ' + (
+                                  action.status === 'done' ? 'bg-slate-800/30 border-slate-700/30' : 'bg-slate-800/50 border-slate-700/50'
+                                )}>
+                                  <button
+                                    onClick={function() { cycleStatus(action); }}
+                                    className={'w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ' + (
+                                      action.status === 'done' ? 'border-emerald-500 bg-emerald-500' :
+                                      action.status === 'in_progress' ? 'border-blue-500' : 'border-gray-500'
+                                    )}
+                                    title="Bấm để đổi trạng thái"
+                                  >
+                                    {action.status === 'done' && (
+                                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                                    )}
+                                    {action.status === 'in_progress' && (
+                                      <div className="w-2 h-2 rounded-full bg-blue-500" />
+                                    )}
+                                  </button>
+                                  <div className="flex-1 min-w-0">
+                                    <p className={'text-sm ' + (action.status === 'done' ? 'text-gray-500 line-through' : 'text-gray-200')}>
+                                      {action.title}
+                                    </p>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    {action.deadline && (
+                                      <span className={'text-[10px] px-2 py-0.5 rounded ' + (isOverdue ? 'bg-red-500/15 text-red-400' : 'text-gray-500')}>
+                                        {parseInt(action.deadline.split('-')[2]) + '/' + parseInt(action.deadline.split('-')[1])}
+                                      </span>
+                                    )}
+                                    <span className={'text-[10px] px-2 py-0.5 rounded border ' + statusColors[action.status]}>
+                                      {statusLabels[action.status]}
+                                    </span>
+                                    <button
+                                      onClick={function() { deleteWeeklyAction(action.id); }}
+                                      className="p-1 text-gray-600 hover:text-red-400 transition-colors"
+                                      title="Xoá"
+                                    >
+                                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-center text-gray-600 text-sm py-2">
+                            Nhìn số liệu tuần này, tự suy nghĩ và đặt task cho mình
+                          </p>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>
               );
             })}
           </div>
-
-          {/* Action Plan */}
-          {weeks.length > 0 && (
-            <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden">
-              <div className="px-5 py-4 border-b border-slate-700/50">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="font-semibold text-gray-100">Kế hoạch hành động</h2>
-                    <p className="text-xs text-gray-500 mt-0.5">Nhìn số liệu, tự suy nghĩ và đặt task cho mình</p>
-                  </div>
-                </div>
-              </div>
-              <div className="p-5 space-y-4">
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="text-sm text-gray-400">Chọn tuần:</span>
-                  {weeks.map(function(w) {
-                    var isActive = activeWeekForTasks === w.days[0].date;
-                    return (
-                      <button
-                        key={w.weekNum}
-                        onClick={function() { setActiveWeekForTasks(w.days[0].date); }}
-                        className={'px-3 py-1.5 text-xs rounded-lg border transition-colors ' + (
-                          isActive ? 'bg-blue-600 text-white border-blue-500' : 'bg-slate-800 text-gray-400 border-slate-700 hover:bg-slate-700'
-                        )}
-                      >
-                        T{w.weekNum}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {activeWeekForTasks && (
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-medium text-gray-200">
-                        Tuần {weeks.find(function(w) { return w.days[0].date === activeWeekForTasks; })?.weekNum || ''}
-                      </h3>
-                      <span className="text-xs text-gray-500">
-                        {weekActions.filter(function(a) { return a.status === 'done'; }).length}/{weekActions.length} hoàn thành
-                      </span>
-                    </div>
-
-                    {/* Add new task */}
-                    <div className="flex gap-2 mb-3">
-                      <input
-                        type="text"
-                        value={newTaskTitle}
-                        onChange={function(e) { setNewTaskTitle(e.target.value); }}
-                        onKeyDown={function(e) { if (e.key === 'Enter') handleAddTask(); }}
-                        placeholder="Viết hành động cụ thể bạn sẽ làm..."
-                        className="flex-1 px-3 py-2 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600"
-                      />
-                      <input
-                        type="date"
-                        value={newTaskDeadline}
-                        onChange={function(e) { setNewTaskDeadline(e.target.value); }}
-                        className="px-3 py-2 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 w-36"
-                      />
-                      <button
-                        onClick={handleAddTask}
-                        disabled={!newTaskTitle.trim()}
-                        className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors font-medium shrink-0"
-                      >
-                        Thêm
-                      </button>
-                    </div>
-
-                    {/* Task list */}
-                    {weekActions.length > 0 ? (
-                      <div className="space-y-1.5">
-                        {weekActions.map(function(action) {
-                          var statusColors = {
-                            pending: 'bg-gray-500/15 text-gray-400 border-gray-500/30',
-                            in_progress: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-                            done: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
-                          };
-                          var statusLabels = { pending: 'Chưa làm', in_progress: 'Đang làm', done: 'Xong' };
-                          var isOverdue = action.deadline && action.deadline < todayStr && action.status !== 'done';
-
-                          return (
-                            <div key={action.id} className={'flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors ' + (
-                              action.status === 'done' ? 'bg-slate-800/30 border-slate-700/30' : 'bg-slate-800/50 border-slate-700/50'
-                            )}>
-                              <button
-                                onClick={function() { cycleStatus(action); }}
-                                className={'w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ' + (
-                                  action.status === 'done' ? 'border-emerald-500 bg-emerald-500' :
-                                  action.status === 'in_progress' ? 'border-blue-500' : 'border-gray-500'
-                                )}
-                                title="Bấm để đổi trạng thái"
-                              >
-                                {action.status === 'done' && (
-                                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                                )}
-                                {action.status === 'in_progress' && (
-                                  <div className="w-2 h-2 rounded-full bg-blue-500" />
-                                )}
-                              </button>
-                              <div className="flex-1 min-w-0">
-                                <p className={'text-sm ' + (action.status === 'done' ? 'text-gray-500 line-through' : 'text-gray-200')}>
-                                  {action.title}
-                                </p>
-                              </div>
-                              <div className="flex items-center gap-2 shrink-0">
-                                {action.deadline && (
-                                  <span className={'text-[10px] px-2 py-0.5 rounded ' + (isOverdue ? 'bg-red-500/15 text-red-400' : 'text-gray-500')}>
-                                    {parseInt(action.deadline.split('-')[2]) + '/' + parseInt(action.deadline.split('-')[1])}
-                                  </span>
-                                )}
-                                <span className={'text-[10px] px-2 py-0.5 rounded border ' + statusColors[action.status]}>
-                                  {statusLabels[action.status]}
-                                </span>
-                                <button
-                                  onClick={function() { deleteWeeklyAction(action.id); }}
-                                  className="p-1 text-gray-600 hover:text-red-400 transition-colors"
-                                  title="Xoá"
-                                >
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className="text-center text-gray-600 text-sm py-4">
-                        Chưa có hành động nào. Hãy suy nghĩ dựa trên số liệu và tự đặt task cho mình.
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                {!activeWeekForTasks && (
-                  <p className="text-center text-gray-600 text-sm py-4">
-                    Chọn tuần để tạo kế hoạch hành động
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
 
           {/* Monthly action summary */}
           {allMonthActions.length > 0 && (
