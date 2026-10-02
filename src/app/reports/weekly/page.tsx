@@ -1601,7 +1601,7 @@ export default function WeeklyPage() {
                       </div>
 
                       {/* Product breakdown per week */}
-                      {weeklyProductData[wi] && weeklyProductData[wi].length > 0 && (weeklyProductData[wi].some(function(p) { return p.weekQty > 0 || p.cumQty > 0; }) || w.daysWithReport > 0) && (
+                      {weeklyProductData[wi] && weeklyProductData[wi].length > 0 && weeklyProductData[wi].some(function(p) { return p.weekQty > 0 || p.cumQty > 0; }) && (
                         <div className="border-t border-slate-700/50 px-5 py-4">
                           <div className="flex items-center justify-between mb-2">
                             <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">
