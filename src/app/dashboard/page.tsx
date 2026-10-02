@@ -369,6 +369,7 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-bold text-gray-100">Dashboard</h1>
           <p className="text-sm text-gray-500 mt-1">Tổng hợp doanh số {filteredShops.length} shop {dateFrom === dateTo ? `ngày ${dateFrom}` : `từ ${dateFrom} đến ${dateTo}`}</p>
         </div>
+        {currentUser.role === 'admin' && (
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={regionFilter}
@@ -399,6 +400,7 @@ export default function DashboardPage() {
             ))}
           </select>
         </div>
+        )}
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 border border-slate-600 rounded-lg px-2 md:px-3 py-1.5 md:py-2 bg-slate-800 flex-1 min-w-0">
             <input
