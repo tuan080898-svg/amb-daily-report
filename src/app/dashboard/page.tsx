@@ -5,6 +5,7 @@ import { useAppState } from '@/lib/store';
 import { calculateMetrics, formatCurrency, formatPercent, getAlertBg, getAlertDot, toDateString, exportToCSV } from '@/lib/utils';
 import { Channel, Region, AlertColor } from '@/lib/types';
 import { loadInventory, getReorderAlerts, WAREHOUSE_LABELS, type InventoryData } from '@/lib/inventory';
+import { aggregateProducts } from '@/lib/sku';
 import dynamic from 'next/dynamic';
 
 const MonthlyCharts = dynamic(() => import('@/components/MonthlyCharts'), { ssr: false });
@@ -24,7 +25,7 @@ function TrendArrow({ current, previous }: { current: number; previous: number }
 }
 
 export default function DashboardPage() {
-  const { currentUser, shops, users, reports, config, getUserShops, monthlyKPIs } = useAppState();
+  const { currentUser, shops, users, reports, config, getUserShops, monthlyKPIs, weeklyActions, monthlyPlanNotes, skuImports } = useAppState();
   const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 1); return toDateString(d); });
   const [dateTo, setDateTo] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 1); return toDateString(d); });
   const [channelFilter, setChannelFilter] = useState<Channel | 'all'>('all');
@@ -171,6 +172,72 @@ export default function DashboardPage() {
     var expectedPct = dayOfMonth / daysInMonth;
     return { month, totalKPI, totalActual, pct, daysRemaining, dayOfMonth, daysInMonth, gap: Math.max(0, gap), avgPerDay, needPerDay, expectedPct, onTrack: pct >= expectedPct };
   }, [filteredShops, monthlyKPIs, reports]);
+
+  // Dashboard task alerts
+  var dashboardTasks = useMemo(function() {
+    if (!currentUser) return { overdue: [] as typeof weeklyActions, todayDue: [] as typeof weeklyActions, upcoming: [] as typeof weeklyActions };
+    var now = new Date();
+    var todayStr = toDateString(now);
+    var threeDays = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
+    var threeDaysStr = toDateString(threeDays);
+    var shopIds = new Set(filteredShops.map(function(s) { return s.id; }));
+    var myTasks = weeklyActions.filter(function(a) { return shopIds.has(a.shopId) && a.status !== 'done' && a.deadline; });
+    var overdue = myTasks.filter(function(a) { return a.deadline < todayStr; });
+    var todayDue = myTasks.filter(function(a) { return a.deadline === todayStr; });
+    var upcoming = myTasks.filter(function(a) { return a.deadline > todayStr && a.deadline <= threeDaysStr; });
+    overdue.sort(function(a, b) { return a.deadline.localeCompare(b.deadline); });
+    upcoming.sort(function(a, b) { return a.deadline.localeCompare(b.deadline); });
+    return { overdue: overdue, todayDue: todayDue, upcoming: upcoming };
+  }, [currentUser, weeklyActions, filteredShops]);
+
+  // Product scoreboard
+  var productScoreboard = useMemo(function() {
+    if (!currentUser) return null;
+    var now = new Date();
+    var month = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+    var shopIds = new Set(filteredShops.map(function(s) { return s.id; }));
+    var notes = monthlyPlanNotes.filter(function(n) { return shopIds.has(n.shopId) && n.month === month && n.productTargets && n.productTargets.length > 0; });
+    if (notes.length === 0) return null;
+    var noteShopIds = new Set(notes.map(function(n) { return n.shopId; }));
+    var allSkus: string[] = [];
+    skuImports.forEach(function(si) {
+      if (!noteShopIds.has(si.shopId)) return;
+      if (si.dateTo < month + '-01' || si.dateFrom > month + '-31') return;
+      Object.entries(si.dailySku).forEach(function([date, codes]) {
+        if (date.startsWith(month)) allSkus = allSkus.concat(codes);
+      });
+    });
+    if (allSkus.length === 0) return null;
+    var products = aggregateProducts(allSkus);
+    var targetMap: Record<string, { targetQty: number; targetRevenue: number }> = {};
+    notes.forEach(function(n) {
+      n.productTargets.forEach(function(pt) {
+        if (!targetMap[pt.product]) targetMap[pt.product] = { targetQty: 0, targetRevenue: 0 };
+        targetMap[pt.product].targetQty += pt.targetQty;
+        targetMap[pt.product].targetRevenue += pt.targetRevenue;
+      });
+    });
+    var dayOfMonth = now.getDate();
+    var daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    var futureDays = daysInMonth - dayOfMonth;
+    var monthReports = reports.filter(function(r) { return noteShopIds.has(r.shopId) && r.date.startsWith(month); });
+    var reportDays = new Set(monthReports.map(function(r) { return r.date; })).size;
+    var totalSkuQty = products.reduce(function(s, p) { return s + p.totalQuantity; }, 0);
+    var totalShopRevenue = monthReports.reduce(function(s, r) { return s + r.actualRevenue; }, 0);
+    var scored = products.filter(function(p) { return targetMap[p.product]; }).map(function(p) {
+      var t = targetMap[p.product];
+      var estRevenue = totalSkuQty > 0 ? (p.totalQuantity / totalSkuQty) * totalShopRevenue : 0;
+      var pctRev = t.targetRevenue > 0 ? estRevenue / t.targetRevenue : 0;
+      var dailyRate = reportDays > 0 ? estRevenue / reportDays : 0;
+      var projected = estRevenue + dailyRate * futureDays;
+      var projectedPct = t.targetRevenue > 0 ? projected / t.targetRevenue : 0;
+      return { product: p.product, actualRev: estRevenue, targetRev: t.targetRevenue, pctRev: pctRev, projectedPct: projectedPct, qty: p.totalQuantity, targetQty: t.targetQty };
+    });
+    scored.sort(function(a, b) { return b.projectedPct - a.projectedPct; });
+    var top3 = scored.filter(function(p) { return p.projectedPct >= 1; }).slice(0, 3);
+    var bottom3 = scored.filter(function(p) { return p.projectedPct < 1; }).sort(function(a, b) { return a.projectedPct - b.projectedPct; }).slice(0, 3);
+    return { top3: top3, bottom3: bottom3 };
+  }, [currentUser, filteredShops, monthlyPlanNotes, skuImports, reports]);
 
   // Top 3 shops needing attention
   const topAlertShops = useMemo(() => {
@@ -372,7 +439,7 @@ export default function DashboardPage() {
       </div>
 
       {/* #1 KPI Progress Bar */}
-      {kpiProgress && currentUser.role === 'admin' && (
+      {kpiProgress && (
         <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4 md:p-5 mb-4 md:mb-6">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -418,6 +485,106 @@ export default function DashboardPage() {
               <span className="text-gray-600 ml-1">(TB {formatCurrency(Math.round(kpiProgress.avgPerDay))})</span>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Task alerts on dashboard */}
+      {(dashboardTasks.overdue.length > 0 || dashboardTasks.todayDue.length > 0 || dashboardTasks.upcoming.length > 0) && (
+        <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4 mb-4 md:mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+              <h2 className="text-sm font-semibold text-gray-200">Việc cần làm</h2>
+            </div>
+            <a href="/reports/weekly" className="text-[10px] text-blue-400 hover:text-blue-300">Xem kế hoạch tuần →</a>
+          </div>
+          <div className="space-y-1.5">
+            {dashboardTasks.overdue.map(function(t) {
+              var daysLate = Math.floor((new Date().getTime() - new Date(t.deadline).getTime()) / 86400000);
+              var shop = shops.find(function(s) { return s.id === t.shopId; });
+              return (
+                <div key={t.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-500/5 border border-red-500/20">
+                  <div className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+                  <span className="text-xs text-gray-200 flex-1 truncate">{t.title}</span>
+                  {shop && <span className="text-[10px] text-gray-600 shrink-0 hidden sm:inline">{shop.name.substring(0, 15)}</span>}
+                  <span className="text-[10px] text-red-400 font-medium shrink-0">Trễ {daysLate}d</span>
+                </div>
+              );
+            })}
+            {dashboardTasks.todayDue.map(function(t) {
+              var shop = shops.find(function(s) { return s.id === t.shopId; });
+              return (
+                <div key={t.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/20">
+                  <div className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                  <span className="text-xs text-gray-200 flex-1 truncate">{t.title}</span>
+                  {shop && <span className="text-[10px] text-gray-600 shrink-0 hidden sm:inline">{shop.name.substring(0, 15)}</span>}
+                  <span className="text-[10px] text-amber-400 font-medium shrink-0">Hôm nay</span>
+                </div>
+              );
+            })}
+            {dashboardTasks.upcoming.map(function(t) {
+              var daysLeft = Math.ceil((new Date(t.deadline).getTime() - new Date().getTime()) / 86400000);
+              var shop = shops.find(function(s) { return s.id === t.shopId; });
+              return (
+                <div key={t.id} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/5 border border-blue-500/20">
+                  <div className="w-2 h-2 rounded-full bg-blue-500/50 shrink-0" />
+                  <span className="text-xs text-gray-300 flex-1 truncate">{t.title}</span>
+                  {shop && <span className="text-[10px] text-gray-600 shrink-0 hidden sm:inline">{shop.name.substring(0, 15)}</span>}
+                  <span className="text-[10px] text-blue-400 shrink-0">Còn {daysLeft}d</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Product scoreboard */}
+      {productScoreboard && (productScoreboard.top3.length > 0 || productScoreboard.bottom3.length > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4 md:mb-6">
+          {productScoreboard.top3.length > 0 && (
+            <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                <h3 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">SP bán tốt nhất</h3>
+              </div>
+              <div className="space-y-2">
+                {productScoreboard.top3.map(function(p, i) {
+                  return (
+                    <div key={i} className="flex items-center gap-3">
+                      <span className="text-xs text-gray-500 w-4 shrink-0">#{i + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-gray-200 truncate">{p.product}</p>
+                        <p className="text-[10px] text-gray-500">{formatCurrency(p.actualRev)} / {formatCurrency(p.targetRev)}</p>
+                      </div>
+                      <span className="text-xs font-bold text-emerald-400 shrink-0">~{(p.projectedPct * 100).toFixed(0)}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {productScoreboard.bottom3.length > 0 && (
+            <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 rounded-full bg-red-500" />
+                <h3 className="text-xs font-semibold text-red-400 uppercase tracking-wider">SP cần đẩy mạnh</h3>
+              </div>
+              <div className="space-y-2">
+                {productScoreboard.bottom3.map(function(p, i) {
+                  return (
+                    <div key={i} className="flex items-center gap-3">
+                      <span className="text-xs text-gray-500 w-4 shrink-0">#{i + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-gray-200 truncate">{p.product}</p>
+                        <p className="text-[10px] text-gray-500">{formatCurrency(p.actualRev)} / {formatCurrency(p.targetRev)}</p>
+                      </div>
+                      <span className={'text-xs font-bold shrink-0 ' + (p.projectedPct < 0.5 ? 'text-red-400' : 'text-amber-400')}>~{(p.projectedPct * 100).toFixed(0)}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
