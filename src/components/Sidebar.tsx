@@ -26,7 +26,6 @@ const NAV_GROUPS: NavGroup[] = [
     icon: '📊',
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: '📊', roles: ['admin', 'employee'] },
-      { href: '/planning', label: 'Kế hoạch tháng', icon: '🎯', roles: ['admin', 'employee'] },
     ],
   },
   {

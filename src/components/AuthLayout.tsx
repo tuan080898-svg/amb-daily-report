@@ -41,7 +41,6 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
 function getPageTitle(pathname: string): string {
   const map: Record<string, string> = {
     '/dashboard': 'Dashboard',
-    '/planning': 'Kế hoạch tháng',
     '/reports': 'Nhập báo cáo',
     '/reports/history': 'Lịch sử',
     '/reports/sku': 'SP bán chạy',
