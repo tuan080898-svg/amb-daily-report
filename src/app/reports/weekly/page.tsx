@@ -333,6 +333,50 @@ export default function WeeklyPage() {
     return monthlyPlanNotes.find(function(n) { return n.shopId === selectedShopId && n.month === selectedMonth; }) || null;
   }, [monthlyPlanNotes, selectedShopId, selectedMonth]);
 
+  // Product data per week: actual qty/revenue + cumulative vs targets
+  var weeklyProductData = useMemo(function() {
+    if (!selectedShopId || !currentNote?.productTargets?.length || weeks.length === 0) return [];
+    var skuMap: Record<string, string[]> = {};
+    skuImports.forEach(function(si) {
+      if (si.shopId !== selectedShopId) return;
+      if (si.dateTo < selectedMonth + '-01' || si.dateFrom > selectedMonth + '-31') return;
+      Object.entries(si.dailySku).forEach(function([date, codes]) {
+        if (date.startsWith(selectedMonth)) {
+          if (!skuMap[date]) skuMap[date] = [];
+          skuMap[date] = skuMap[date].concat(codes);
+        }
+      });
+    });
+    var cumMap: Record<string, { qty: number; revenue: number }> = {};
+    return weeks.map(function(w) {
+      var weekSkus: string[] = [];
+      w.days.forEach(function(d) {
+        if (skuMap[d.date]) weekSkus = weekSkus.concat(skuMap[d.date]);
+      });
+      var weekProducts = aggregateProducts(weekSkus);
+      var totalWeekQty = weekProducts.reduce(function(s, p) { return s + p.totalQuantity; }, 0);
+      return currentNote!.productTargets.map(function(pt) {
+        var wp = weekProducts.find(function(p) { return p.product === pt.product; });
+        var weekQty = wp ? wp.totalQuantity : 0;
+        var weekRevenue = totalWeekQty > 0 && w.actual.revenue > 0
+          ? Math.round((weekQty / totalWeekQty) * w.actual.revenue)
+          : 0;
+        if (!cumMap[pt.product]) cumMap[pt.product] = { qty: 0, revenue: 0 };
+        cumMap[pt.product].qty += weekQty;
+        cumMap[pt.product].revenue += weekRevenue;
+        return {
+          product: pt.product,
+          weekQty: weekQty,
+          weekRevenue: weekRevenue,
+          cumQty: cumMap[pt.product].qty,
+          cumRevenue: cumMap[pt.product].revenue,
+          targetQty: pt.targetQty,
+          targetRevenue: pt.targetRevenue,
+        };
+      });
+    });
+  }, [selectedShopId, weeks, skuImports, currentNote, selectedMonth]);
+
   var [showPlanning, setShowPlanning] = useState(false);
   var [noteStrategy, setNoteStrategy] = useState('');
   var [noteProductFocus, setNoteProductFocus] = useState('');
@@ -1555,6 +1599,99 @@ export default function WeeklyPage() {
                           </tbody>
                         </table>
                       </div>
+
+                      {/* Product breakdown per week */}
+                      {weeklyProductData[wi] && weeklyProductData[wi].length > 0 && (weeklyProductData[wi].some(function(p) { return p.weekQty > 0 || p.cumQty > 0; }) || w.daysWithReport > 0) && (
+                        <div className="border-t border-slate-700/50 px-5 py-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <h3 className="text-xs font-medium text-gray-400 uppercase tracking-wider">
+                              Sản phẩm tuần {w.weekNum}
+                              {wi > 0 && <span className="text-gray-600 normal-case ml-1">· luỹ kế từ đầu tháng</span>}
+                            </h3>
+                          </div>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-[10px] text-gray-500 uppercase tracking-wider">
+                                  <th className="text-left px-2 py-1.5 font-medium">SP</th>
+                                  <th className="text-right px-2 py-1.5 font-medium">SL tuần</th>
+                                  <th className="text-right px-2 py-1.5 font-medium">DT tuần</th>
+                                  {wi > 0 && <th className="text-right px-2 py-1.5 font-medium">LK SL</th>}
+                                  {wi > 0 && <th className="text-right px-2 py-1.5 font-medium">LK DT</th>}
+                                  <th className="text-right px-2 py-1.5 font-medium">KH tháng</th>
+                                  <th className="text-center px-2 py-1.5 font-medium">% đạt</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/30">
+                                {weeklyProductData[wi].filter(function(p) { return p.weekQty > 0 || p.cumQty > 0; }).map(function(p) {
+                                  var pctRev = p.targetRevenue > 0 ? (wi > 0 ? p.cumRevenue : p.weekRevenue) / p.targetRevenue : 0;
+                                  return (
+                                    <tr key={p.product} className="hover:bg-slate-800/30">
+                                      <td className="px-2 py-1.5 text-gray-300 max-w-[140px] truncate" title={p.product}>{p.product}</td>
+                                      <td className="px-2 py-1.5 text-right text-gray-300">{p.weekQty > 0 ? p.weekQty.toLocaleString() : '—'}</td>
+                                      <td className="px-2 py-1.5 text-right text-gray-400">{p.weekRevenue > 0 ? formatCurrency(p.weekRevenue) : '—'}</td>
+                                      {wi > 0 && <td className="px-2 py-1.5 text-right text-gray-300 font-medium">{p.cumQty > 0 ? p.cumQty.toLocaleString() : '—'}</td>}
+                                      {wi > 0 && <td className="px-2 py-1.5 text-right text-gray-300 font-medium">{p.cumRevenue > 0 ? formatCurrency(p.cumRevenue) : '—'}</td>}
+                                      <td className="px-2 py-1.5 text-right text-gray-500">{p.targetRevenue > 0 ? formatCurrency(p.targetRevenue) : '—'}</td>
+                                      <td className="px-2 py-1.5 text-center">
+                                        {pctRev > 0 ? (
+                                          <span className={'px-1.5 py-0.5 rounded text-[10px] font-medium ' + (
+                                            pctRev >= 0.9 ? 'bg-emerald-500/15 text-emerald-400' :
+                                            pctRev >= 0.5 ? 'bg-yellow-500/15 text-yellow-400' :
+                                            'bg-red-500/15 text-red-400'
+                                          )}>
+                                            {(pctRev * 100).toFixed(0)}%
+                                          </span>
+                                        ) : <span className="text-gray-600">—</span>}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                              <tfoot>
+                                <tr className="bg-slate-800/30 font-medium text-xs">
+                                  <td className="px-2 py-1.5 text-gray-300">Tổng</td>
+                                  <td className="px-2 py-1.5 text-right text-gray-300">
+                                    {weeklyProductData[wi].reduce(function(s, p) { return s + p.weekQty; }, 0).toLocaleString()}
+                                  </td>
+                                  <td className="px-2 py-1.5 text-right text-gray-300">
+                                    {formatCurrency(weeklyProductData[wi].reduce(function(s, p) { return s + p.weekRevenue; }, 0))}
+                                  </td>
+                                  {wi > 0 && (
+                                    <td className="px-2 py-1.5 text-right text-gray-200">
+                                      {weeklyProductData[wi].reduce(function(s, p) { return s + p.cumQty; }, 0).toLocaleString()}
+                                    </td>
+                                  )}
+                                  {wi > 0 && (
+                                    <td className="px-2 py-1.5 text-right text-gray-200">
+                                      {formatCurrency(weeklyProductData[wi].reduce(function(s, p) { return s + p.cumRevenue; }, 0))}
+                                    </td>
+                                  )}
+                                  <td className="px-2 py-1.5 text-right text-gray-500">
+                                    {formatCurrency(weeklyProductData[wi].reduce(function(s, p) { return s + p.targetRevenue; }, 0))}
+                                  </td>
+                                  <td className="px-2 py-1.5 text-center">
+                                    {(function() {
+                                      var totalCum = weeklyProductData[wi].reduce(function(s, p) { return s + (wi > 0 ? p.cumRevenue : p.weekRevenue); }, 0);
+                                      var totalTarget = weeklyProductData[wi].reduce(function(s, p) { return s + p.targetRevenue; }, 0);
+                                      var pct = totalTarget > 0 ? totalCum / totalTarget : 0;
+                                      return pct > 0 ? (
+                                        <span className={'px-1.5 py-0.5 rounded text-[10px] font-medium ' + (
+                                          pct >= 0.9 ? 'bg-emerald-500/15 text-emerald-400' :
+                                          pct >= 0.5 ? 'bg-yellow-500/15 text-yellow-400' :
+                                          'bg-red-500/15 text-red-400'
+                                        )}>
+                                          {(pct * 100).toFixed(0)}%
+                                        </span>
+                                      ) : <span className="text-gray-600">—</span>;
+                                    })()}
+                                  </td>
+                                </tr>
+                              </tfoot>
+                            </table>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Inline action plan for this week */}
                       <div className="border-t border-slate-700/50 px-5 py-4">
