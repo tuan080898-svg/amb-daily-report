@@ -252,7 +252,7 @@ export default function PnlPage() {
               if (costVal > 0) allEntries.set(sku, { sku: sku, name: name, cost: costVal });
             });
           }
-        } catch (err) { console.error('Parse COGS error:', err); }
+        } catch (err) { console.error('Parse COGS error:', err); alert('Lỗi đọc file giá vốn: ' + (err instanceof Error ? err.message : 'File không đúng định dạng')); }
         processed++;
         if (processed === totalFiles) {
           var result = Array.from(allEntries.values());
@@ -385,7 +385,7 @@ export default function PnlPage() {
               importedAt: new Date().toISOString(),
             });
           }
-        } catch (err) { console.error('Parse order error:', err); }
+        } catch (err) { console.error('Parse order error:', err); alert('Lỗi đọc file đơn hàng: ' + (err instanceof Error ? err.message : 'File không đúng định dạng')); }
 
         processed++;
         if (processed === totalFiles) {

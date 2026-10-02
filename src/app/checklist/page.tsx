@@ -78,20 +78,28 @@ export default function ChecklistPage() {
 
   function toggleTask(taskId: string) {
     var completed = isTaskCompleted(taskId);
-    var existing = checklistEntries.filter(function(e) {
-      return !(e.date === selectedDate && e.taskId === taskId && e.userId === currentUser?.id);
+    var hasEntry = checklistEntries.some(function(e) {
+      return e.date === selectedDate && e.taskId === taskId && e.userId === currentUser?.id;
     });
-    if (!completed) {
-      existing.push({
+    var updated;
+    if (hasEntry) {
+      updated = checklistEntries.map(function(e) {
+        if (e.date === selectedDate && e.taskId === taskId && e.userId === currentUser?.id) {
+          return { ...e, completed: !completed, completedAt: !completed ? new Date().toISOString() : e.completedAt };
+        }
+        return e;
+      });
+    } else {
+      updated = checklistEntries.concat([{
         date: selectedDate,
         taskId: taskId,
         userId: currentUser?.id || '',
         completed: true,
         completedAt: new Date().toISOString(),
         note: '',
-      });
+      }]);
     }
-    saveChecklistEntries(existing);
+    saveChecklistEntries(updated);
   }
 
   function saveNote(taskId: string, note: string) {
