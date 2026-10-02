@@ -1797,6 +1797,120 @@ export default function WeeklyPage() {
             })}
           </div>
 
+          {/* Monthly product progress summary */}
+          {weeklyProductData.length > 0 && weeklyProductData[weeklyProductData.length - 1].some(function(p) { return p.cumQty > 0; }) && (
+            <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden">
+              <div className="px-5 py-4 border-b border-slate-700/50">
+                <h3 className="text-sm font-medium text-gray-200">
+                  Tiến độ sản phẩm tháng {month}/{year}
+                </h3>
+                <p className="text-xs text-gray-500 mt-0.5">Thực đạt so với kế hoạch đã đặt · dữ liệu từ file SKU nhân sự upload</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-[10px] text-gray-500 uppercase tracking-wider bg-slate-800/50">
+                      <th className="text-left px-4 py-2.5 font-medium">Sản phẩm</th>
+                      <th className="text-right px-3 py-2.5 font-medium">SL thực</th>
+                      <th className="text-right px-3 py-2.5 font-medium">DT thực</th>
+                      <th className="text-right px-3 py-2.5 font-medium">KH SL</th>
+                      <th className="text-right px-3 py-2.5 font-medium">KH DT</th>
+                      <th className="text-center px-3 py-2.5 font-medium w-[80px]">% đạt</th>
+                      <th className="px-3 py-2.5 font-medium w-[120px]">Tiến độ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/50">
+                    {weeklyProductData[weeklyProductData.length - 1].filter(function(p) { return p.cumQty > 0 || p.targetRevenue > 0; }).map(function(p) {
+                      var pctRev = p.targetRevenue > 0 ? p.cumRevenue / p.targetRevenue : 0;
+                      var pctQty = p.targetQty > 0 ? p.cumQty / p.targetQty : 0;
+                      return (
+                        <tr key={p.product} className="hover:bg-slate-800/30 transition-colors">
+                          <td className="px-4 py-2.5 text-gray-200 font-medium max-w-[180px] truncate" title={p.product}>{p.product}</td>
+                          <td className="px-3 py-2.5 text-right text-gray-300">{p.cumQty > 0 ? p.cumQty.toLocaleString() : '—'}</td>
+                          <td className="px-3 py-2.5 text-right text-gray-300">{p.cumRevenue > 0 ? formatCurrency(p.cumRevenue) : '—'}</td>
+                          <td className="px-3 py-2.5 text-right text-gray-500">{p.targetQty > 0 ? p.targetQty.toLocaleString() : '—'}</td>
+                          <td className="px-3 py-2.5 text-right text-gray-500">{p.targetRevenue > 0 ? formatCurrency(p.targetRevenue) : '—'}</td>
+                          <td className="px-3 py-2.5 text-center">
+                            <span className={'inline-block px-2 py-0.5 rounded text-[11px] font-bold ' + (
+                              pctRev >= 0.9 ? 'bg-emerald-500/15 text-emerald-400' :
+                              pctRev >= 0.7 ? 'bg-yellow-500/15 text-yellow-400' :
+                              pctRev >= 0.5 ? 'bg-orange-500/15 text-orange-400' :
+                              pctRev > 0 ? 'bg-red-500/15 text-red-400' : 'text-gray-600'
+                            )}>
+                              {pctRev > 0 ? Math.round(pctRev * 100) + '%' : '—'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                              <div
+                                className={'h-full rounded-full transition-all ' + (
+                                  pctRev >= 0.9 ? 'bg-emerald-500' :
+                                  pctRev >= 0.7 ? 'bg-yellow-500' :
+                                  pctRev >= 0.5 ? 'bg-orange-500' :
+                                  'bg-red-500'
+                                )}
+                                style={{ width: Math.min(pctRev * 100, 100) + '%' }}
+                              />
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-800/50 font-medium">
+                      <td className="px-4 py-2.5 text-gray-300">Tổng</td>
+                      <td className="px-3 py-2.5 text-right text-gray-200">
+                        {weeklyProductData[weeklyProductData.length - 1].reduce(function(s, p) { return s + p.cumQty; }, 0).toLocaleString()}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-gray-200">
+                        {formatCurrency(weeklyProductData[weeklyProductData.length - 1].reduce(function(s, p) { return s + p.cumRevenue; }, 0))}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-gray-400">
+                        {weeklyProductData[weeklyProductData.length - 1].reduce(function(s, p) { return s + p.targetQty; }, 0).toLocaleString()}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-gray-400">
+                        {formatCurrency(weeklyProductData[weeklyProductData.length - 1].reduce(function(s, p) { return s + p.targetRevenue; }, 0))}
+                      </td>
+                      {(function() {
+                        var totalCum = weeklyProductData[weeklyProductData.length - 1].reduce(function(s, p) { return s + p.cumRevenue; }, 0);
+                        var totalTarget = weeklyProductData[weeklyProductData.length - 1].reduce(function(s, p) { return s + p.targetRevenue; }, 0);
+                        var totalPct = totalTarget > 0 ? totalCum / totalTarget : 0;
+                        return (
+                          <>
+                            <td className="px-3 py-2.5 text-center">
+                              <span className={'inline-block px-2 py-0.5 rounded text-[11px] font-bold ' + (
+                                totalPct >= 0.9 ? 'bg-emerald-500/15 text-emerald-400' :
+                                totalPct >= 0.7 ? 'bg-yellow-500/15 text-yellow-400' :
+                                totalPct >= 0.5 ? 'bg-orange-500/15 text-orange-400' :
+                                totalPct > 0 ? 'bg-red-500/15 text-red-400' : 'text-gray-600'
+                              )}>
+                                {totalPct > 0 ? Math.round(totalPct * 100) + '%' : '—'}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                                <div
+                                  className={'h-full rounded-full ' + (
+                                    totalPct >= 0.9 ? 'bg-emerald-500' :
+                                    totalPct >= 0.7 ? 'bg-yellow-500' :
+                                    totalPct >= 0.5 ? 'bg-orange-500' :
+                                    'bg-red-500'
+                                  )}
+                                  style={{ width: Math.min(totalPct * 100, 100) + '%' }}
+                                />
+                              </div>
+                            </td>
+                          </>
+                        );
+                      })()}
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
+
           {/* Monthly action summary */}
           {allMonthActions.length > 0 && (
             <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-5">
