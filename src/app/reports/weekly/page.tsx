@@ -539,7 +539,8 @@ export default function WeeklyPage() {
     }
     setProductTargets(targets);
     setProductTargetsSaved(false);
-  }, [currentNote, prevMonthProducts, monthlyTarget]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentNote, prevMonthProducts]);
 
   function handleSaveProductTargets() {
     if (!currentUser || !selectedShopId) return;

@@ -898,7 +898,7 @@ export async function dbGetMonthlyPlanNotes(): Promise<MonthlyPlanNote[]> {
       strategy: r.strategy || '',
       productFocus: r.product_focus || '',
       promoPlan: r.promo_plan || '',
-      productTargets: r.product_targets ? JSON.parse(r.product_targets) : [],
+      productTargets: (() => { try { return r.product_targets ? JSON.parse(r.product_targets) : []; } catch { return []; } })(),
       createdBy: r.created_by,
       createdAt: r.created_at || '',
       updatedAt: r.updated_at || undefined,
