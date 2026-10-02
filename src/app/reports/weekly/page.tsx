@@ -628,6 +628,48 @@ export default function WeeklyPage() {
     setTimeout(function() { setProductTargetsSaved(false); }, 2000);
   }
 
+  var taskTemplates = [
+    'Review hiệu quả quảng cáo',
+    'Check tồn kho sản phẩm chủ lực',
+    'Chạy flash sale / voucher',
+    'Trả lời đánh giá khách hàng',
+    'Cập nhật hình ảnh sản phẩm',
+    'Phân tích đối thủ cạnh tranh',
+    'Lên content mạng xã hội',
+    'Kiểm tra đóng gói & vận chuyển',
+  ];
+
+  function getWeekSuggestions(w: WeekData, wi: number) {
+    if (w.daysWithReport === 0) return [];
+    var suggestions: string[] = [];
+    var weekPct = w.plan.revenue > 0 ? w.actual.revenue / w.plan.revenue : 0;
+    if (weekPct < 0.8 && weekPct > 0) {
+      suggestions.push('Tăng ngân sách quảng cáo tuần này (' + (weekPct * 100).toFixed(0) + '% KH)');
+    }
+    if (weekPct < 0.6 && weekPct > 0) {
+      suggestions.push('Chạy flash sale để đẩy doanh thu');
+    }
+    var mktRatio = w.actual.revenue > 0 ? w.actual.mkt / w.actual.revenue : 0;
+    if (mktRatio > 0.15) {
+      suggestions.push('Review quảng cáo - chi phí MKT ' + (mktRatio * 100).toFixed(0) + '% DT');
+    }
+    if (w.cancelReturnRate > 0.08) {
+      suggestions.push('Kiểm tra chất lượng đóng gói - huỷ/hoàn ' + (w.cancelReturnRate * 100).toFixed(1) + '%');
+    }
+    if (weeklyProductData[wi]) {
+      weeklyProductData[wi].forEach(function(p) {
+        if (p.targetRevenue > 0 && p.cumRevenue > 0) {
+          var dailyRate = monthSummary.totalDaysWithReport > 0 ? p.cumRevenue / monthSummary.totalDaysWithReport : 0;
+          var projected = p.cumRevenue + dailyRate * monthSummary.futureDays;
+          if (projected < p.targetRevenue * 0.7) {
+            suggestions.push('Đẩy mạnh SP "' + p.product + '" - dự báo chỉ đạt ' + (p.targetRevenue > 0 ? (projected / p.targetRevenue * 100).toFixed(0) : 0) + '% KH');
+          }
+        }
+      });
+    }
+    return suggestions.slice(0, 4);
+  }
+
   function handleAddTask(weekStart: string) {
     if (!newTaskTitle.trim() || !currentUser) return;
     var action: WeeklyAction = {
@@ -644,6 +686,22 @@ export default function WeeklyPage() {
     addWeeklyAction(action);
     setNewTaskTitle('');
     setNewTaskDeadline('');
+  }
+
+  function handleQuickAddTask(weekStart: string, title: string, weekEnd: string) {
+    if (!currentUser) return;
+    var action: WeeklyAction = {
+      id: 'wa-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      shopId: selectedShopId,
+      weekStart: weekStart,
+      month: selectedMonth,
+      title: title,
+      deadline: weekEnd,
+      status: 'pending',
+      createdBy: currentUser.id,
+      createdAt: new Date().toISOString(),
+    };
+    addWeeklyAction(action);
   }
 
   function cycleStatus(action: WeeklyAction) {
@@ -1378,6 +1436,56 @@ export default function WeeklyPage() {
             </div>
           )}
 
+          {/* Monthly task summary — all incomplete tasks across weeks */}
+          {allMonthActions.length > 0 && (function() {
+            var incomplete = allMonthActions.filter(function(a) { return a.status !== 'done'; });
+            var overdue = incomplete.filter(function(a) { return a.deadline && a.deadline < todayStr; });
+            var inProgress = incomplete.filter(function(a) { return a.status === 'in_progress'; });
+            var pending = incomplete.filter(function(a) { return a.status === 'pending' && (!a.deadline || a.deadline >= todayStr); });
+            if (incomplete.length === 0) return null;
+            return (
+              <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4 mb-1">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <svg className="w-4 h-4 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
+                    <h3 className="text-sm font-medium text-gray-200">Task chưa xong tháng {month}</h3>
+                  </div>
+                  <div className="flex items-center gap-3 text-[10px]">
+                    {overdue.length > 0 && <span className="text-red-400 font-medium">{overdue.length} trễ hạn</span>}
+                    {inProgress.length > 0 && <span className="text-blue-400">{inProgress.length} đang làm</span>}
+                    {pending.length > 0 && <span className="text-gray-500">{pending.length} chưa làm</span>}
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  {overdue.concat(inProgress).concat(pending).slice(0, 8).map(function(a) {
+                    var isOd = a.deadline && a.deadline < todayStr && a.status !== 'done';
+                    var weekNum = weeks.findIndex(function(w) { return w.days[0].date === a.weekStart; }) + 1;
+                    return (
+                      <div key={a.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/40">
+                        <button onClick={function() { cycleStatus(a); }} className={'w-4 h-4 rounded-full border-2 shrink-0 ' + (a.status === 'in_progress' ? 'border-blue-500' : 'border-gray-500')} title="Đổi trạng thái">
+                          {a.status === 'in_progress' && <div className="w-1.5 h-1.5 rounded-full bg-blue-500 m-auto" />}
+                        </button>
+                        <span className="text-[10px] text-gray-600 shrink-0 w-6">T{weekNum || '?'}</span>
+                        <span className={'text-xs flex-1 truncate ' + (isOd ? 'text-red-400' : 'text-gray-300')}>{a.title}</span>
+                        {a.deadline && (
+                          <span className={'text-[10px] shrink-0 ' + (isOd ? 'text-red-400' : 'text-gray-600')}>
+                            {parseInt(a.deadline.split('-')[2]) + '/' + parseInt(a.deadline.split('-')[1])}
+                          </span>
+                        )}
+                        <span className={'text-[10px] px-1.5 py-0.5 rounded ' + (a.status === 'in_progress' ? 'bg-blue-500/15 text-blue-400' : 'bg-gray-500/15 text-gray-500')}>
+                          {a.status === 'in_progress' ? 'Đang' : 'Chưa'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {incomplete.length > 8 && (
+                    <p className="text-[10px] text-gray-600 text-center py-1">+ {incomplete.length - 8} task khác</p>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Weekly breakdown */}
           <div className="space-y-3">
             {weeks.map(function(w, wi) {
@@ -1780,6 +1888,45 @@ export default function WeeklyPage() {
                             Thêm
                           </button>
                         </div>
+
+                        {/* AI suggestions based on data */}
+                        {(function() {
+                          var suggestions = getWeekSuggestions(w, wi);
+                          if (suggestions.length === 0) return null;
+                          var existingTitles = wActions.map(function(a) { return a.title; });
+                          var filtered = suggestions.filter(function(s) { return !existingTitles.some(function(t) { return t === s; }); });
+                          if (filtered.length === 0) return null;
+                          return (
+                            <div className="mb-3 p-3 bg-amber-500/5 border border-amber-500/20 rounded-lg">
+                              <p className="text-[10px] text-amber-400/80 font-medium mb-2 uppercase tracking-wider">💡 Gợi ý dựa trên số liệu</p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {filtered.map(function(s, si) {
+                                  return (
+                                    <button key={si} onClick={function() { handleQuickAddTask(w.days[0].date, s, w.days[w.days.length - 1].date); }} className="text-[11px] px-2.5 py-1.5 rounded-lg bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border border-amber-500/20 hover:border-amber-500/40 transition-colors text-left">
+                                      + {s}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Task templates */}
+                        {wActions.length === 0 && (
+                          <div className="mb-3">
+                            <p className="text-[10px] text-gray-500 mb-2">Mẫu task có sẵn — bấm để thêm nhanh:</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {taskTemplates.map(function(tmpl, ti) {
+                                return (
+                                  <button key={ti} onClick={function() { handleQuickAddTask(w.days[0].date, tmpl, w.days[w.days.length - 1].date); }} className="text-[11px] px-2.5 py-1 rounded-full bg-slate-800 text-gray-400 hover:text-gray-200 hover:bg-slate-700 border border-slate-700 hover:border-slate-600 transition-colors">
+                                    + {tmpl}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
 
                         {wActions.length > 0 ? (
                           <div className="space-y-1.5">
