@@ -440,6 +440,7 @@ export default function WeeklyPage() {
   var [calcSaleFixed, setCalcSaleFixed] = useState('');
   var [calcSaleFixedAds, setCalcSaleFixedAds] = useState('');
   var [calcSaved, setCalcSaved] = useState(false);
+  var [calcUserEditing, setCalcUserEditing] = useState(false);
 
   // Count day types in selected month
   var dayTypeCounts = useMemo(function() {
@@ -492,8 +493,14 @@ export default function WeeklyPage() {
     };
   }, [calcTarget, calcAds, calcSaleDouble, calcSaleDoubleAds, calcSaleFixed, calcSaleFixedAds, dayTypeCounts]);
 
-  // Load existing plan into calculator
+  // Reset editing flag when shop/month changes
   useEffect(function() {
+    setCalcUserEditing(false);
+  }, [selectedShopId, selectedMonth]);
+
+  // Load existing plan into calculator (skip if user is editing)
+  useEffect(function() {
+    if (calcUserEditing) return;
     if (plan) {
       var totalRevenue = (plan.regularDayTarget * dayTypeCounts.regular)
         + (plan.saleDoubleDayTarget * dayTypeCounts.saleDouble)
@@ -514,7 +521,7 @@ export default function WeeklyPage() {
       setCalcSaleFixedAds('');
     }
     setCalcSaved(false);
-  }, [plan, kpi, selectedShopId, selectedMonth, dayTypeCounts]);
+  }, [plan, kpi, selectedShopId, selectedMonth, dayTypeCounts, calcUserEditing]);
 
   function handleSavePlan() {
     if (!selectedShopId || !calcResults.isValid) return;
@@ -544,6 +551,7 @@ export default function WeeklyPage() {
     updateKPI(newKpi);
 
     setCalcSaved(true);
+    setCalcUserEditing(false);
     setTimeout(function() { setCalcSaved(false); }, 2000);
   }
 
@@ -886,13 +894,14 @@ export default function WeeklyPage() {
                         <input
                           type="text"
                           inputMode="numeric"
-                          value={calcTarget ? Number(calcTarget).toLocaleString('vi-VN') : ''}
-                          onChange={function(e) { setCalcTarget(e.target.value.replace(/[^\d]/g, '')); }}
-                          placeholder="VD: 500,000,000"
+                          value={calcTarget}
+                          onChange={function(e) { setCalcTarget(e.target.value.replace(/[^\d]/g, '')); setCalcUserEditing(true); }}
+                          placeholder="VD: 500000000"
                           className="w-full px-3 py-2.5 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 pr-8"
                         />
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">đ</span>
                       </div>
+                      {calcTarget && <p className="text-[10px] text-blue-400/70 mt-0.5 ml-1">{Number(calcTarget).toLocaleString('vi-VN')} đ</p>}
                     </div>
                     <div>
                       <label className="block text-xs text-gray-500 mb-1.5 font-medium">Tổng chi phí QC tháng {month}</label>
@@ -900,13 +909,14 @@ export default function WeeklyPage() {
                         <input
                           type="text"
                           inputMode="numeric"
-                          value={calcAds ? Number(calcAds).toLocaleString('vi-VN') : ''}
-                          onChange={function(e) { setCalcAds(e.target.value.replace(/[^\d]/g, '')); }}
-                          placeholder="VD: 100,000,000"
+                          value={calcAds}
+                          onChange={function(e) { setCalcAds(e.target.value.replace(/[^\d]/g, '')); setCalcUserEditing(true); }}
+                          placeholder="VD: 100000000"
                           className="w-full px-3 py-2.5 text-sm border border-slate-600 rounded-lg bg-slate-800 text-gray-200 placeholder:text-gray-600 pr-8"
                         />
                         <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">đ</span>
                       </div>
+                      {calcAds && <p className="text-[10px] text-blue-400/70 mt-0.5 ml-1">{Number(calcAds).toLocaleString('vi-VN')} đ</p>}
                     </div>
                   </div>
 
@@ -925,13 +935,14 @@ export default function WeeklyPage() {
                               <input
                                 type="text"
                                 inputMode="numeric"
-                                value={calcSaleDouble ? Number(calcSaleDouble).toLocaleString('vi-VN') : ''}
-                                onChange={function(e) { setCalcSaleDouble(e.target.value.replace(/[^\d]/g, '')); }}
+                                value={calcSaleDouble}
+                                onChange={function(e) { setCalcSaleDouble(e.target.value.replace(/[^\d]/g, '')); setCalcUserEditing(true); }}
                                 placeholder="DT mỗi ngày sale đôi"
                                 className="w-full px-3 py-2.5 text-sm border border-red-500/30 rounded-lg bg-red-500/5 text-gray-200 placeholder:text-gray-600 pr-8"
                               />
                               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">đ/ngày</span>
                             </div>
+                            {calcSaleDouble && <p className="text-[10px] text-red-400/70 mt-0.5 ml-1">{Number(calcSaleDouble).toLocaleString('vi-VN')} đ</p>}
                           </div>
                           <div>
                             <label className="block text-xs text-red-400/80 mb-1.5 font-medium">
@@ -941,13 +952,14 @@ export default function WeeklyPage() {
                               <input
                                 type="text"
                                 inputMode="numeric"
-                                value={calcSaleDoubleAds ? Number(calcSaleDoubleAds).toLocaleString('vi-VN') : ''}
-                                onChange={function(e) { setCalcSaleDoubleAds(e.target.value.replace(/[^\d]/g, '')); }}
+                                value={calcSaleDoubleAds}
+                                onChange={function(e) { setCalcSaleDoubleAds(e.target.value.replace(/[^\d]/g, '')); setCalcUserEditing(true); }}
                                 placeholder="QC mỗi ngày sale đôi"
                                 className="w-full px-3 py-2.5 text-sm border border-red-500/30 rounded-lg bg-red-500/5 text-gray-200 placeholder:text-gray-600 pr-8"
                               />
                               <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">đ/ngày</span>
                             </div>
+                            {calcSaleDoubleAds && <p className="text-[10px] text-red-400/70 mt-0.5 ml-1">{Number(calcSaleDoubleAds).toLocaleString('vi-VN')} đ</p>}
                           </div>
                         </>
                       )}
@@ -961,13 +973,14 @@ export default function WeeklyPage() {
                           <input
                             type="text"
                             inputMode="numeric"
-                            value={calcSaleFixed ? Number(calcSaleFixed).toLocaleString('vi-VN') : ''}
-                            onChange={function(e) { setCalcSaleFixed(e.target.value.replace(/[^\d]/g, '')); }}
+                            value={calcSaleFixed}
+                            onChange={function(e) { setCalcSaleFixed(e.target.value.replace(/[^\d]/g, '')); setCalcUserEditing(true); }}
                             placeholder="DT mỗi ngày sale cố định"
                             className="w-full px-3 py-2.5 text-sm border border-orange-500/30 rounded-lg bg-orange-500/5 text-gray-200 placeholder:text-gray-600 pr-8"
                           />
                           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">đ/ngày</span>
                         </div>
+                        {calcSaleFixed && <p className="text-[10px] text-orange-400/70 mt-0.5 ml-1">{Number(calcSaleFixed).toLocaleString('vi-VN')} đ</p>}
                       </div>
                       <div>
                         <label className="block text-xs text-orange-400/80 mb-1.5 font-medium">
@@ -977,13 +990,14 @@ export default function WeeklyPage() {
                           <input
                             type="text"
                             inputMode="numeric"
-                            value={calcSaleFixedAds ? Number(calcSaleFixedAds).toLocaleString('vi-VN') : ''}
-                            onChange={function(e) { setCalcSaleFixedAds(e.target.value.replace(/[^\d]/g, '')); }}
+                            value={calcSaleFixedAds}
+                            onChange={function(e) { setCalcSaleFixedAds(e.target.value.replace(/[^\d]/g, '')); setCalcUserEditing(true); }}
                             placeholder="QC mỗi ngày sale cố định"
                             className="w-full px-3 py-2.5 text-sm border border-orange-500/30 rounded-lg bg-orange-500/5 text-gray-200 placeholder:text-gray-600 pr-8"
                           />
                           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-500">đ/ngày</span>
                         </div>
+                        {calcSaleFixedAds && <p className="text-[10px] text-orange-400/70 mt-0.5 ml-1">{Number(calcSaleFixedAds).toLocaleString('vi-VN')} đ</p>}
                       </div>
                     </div>
                   </div>
