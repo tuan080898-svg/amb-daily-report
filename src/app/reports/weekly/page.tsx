@@ -228,6 +228,14 @@ export default function WeeklyPage() {
   var [newTaskTitle, setNewTaskTitle] = useState('');
   var [newTaskDeadline, setNewTaskDeadline] = useState('');
 
+  function expandWeekAndSetDeadline(weekNum: number | null) {
+    setExpandedWeek(weekNum);
+    if (weekNum !== null && weeks.length > 0) {
+      var w = weeks[weekNum - 1];
+      if (w) setNewTaskDeadline(w.days[w.days.length - 1].date);
+    }
+  }
+
   // Sticky KPI bar
   var kpiSectionRef = useRef<HTMLDivElement>(null);
   var [showStickyKPI, setShowStickyKPI] = useState(false);
@@ -247,7 +255,7 @@ export default function WeeklyPage() {
       var currentWeek = weeks.find(function(w) {
         return w.days.some(function(d) { return d.date === todayStr; });
       });
-      if (currentWeek) setExpandedWeek(currentWeek.weekNum);
+      if (currentWeek) expandWeekAndSetDeadline(currentWeek.weekNum);
     }
   }, [weeks, todayStr]);
 
@@ -1504,7 +1512,7 @@ export default function WeeklyPage() {
                   isCurrentWeek ? 'border-blue-500/50' : 'border-slate-700/50'
                 )}>
                   <button
-                    onClick={function() { setExpandedWeek(isExpanded ? null : w.weekNum); }}
+                    onClick={function() { expandWeekAndSetDeadline(isExpanded ? null : w.weekNum); }}
                     className={'w-full flex items-center gap-4 hover:bg-slate-800/50 transition-colors text-left ' + (isCompactFuture ? 'px-5 py-2.5' : 'px-5 py-4')}
                   >
                     <div className="shrink-0">
