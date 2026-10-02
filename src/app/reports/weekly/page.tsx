@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppState } from '@/lib/store';
 import { formatCurrency, getDayType, getTargetForDate, getMktForDate, toDateString } from '@/lib/utils';
 import { DayType, WeeklyAction, ActionStatus, MonthlyPlanNote, ProductTarget } from '@/lib/types';
@@ -227,6 +227,19 @@ export default function WeeklyPage() {
   var [expandedWeek, setExpandedWeek] = useState<number | null>(null);
   var [newTaskTitle, setNewTaskTitle] = useState('');
   var [newTaskDeadline, setNewTaskDeadline] = useState('');
+
+  // Sticky KPI bar
+  var kpiSectionRef = useRef<HTMLDivElement>(null);
+  var [showStickyKPI, setShowStickyKPI] = useState(false);
+
+  useEffect(function() {
+    if (!kpiSectionRef.current) return;
+    var observer = new IntersectionObserver(function(entries) {
+      setShowStickyKPI(!entries[0].isIntersecting);
+    }, { threshold: 0 });
+    observer.observe(kpiSectionRef.current);
+    return function() { observer.disconnect(); };
+  }, [selectedShopId]);
 
   // Auto-expand current week
   useEffect(function() {
@@ -1243,10 +1256,39 @@ export default function WeeklyPage() {
         </div>
       )}
 
+      {/* Sticky KPI bar */}
+      {selectedShopId && showStickyKPI && monthlyTarget > 0 && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-slate-900/95 backdrop-blur-sm border-b border-slate-700/50 px-4 py-2">
+          <div className="max-w-5xl mx-auto flex items-center gap-4 text-xs">
+            <div className="flex items-center gap-2">
+              <div className={'w-2 h-2 rounded-full ' + (monthSummary.pctAchieved >= 0.7 ? 'bg-emerald-500' : monthSummary.pctAchieved >= 0.4 ? 'bg-yellow-500' : 'bg-red-500')} />
+              <span className="text-gray-400">KPI:</span>
+              <span className={'font-bold ' + (monthSummary.pctAchieved >= 0.7 ? 'text-emerald-400' : monthSummary.pctAchieved >= 0.4 ? 'text-yellow-400' : 'text-red-400')}>
+                {(monthSummary.pctAchieved * 100).toFixed(1)}%
+              </span>
+            </div>
+            <div className="h-1.5 flex-1 max-w-32 bg-slate-700 rounded-full overflow-hidden">
+              <div
+                className={'h-full rounded-full ' + (monthSummary.pctAchieved >= 0.7 ? 'bg-emerald-500' : monthSummary.pctAchieved >= 0.4 ? 'bg-yellow-500' : 'bg-red-500')}
+                style={{ width: Math.min(monthSummary.pctAchieved * 100, 100) + '%' }}
+              />
+            </div>
+            <span className="text-gray-500 hidden sm:inline">{formatCurrency(monthSummary.totalActualRevenue)} / {formatCurrency(monthlyTarget)}</span>
+            {monthSummary.gap > 0 && (
+              <span className="text-gray-400 hidden sm:inline">· Thiếu <span className="text-red-400 font-medium">{formatCurrency(monthSummary.gap)}</span></span>
+            )}
+            {monthSummary.gap > 0 && monthSummary.futureDays > 0 && (
+              <span className="text-gray-400 hidden md:inline">· Cần ~{formatCurrency(Math.round(monthSummary.avgNeeded))}/ngày</span>
+            )}
+            <span className="text-gray-600 ml-auto">{selectedShop?.name}</span>
+          </div>
+        </div>
+      )}
+
       {selectedShopId && (
         <div className="space-y-6">
           {/* Monthly overview cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div ref={kpiSectionRef} className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-4">
               <p className="text-xs text-gray-500 mb-1">KPI tháng</p>
               <p className="text-xl font-bold text-gray-100">{formatCurrency(monthlyTarget)}</p>
@@ -1347,16 +1389,18 @@ export default function WeeklyPage() {
               var wActions = weekActionsForWeek(w.days[0].date);
               var pendingTasks = wActions.filter(function(a) { return a.status !== 'done'; }).length;
 
+              var isCompactFuture = allFuture && w.daysWithReport === 0 && !isCurrentWeek && !isExpanded;
+
               return (
                 <div key={w.weekNum} className={'bg-slate-900 border rounded-xl overflow-hidden ' + (
                   isCurrentWeek ? 'border-blue-500/50' : 'border-slate-700/50'
                 )}>
                   <button
                     onClick={function() { setExpandedWeek(isExpanded ? null : w.weekNum); }}
-                    className="w-full flex items-center gap-4 px-5 py-4 hover:bg-slate-800/50 transition-colors text-left"
+                    className={'w-full flex items-center gap-4 hover:bg-slate-800/50 transition-colors text-left ' + (isCompactFuture ? 'px-5 py-2.5' : 'px-5 py-4')}
                   >
                     <div className="shrink-0">
-                      <div className={'w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold ' + (
+                      <div className={'rounded-xl flex items-center justify-center font-bold ' + (isCompactFuture ? 'w-8 h-8 text-xs ' : 'w-10 h-10 text-sm ') + (
                         isCurrentWeek
                           ? 'bg-blue-500/20 text-blue-400'
                           : allFuture
@@ -1372,6 +1416,12 @@ export default function WeeklyPage() {
                         T{w.weekNum}
                       </div>
                     </div>
+                    {isCompactFuture ? (
+                      <div className="flex-1 flex items-center gap-3 min-w-0">
+                        <p className="text-sm text-gray-400">{w.label}</p>
+                        <span className="text-xs text-gray-600">{w.plan.regularDays} thường + {w.plan.saleDays} sale</span>
+                      </div>
+                    ) : (
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-medium text-gray-200 text-sm">{w.label}</p>
@@ -1408,10 +1458,12 @@ export default function WeeklyPage() {
                         </div>
                       )}
                     </div>
+                    )}
                     <div className="text-right shrink-0">
                       {plan && (
-                        <p className="text-xs text-gray-500">KH: {formatCurrency(w.plan.revenue)}</p>
+                        <p className={'text-gray-500 ' + (isCompactFuture ? 'text-[11px]' : 'text-xs')}>KH: {formatCurrency(w.plan.revenue)}</p>
                       )}
+                      {!isCompactFuture && (
                       <p className={'font-semibold ' + (
                         w.daysWithReport === 0
                           ? 'text-gray-500'
@@ -1423,6 +1475,7 @@ export default function WeeklyPage() {
                       )}>
                         {w.daysWithReport > 0 ? formatCurrency(w.actual.revenue) : '—'}
                       </p>
+                      )}
                       {w.daysWithReport > 0 && w.plan.revenue > 0 && (
                         <p className="text-xs text-gray-500">{(weekPct * 100).toFixed(0)}% KH</p>
                       )}
@@ -1816,6 +1869,9 @@ export default function WeeklyPage() {
                       <th className="text-right px-3 py-2.5 font-medium">KH SL</th>
                       <th className="text-right px-3 py-2.5 font-medium">KH DT</th>
                       <th className="text-center px-3 py-2.5 font-medium w-[80px]">% đạt</th>
+                      {monthSummary.totalDaysWithReport > 0 && monthSummary.futureDays > 0 && (
+                        <th className="text-center px-3 py-2.5 font-medium w-[80px]">Dự báo</th>
+                      )}
                       <th className="px-3 py-2.5 font-medium w-[120px]">Tiến độ</th>
                     </tr>
                   </thead>
@@ -1824,6 +1880,9 @@ export default function WeeklyPage() {
                       return { product: pt.product, weekQty: 0, weekRevenue: 0, cumQty: 0, cumRevenue: 0, targetQty: pt.targetQty, targetRevenue: pt.targetRevenue };
                     })).map(function(p) {
                       var pctRev = p.targetRevenue > 0 ? p.cumRevenue / p.targetRevenue : 0;
+                      var dailyRate = monthSummary.totalDaysWithReport > 0 ? p.cumRevenue / monthSummary.totalDaysWithReport : 0;
+                      var projectedRev = p.cumRevenue + dailyRate * monthSummary.futureDays;
+                      var projectedPct = p.targetRevenue > 0 ? projectedRev / p.targetRevenue : 0;
                       return (
                         <tr key={p.product} className="hover:bg-slate-800/30 transition-colors">
                           <td className="px-4 py-2.5 text-gray-200 font-medium max-w-[180px] truncate" title={p.product}>{p.product}</td>
@@ -1841,6 +1900,18 @@ export default function WeeklyPage() {
                               {Math.round(pctRev * 100) + '%'}
                             </span>
                           </td>
+                          {monthSummary.totalDaysWithReport > 0 && monthSummary.futureDays > 0 && (
+                            <td className="px-3 py-2.5 text-center">
+                              <span className={'inline-block px-2 py-0.5 rounded text-[11px] font-bold ' + (
+                                projectedPct >= 0.9 ? 'bg-emerald-500/15 text-emerald-400' :
+                                projectedPct >= 0.7 ? 'bg-yellow-500/15 text-yellow-400' :
+                                projectedPct >= 0.5 ? 'bg-orange-500/15 text-orange-400' :
+                                projectedPct > 0 ? 'bg-red-500/15 text-red-400' : 'text-gray-600'
+                              )}>
+                                {projectedPct > 0 ? '~' + Math.round(projectedPct * 100) + '%' : '—'}
+                              </span>
+                            </td>
+                          )}
                           <td className="px-3 py-2.5">
                             <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
                               <div
@@ -1868,6 +1939,9 @@ export default function WeeklyPage() {
                       var totalTargetQty = productRows.reduce(function(s, p) { return s + p.targetQty; }, 0);
                       var totalTargetRev = productRows.reduce(function(s, p) { return s + p.targetRevenue; }, 0);
                       var totalPct = totalTargetRev > 0 ? totalCumRev / totalTargetRev : 0;
+                      var totalDailyRate = monthSummary.totalDaysWithReport > 0 ? totalCumRev / monthSummary.totalDaysWithReport : 0;
+                      var totalProjected = totalCumRev + totalDailyRate * monthSummary.futureDays;
+                      var totalProjectedPct = totalTargetRev > 0 ? totalProjected / totalTargetRev : 0;
                       return (
                         <tr className="bg-slate-800/50 font-medium">
                           <td className="px-4 py-2.5 text-gray-300">Tổng</td>
@@ -1885,6 +1959,18 @@ export default function WeeklyPage() {
                               {Math.round(totalPct * 100) + '%'}
                             </span>
                           </td>
+                          {monthSummary.totalDaysWithReport > 0 && monthSummary.futureDays > 0 && (
+                            <td className="px-3 py-2.5 text-center">
+                              <span className={'inline-block px-2 py-0.5 rounded text-[11px] font-bold ' + (
+                                totalProjectedPct >= 0.9 ? 'bg-emerald-500/15 text-emerald-400' :
+                                totalProjectedPct >= 0.7 ? 'bg-yellow-500/15 text-yellow-400' :
+                                totalProjectedPct >= 0.5 ? 'bg-orange-500/15 text-orange-400' :
+                                totalProjectedPct > 0 ? 'bg-red-500/15 text-red-400' : 'text-gray-600'
+                              )}>
+                                {totalProjectedPct > 0 ? '~' + Math.round(totalProjectedPct * 100) + '%' : '—'}
+                              </span>
+                            </td>
+                          )}
                           <td className="px-3 py-2.5">
                             <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
                               <div
