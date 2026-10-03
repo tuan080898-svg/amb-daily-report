@@ -473,16 +473,49 @@ function isTrackedIn(data: InventoryData, product: string, wh: Warehouse): boole
   return !!(cfg && cfg[wh] && cfg[wh].initialStock > 0);
 }
 
-// Các sản phẩm bán ra nhưng chưa cài tồn đầu ở kho này nên sẽ KHÔNG được trừ kho.
-export function getUntrackedSaleProducts(data: InventoryData, sales: Array<{ product: string; quantity: number }>, wh: Warehouse): string[] {
-  return sales
-    .filter(function(s) { return s.quantity > 0 && !isTrackedIn(data, s.product, wh); })
-    .map(function(s) { return s.product; });
+// Mốc tồn: dòng giao dịch loại 'initial' (số lượng 0) ghi ngày chốt tồn đầu của sản phẩm ở kho.
+// Đơn bán có ngày <= mốc đã nằm sẵn trong số tồn đã chốt nên không được trừ lại.
+export function makeStockBaselineTx(product: string, wh: Warehouse, date: string, note: string): InventoryTransaction {
+  return {
+    id: 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+    date: date,
+    product: product,
+    quantity: 0,
+    type: 'initial',
+    note: note,
+    warehouse: wh,
+  };
+}
+
+function baselineDates(data: InventoryData, wh: Warehouse): Record<string, string> {
+  var out: Record<string, string> = {};
+  data.transactions.forEach(function(t) {
+    if (t.type === 'initial' && t.warehouse === wh && (!out[t.product] || t.date > out[t.product])) out[t.product] = t.date;
+  });
+  return out;
+}
+
+export interface SaleDeductionPlan {
+  deduct: Array<{ product: string; quantity: number }>;
+  noConfig: string[];
+  beforeBaseline: string[];
+}
+
+// Phân loại các dòng bán của một ngày: trừ được / chưa cài tồn đầu / đã nằm trong số tồn chốt.
+export function planSaleDeduction(data: InventoryData, sales: Array<{ product: string; quantity: number }>, date: string, wh: Warehouse): SaleDeductionPlan {
+  var baselines = baselineDates(data, wh);
+  var plan: SaleDeductionPlan = { deduct: [], noConfig: [], beforeBaseline: [] };
+  sales.forEach(function(s) {
+    if (s.quantity <= 0) return;
+    if (!isTrackedIn(data, s.product, wh)) plan.noConfig.push(s.product);
+    else if (baselines[s.product] && date <= baselines[s.product]) plan.beforeBaseline.push(s.product);
+    else plan.deduct.push(s);
+  });
+  return plan;
 }
 
 export function addSaleTransactions(data: InventoryData, sales: Array<{ product: string; quantity: number }>, date: string, shopName: string, wh: Warehouse): InventoryData {
-  var newTxs = sales
-    .filter(function(s) { return s.quantity > 0 && isTrackedIn(data, s.product, wh); })
+  var newTxs = planSaleDeduction(data, sales, date, wh).deduct
     .map(function(s) {
       return {
         id: 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),

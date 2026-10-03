@@ -2,9 +2,10 @@
 
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppState } from '@/lib/store';
+import { toDateString } from '@/lib/utils';
 import { getProductSkuCodes, getAllComboSkus } from '@/lib/sku';
 import {
-  loadInventory, saveInventory, refreshInventory, getCurrentStock, getStockStatus,
+  loadInventory, saveInventory, refreshInventory, makeStockBaselineTx, getCurrentStock, getStockStatus,
   getProductTransactions, getLowStockProducts, getTrackedProducts,
   isProductTracked, getWarehouseConfig, getReorderAlerts,
   WAREHOUSES, WAREHOUSE_LABELS,
@@ -210,6 +211,9 @@ export default function AdminInventoryPage() {
       batchItems.forEach(function(item) {
         if (!updated.products[item.product]) updated.products[item.product] = {};
         updated.products[item.product][opWh] = { initialStock: item.quantity, alertThreshold: configThreshold, leadTimeDays: configLeadTime };
+        if (item.quantity > 0) {
+          updated.transactions = updated.transactions.concat([makeStockBaselineTx(item.product, opWh, toDateString(new Date()), 'Mốc tồn đầu')]);
+        }
         count++;
       });
       setInv(saveInventory(updated));
@@ -627,7 +631,7 @@ export default function AdminInventoryPage() {
                             tx.type === 'import' ? 'bg-emerald-500/15 text-emerald-400' :
                             tx.type === 'sale' ? 'bg-orange-500/15 text-orange-400' :
                             'bg-purple-500/15 text-purple-400'
-                          )}>{tx.type === 'import' ? 'Nhập' : tx.type === 'sale' ? 'Bán' : 'Đ.chỉnh'}</span>
+                          )}>{tx.type === 'import' ? 'Nhập' : tx.type === 'sale' ? 'Bán' : tx.type === 'initial' ? 'Mốc tồn' : 'Đ.chỉnh'}</span>
                         </td>
                         <td className={'px-4 py-2.5 text-right font-semibold ' + (isIn ? 'text-emerald-400' : 'text-red-400')}>
                           {isIn ? '+' : ''}{formatNum(tx.quantity)}
