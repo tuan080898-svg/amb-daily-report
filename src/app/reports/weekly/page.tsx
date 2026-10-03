@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppState } from '@/lib/store';
 import { formatCurrency, getDayType, getTargetForDate, getMktForDate, toDateString } from '@/lib/utils';
 import { DayType, WeeklyAction, ActionStatus, MonthlyPlanNote, ProductTarget } from '@/lib/types';
-import { aggregateProducts } from '@/lib/sku';
+import { aggregateProducts, getSkuProducts } from '@/lib/sku';
 
 interface WeekData {
   weekNum: number;
@@ -555,13 +555,13 @@ export default function WeeklyPage() {
     setTimeout(function() { setCalcSaved(false); }, 2000);
   }
 
-  // Product breakdown: T9 results + T10 plan
-  var prevMonthProducts = useMemo(function() {
-    if (!selectedShopId || !prevMonthStr) return [];
+  // Collect prev month SKU codes (shared between product table and warning)
+  var prevMonthSkuInfo = useMemo(function() {
+    if (!selectedShopId || !prevMonthStr) return { allCodes: [], hasImports: false };
     var shopSkuImports = skuImports.filter(function(s) {
       return s.shopId === selectedShopId && s.dateFrom <= prevMonthStr + '-31' && s.dateTo >= prevMonthStr + '-01';
     });
-    if (shopSkuImports.length === 0) return [];
+    if (shopSkuImports.length === 0) return { allCodes: [], hasImports: false };
 
     var allCodes: string[] = [];
     var lastDay = new Date(parseInt(prevMonthStr.split('-')[0]), parseInt(prevMonthStr.split('-')[1]), 0).getDate();
@@ -573,6 +573,17 @@ export default function WeeklyPage() {
       }
     });
 
+    var unmatchedSet = new Set<string>();
+    allCodes.forEach(function(code) {
+      if (getSkuProducts(code).length === 0) unmatchedSet.add(code.trim());
+    });
+
+    return { allCodes: allCodes, hasImports: true, unmatchedCodes: Array.from(unmatchedSet) };
+  }, [skuImports, selectedShopId, prevMonthStr]);
+
+  // Product breakdown: T9 results + T10 plan
+  var prevMonthProducts = useMemo(function() {
+    var allCodes = prevMonthSkuInfo.allCodes;
     if (allCodes.length === 0) return [];
     var products = aggregateProducts(allCodes);
     var totalQty = products.reduce(function(s, p) { return s + p.totalQuantity; }, 0);
@@ -588,7 +599,7 @@ export default function WeeklyPage() {
         estRevenue: Math.round(prevRevenue * share),
       };
     });
-  }, [skuImports, selectedShopId, prevMonthStr, prevMonthRecap]);
+  }, [prevMonthSkuInfo, prevMonthRecap]);
 
   // Editable product targets for next month
   var [productTargets, setProductTargets] = useState<Record<string, { targetQty: string; targetRevenue: string }>>({});
@@ -1067,6 +1078,25 @@ export default function WeeklyPage() {
                 </div>
               </div>
 
+              {/* Warning: SKU codes not in mapping */}
+              {prevMonthProducts.length === 0 && prevMonthSkuInfo.hasImports && prevMonthSkuInfo.allCodes.length > 0 && prevMonthSkuInfo.unmatchedCodes && prevMonthSkuInfo.unmatchedCodes.length > 0 && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4">
+                  <div className="flex items-start gap-3">
+                    <span className="text-amber-400 text-lg mt-0.5">&#x26A0;</span>
+                    <div>
+                      <p className="text-sm font-medium text-amber-300">Không hiển thị được bảng sản phẩm</p>
+                      <p className="text-xs text-amber-400/80 mt-1">
+                        Có {prevMonthSkuInfo.allCodes.length} mã SKU từ T{parseInt(prevMonthStr.split('-')[1])} nhưng {prevMonthSkuInfo.unmatchedCodes.length} mã chưa có trong bảng quy đổi:
+                        <span className="font-mono ml-1">{prevMonthSkuInfo.unmatchedCodes.slice(0, 5).join(', ')}{prevMonthSkuInfo.unmatchedCodes.length > 5 ? '...' : ''}</span>
+                      </p>
+                      <p className="text-xs text-amber-400/60 mt-1">
+                        Vào <span className="font-medium">Quản lý SKU</span> để thêm mã SKU vào bảng quy đổi sản phẩm.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Product breakdown: T9 results + T10 plan */}
               {prevMonthProducts.length > 0 && (
                 <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-5">
@@ -1212,7 +1242,7 @@ export default function WeeklyPage() {
                 </div>
               )}
 
-              {prevMonthProducts.length === 0 && (
+              {prevMonthProducts.length === 0 && !prevMonthSkuInfo.hasImports && (
                 <div className="bg-slate-900 border border-slate-700/50 rounded-xl p-5">
                   <p className="text-sm text-gray-500 text-center py-4">
                     Chưa có dữ liệu SKU tháng trước cho shop này — import file đơn hàng để thấy phân tích sản phẩm.
