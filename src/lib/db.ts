@@ -1,6 +1,6 @@
 import { supabase } from './supabase';
 import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry, WeeklyAction, MonthlyPlanNote } from './types';
-import type { InventoryData, InventoryTransaction, InventoryConfig, Warehouse } from './inventory';
+import type { InventoryData, InventoryTransaction, InventoryConfig, InventoryPushBatch, Warehouse } from './inventory';
 import { DEFAULT_CONFIG } from './utils';
 import bcrypt from 'bcryptjs';
 
@@ -248,6 +248,19 @@ export async function dbGetSkuMappings(): Promise<Record<string, Array<{ product
   } catch {
     return null;
   }
+}
+
+// Trả null khi file chưa tồn tại; ném lỗi khi lỗi mạng/quyền (để không nhầm "lỗi" với "rỗng").
+export async function dbGetSkuMappingsStrict(): Promise<Record<string, Array<{ product: string; quantity: number }>> | null> {
+  const { data, error } = await db().storage.from(SKU_BUCKET).download(SKU_MAPPINGS_FILE);
+  if (error) {
+    const e = error as { message?: string; statusCode?: string | number; status?: number };
+    const msg = (e.message || '').toLowerCase();
+    if (msg.includes('not found') || String(e.statusCode) === '404' || e.status === 404) return null;
+    throw new Error('Đọc SKU mappings thất bại: ' + (e.message || 'lỗi không rõ'));
+  }
+  if (!data) return null;
+  return JSON.parse(await data.text());
 }
 
 export async function dbSaveSkuMappings(map: Record<string, Array<{ product: string; quantity: number }>>): Promise<void> {
@@ -721,116 +734,100 @@ export async function dbSaveChecklistEntries(list: ChecklistEntry[]): Promise<vo
 
 // ==================== Inventory ====================
 
+// Đọc hết mọi dòng (Supabase giới hạn số dòng mỗi lần trả về nên phải đọc từng trang).
+// Lỗi thì ném ra — không trả về dữ liệu rỗng/thiếu để tránh bị hiểu nhầm là "kho trống".
+async function fetchAllRows<T>(table: string, orderCols: Array<{ col: string; asc: boolean }>): Promise<T[]> {
+  const rows: T[] = [];
+  let from = 0;
+  for (;;) {
+    let q = db().from(table).select('*');
+    orderCols.forEach(function(o) { q = q.order(o.col, { ascending: o.asc }); });
+    const { data, error } = await q.range(from, from + 999);
+    if (error) throw new Error('Đọc ' + table + ' thất bại: ' + error.message);
+    if (!data || data.length === 0) break;
+    rows.push(...(data as T[]));
+    from += data.length;
+  }
+  return rows;
+}
+
 export async function dbGetInventory(): Promise<InventoryData> {
-  const [configRes, txRes] = await Promise.all([
-    db().from('inventory_configs').select('*'),
-    db().from('inventory_transactions').select('*').order('date', { ascending: false }),
+  const [configRows, txRows] = await Promise.all([
+    fetchAllRows<{ product: string; warehouse: string; initial_stock: number; alert_threshold: number; lead_time_days?: number }>(
+      'inventory_configs', [{ col: 'product', asc: true }, { col: 'warehouse', asc: true }]),
+    fetchAllRows<{ id: string; date: string; product: string; quantity: number; type: string; note: string; warehouse: string }>(
+      'inventory_transactions', [{ col: 'date', asc: false }, { col: 'id', asc: true }]),
   ]);
 
   const products: Record<string, Record<string, InventoryConfig>> = {};
-  if (configRes.data) {
-    configRes.data.forEach(function(r: { product: string; warehouse: string; initial_stock: number; alert_threshold: number; lead_time_days?: number }) {
-      if (!products[r.product]) products[r.product] = {};
-      products[r.product][r.warehouse] = {
-        initialStock: r.initial_stock || 0,
-        alertThreshold: r.alert_threshold || 10,
-        leadTimeDays: r.lead_time_days || 10,
-      };
-    });
-  }
+  configRows.forEach(function(r) {
+    if (!products[r.product]) products[r.product] = {};
+    products[r.product][r.warehouse] = {
+      initialStock: r.initial_stock || 0,
+      alertThreshold: r.alert_threshold || 10,
+      leadTimeDays: r.lead_time_days || 10,
+    };
+  });
 
-  const transactions: InventoryTransaction[] = [];
-  if (txRes.data) {
-    txRes.data.forEach(function(r: { id: string; date: string; product: string; quantity: number; type: string; note: string; warehouse: string }) {
-      transactions.push({
-        id: r.id,
-        date: r.date,
-        product: r.product,
-        quantity: r.quantity,
-        type: r.type as InventoryTransaction['type'],
-        note: r.note || '',
-        warehouse: (r.warehouse || 'HCM') as Warehouse,
-      });
-    });
-  }
+  const transactions: InventoryTransaction[] = txRows.map(function(r) {
+    return {
+      id: r.id,
+      date: r.date,
+      product: r.product,
+      quantity: r.quantity,
+      type: r.type as InventoryTransaction['type'],
+      note: r.note || '',
+      warehouse: (r.warehouse || 'HCM') as Warehouse,
+    };
+  });
 
   return { products, transactions };
 }
 
-export async function dbSaveInventory(data: InventoryData): Promise<void> {
-  const configRowsFull: Array<{ product: string; warehouse: string; initial_stock: number; alert_threshold: number; lead_time_days: number }> = [];
-  const configRowsBasic: Array<{ product: string; warehouse: string; initial_stock: number; alert_threshold: number }> = [];
-  Object.entries(data.products).forEach(function(entry) {
-    var product = entry[0];
-    var whConfigs = entry[1];
-    Object.entries(whConfigs).forEach(function(whEntry) {
-      configRowsFull.push({
-        product: product,
-        warehouse: whEntry[0],
-        initial_stock: whEntry[1].initialStock,
-        alert_threshold: whEntry[1].alertThreshold,
-        lead_time_days: whEntry[1].leadTimeDays || 10,
-      });
-      configRowsBasic.push({
-        product: product,
-        warehouse: whEntry[0],
-        initial_stock: whEntry[1].initialStock,
-        alert_threshold: whEntry[1].alertThreshold,
-      });
-    });
-  });
-
+// Gửi các thay đổi lên cloud theo từng dòng. KHÔNG bao giờ xoá dòng nào ngoài danh sách txDel.
+export async function dbPushInventory(batch: InventoryPushBatch): Promise<void> {
   const BATCH = 500;
-  if (configRowsFull.length > 0) {
+
+  const cfgGroups = [
+    { ifAbsent: false, items: batch.cfg.filter(function(c) { return !c.ifAbsent; }) },
+    { ifAbsent: true, items: batch.cfg.filter(function(c) { return c.ifAbsent; }) },
+  ];
+  for (const group of cfgGroups) {
+    if (group.items.length === 0) continue;
+    const full = group.items.map(function(c) {
+      return { product: c.product, warehouse: c.warehouse, initial_stock: c.config.initialStock, alert_threshold: c.config.alertThreshold, lead_time_days: c.config.leadTimeDays || 10 };
+    });
+    const basic = group.items.map(function(c) {
+      return { product: c.product, warehouse: c.warehouse, initial_stock: c.config.initialStock, alert_threshold: c.config.alertThreshold };
+    });
+    const opts = group.ifAbsent ? { onConflict: 'product,warehouse', ignoreDuplicates: true } : { onConflict: 'product,warehouse' };
     let useFull = true;
-    for (let i = 0; i < configRowsFull.length; i += BATCH) {
-      const rows = useFull ? configRowsFull.slice(i, i + BATCH) : configRowsBasic.slice(i, i + BATCH);
-      const { error } = await db().from('inventory_configs').upsert(rows);
+    for (let i = 0; i < full.length; i += BATCH) {
+      const rows = useFull ? full.slice(i, i + BATCH) : basic.slice(i, i + BATCH);
+      const { error } = await db().from('inventory_configs').upsert(rows, opts);
       if (error) {
         if (useFull && error.message.includes('lead_time_days')) {
           useFull = false;
-          const { error: err2 } = await db().from('inventory_configs').upsert(configRowsBasic.slice(i, i + BATCH));
+          const { error: err2 } = await db().from('inventory_configs').upsert(basic.slice(i, i + BATCH), opts);
           if (err2) throw new Error('Lưu config tồn kho thất bại: ' + err2.message);
         } else {
           throw new Error('Lưu config tồn kho thất bại: ' + error.message);
         }
       }
     }
-    const newProducts = new Set(configRowsBasic.map(r => r.product + '|' + r.warehouse));
-    const { data: existing } = await db().from('inventory_configs').select('product, warehouse');
-    if (existing) {
-      const toDelete = existing.filter(r => !newProducts.has(r.product + '|' + r.warehouse));
-      for (const row of toDelete) {
-        await db().from('inventory_configs').delete().eq('product', row.product).eq('warehouse', row.warehouse);
-      }
-    }
   }
 
-  const txRows = data.transactions.map(function(t) {
-    return {
-      id: t.id,
-      date: t.date,
-      product: t.product,
-      quantity: t.quantity,
-      type: t.type,
-      note: t.note,
-      warehouse: t.warehouse || 'HCM',
-    };
+  const txRows = batch.tx.map(function(t) {
+    return { id: t.id, date: t.date, product: t.product, quantity: t.quantity, type: t.type, note: t.note, warehouse: t.warehouse || 'HCM' };
   });
+  for (let i = 0; i < txRows.length; i += BATCH) {
+    const { error } = await db().from('inventory_transactions').upsert(txRows.slice(i, i + BATCH));
+    if (error) throw new Error('Lưu giao dịch tồn kho thất bại: ' + error.message);
+  }
 
-  if (txRows.length > 0) {
-    for (let i = 0; i < txRows.length; i += BATCH) {
-      const { error } = await db().from('inventory_transactions').upsert(txRows.slice(i, i + BATCH));
-      if (error) throw new Error('Lưu giao dịch tồn kho thất bại: ' + error.message);
-    }
-    const newIds = new Set(txRows.map(r => r.id));
-    const { data: existingTx } = await db().from('inventory_transactions').select('id');
-    if (existingTx) {
-      const txToDelete = existingTx.filter(r => !newIds.has(r.id));
-      for (const row of txToDelete) {
-        await db().from('inventory_transactions').delete().eq('id', row.id);
-      }
-    }
+  for (let i = 0; i < batch.txDel.length; i += 100) {
+    const { error } = await db().from('inventory_transactions').delete().in('id', batch.txDel.slice(i, i + 100));
+    if (error) throw new Error('Xoá giao dịch tồn kho thất bại: ' + error.message);
   }
 }
 

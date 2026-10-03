@@ -9,6 +9,7 @@ export interface SkuItem {
 export type SkuMap = Record<string, SkuItem[]>;
 
 const STORAGE_KEY = 'amb_sku_mappings';
+const PENDING_KEY = 'amb_sku_pending';
 
 let cachedMap: SkuMap | null = null;
 let supabaseSynced = false;
@@ -30,25 +31,100 @@ function loadSkuMap(): SkuMap {
   return cachedMap;
 }
 
+// Thay đổi chưa gửi lên cloud được giữ bền vững; mỗi lần gửi là "đọc bản cloud -> áp đúng các thay đổi
+// của máy này -> ghi lại", nên không ghi đè mã SKU do máy khác thêm, và lỗi mạng không làm mất thay đổi.
+interface SkuPending {
+  set: SkuMap;
+  del: string[];
+}
+
+function readPending(): SkuPending {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) as Partial<SkuPending>;
+      return { set: p.set || {}, del: p.del || [] };
+    }
+  } catch (err) {
+    console.error('[SKU] Lỗi đọc thay đổi chờ gửi:', err);
+  }
+  return { set: {}, del: [] };
+}
+
+function writePending(p: SkuPending): void {
+  try {
+    if (Object.keys(p.set).length === 0 && p.del.length === 0) localStorage.removeItem(PENDING_KEY);
+    else localStorage.setItem(PENDING_KEY, JSON.stringify(p));
+  } catch (err) {
+    console.error('[SKU] Lỗi ghi thay đổi chờ gửi:', err);
+  }
+}
+
+function applyPending(base: SkuMap, p: SkuPending): SkuMap {
+  const out: SkuMap = Object.assign({}, base);
+  Object.keys(p.set).forEach(function(code) { out[code] = p.set[code]; });
+  p.del.forEach(function(code) { delete out[code]; });
+  return out;
+}
+
+let skuFlushing = false;
+let skuFlushAgain = false;
+let skuRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function flushSkuPending(): Promise<void> {
+  if (!IS_SUPABASE_CONFIGURED || typeof window === 'undefined') return;
+  if (skuFlushing) { skuFlushAgain = true; return; }
+  skuFlushing = true;
+  try {
+    do {
+      skuFlushAgain = false;
+      const sent = readPending();
+      if (Object.keys(sent.set).length === 0 && sent.del.length === 0) break;
+      const db = await import('./db');
+      const remote = await db.dbGetSkuMappingsStrict();
+      const base: SkuMap = remote ? (remote as SkuMap) : loadSkuMap();
+      const merged = applyPending(base, sent);
+      await db.dbSaveSkuMappings(merged);
+
+      const cur = readPending();
+      Object.keys(sent.set).forEach(function(code) {
+        if (cur.set[code] && JSON.stringify(cur.set[code]) === JSON.stringify(sent.set[code])) delete cur.set[code];
+      });
+      const sentDel = new Set(sent.del);
+      cur.del = cur.del.filter(function(c) { return !sentDel.has(c); });
+      writePending(cur);
+
+      cachedMap = applyPending(merged, cur);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(cachedMap));
+    } while (skuFlushAgain);
+  } catch (err) {
+    console.error('[SKU] Supabase save error (sẽ tự gửi lại):', err);
+    if (skuRetryTimer) clearTimeout(skuRetryTimer);
+    skuRetryTimer = setTimeout(function() { skuRetryTimer = null; flushSkuPending(); }, 15000);
+  } finally {
+    skuFlushing = false;
+  }
+}
+
 export async function initSkuMapFromSupabase(): Promise<void> {
   if (!IS_SUPABASE_CONFIGURED || supabaseSynced) return;
   supabaseSynced = true;
   try {
-    const { dbGetSkuMappings } = await import('./db');
-    const remote = await dbGetSkuMappings();
+    const { dbGetSkuMappingsStrict, dbSaveSkuMappings } = await import('./db');
+    const remote = await dbGetSkuMappingsStrict();
     if (remote && Object.keys(remote).length > 0) {
-      cachedMap = remote as SkuMap;
+      cachedMap = applyPending(remote as SkuMap, readPending());
       localStorage.setItem(STORAGE_KEY, JSON.stringify(cachedMap));
     } else {
       const local = loadSkuMap();
       if (Object.keys(local).length > 0) {
-        const { dbSaveSkuMappings } = await import('./db');
         await dbSaveSkuMappings(local);
       }
     }
   } catch (err) {
     console.error('[SKU] Supabase sync error:', err);
   }
+  flushSkuPending();
 }
 
 export function getSkuMap(): SkuMap {
@@ -56,14 +132,25 @@ export function getSkuMap(): SkuMap {
 }
 
 export function saveSkuMap(map: SkuMap): void {
+  const prev = loadSkuMap();
+  const pending = readPending();
+  Object.keys(map).forEach(function(code) {
+    if (JSON.stringify(prev[code]) !== JSON.stringify(map[code])) {
+      pending.set[code] = map[code];
+      pending.del = pending.del.filter(function(c) { return c !== code; });
+    }
+  });
+  Object.keys(prev).forEach(function(code) {
+    if (!(code in map)) {
+      delete pending.set[code];
+      if (pending.del.indexOf(code) < 0) pending.del.push(code);
+    }
+  });
   cachedMap = map;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
   if (IS_SUPABASE_CONFIGURED) {
-    import('./db').then(function(db) {
-      return db.dbSaveSkuMappings(map);
-    }).catch(function(err) {
-      console.error('[SKU] Supabase save error:', err);
-    });
+    writePending(pending);
+    flushSkuPending();
   }
 }
 

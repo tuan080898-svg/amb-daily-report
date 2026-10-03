@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppState } from '@/lib/store';
 import { getProductSkuCodes, getAllComboSkus } from '@/lib/sku';
 import {
-  loadInventory, saveInventory, getCurrentStock, getStockStatus,
+  loadInventory, saveInventory, refreshInventory, getCurrentStock, getStockStatus,
   getProductTransactions, getLowStockProducts, getTrackedProducts,
   isProductTracked, getWarehouseConfig, getReorderAlerts,
   WAREHOUSES, WAREHOUSE_LABELS,
@@ -37,7 +37,12 @@ export default function AdminInventoryPage() {
   const [excelPreview, setExcelPreview] = useState<Array<{ product: string; qtyHCM: number; qtyHN: number; matched: boolean }> | null>(null);
   const [excelDualMode, setExcelDualMode] = useState(false);
 
-  useEffect(function() { setInv(loadInventory()); }, []);
+  useEffect(function() {
+    var alive = true;
+    setInv(loadInventory());
+    refreshInventory().then(function(fresh) { if (alive) setInv(fresh); });
+    return function() { alive = false; };
+  }, []);
 
   useEffect(function() {
     function handleClickOutside(e: MouseEvent) {
@@ -172,7 +177,7 @@ export default function AdminInventoryPage() {
         }]);
         count++;
       });
-      saveInventory(updated); setInv(updated);
+      setInv(saveInventory(updated));
       showSuccess('Đã nhập ' + whLabel + ': ' + count + ' sản phẩm');
     } else if (activeTab === 'export') {
       validItems.forEach(function(item) {
@@ -184,7 +189,7 @@ export default function AdminInventoryPage() {
         }]);
         count++;
       });
-      saveInventory(updated); setInv(updated);
+      setInv(saveInventory(updated));
       showSuccess('Đã trừ ' + whLabel + ': ' + count + ' sản phẩm');
     } else if (activeTab === 'audit') {
       batchItems.forEach(function(item) {
@@ -199,7 +204,7 @@ export default function AdminInventoryPage() {
         }]);
         count++;
       });
-      saveInventory(updated); setInv(updated);
+      setInv(saveInventory(updated));
       showSuccess(count > 0 ? 'Đã cân đối ' + whLabel + ': ' + count + ' SP' : 'Tồn kho khớp');
     } else if (activeTab === 'config') {
       batchItems.forEach(function(item) {
@@ -207,7 +212,7 @@ export default function AdminInventoryPage() {
         updated.products[item.product][opWh] = { initialStock: item.quantity, alertThreshold: configThreshold, leadTimeDays: configLeadTime };
         count++;
       });
-      saveInventory(updated); setInv(updated);
+      setInv(saveInventory(updated));
       showSuccess('Đã cài đặt ' + whLabel + ': ' + count + ' sản phẩm');
     }
     setBatchItems([]); setOpNote('');
@@ -297,8 +302,7 @@ export default function AdminInventoryPage() {
         count++;
       }
     });
-    saveInventory(updated);
-    setInv(updated);
+    setInv(saveInventory(updated));
     setExcelPreview(null);
     var whInfo = excelDualMode ? 'Kho HCM + Kho HN' : WAREHOUSE_LABELS[opWh];
     showSuccess('Đã nhập ' + whInfo + ': ' + matched.length + ' sản phẩm từ Excel');

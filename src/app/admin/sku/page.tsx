@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAppState } from '@/lib/store';
 import { getSkuMap, saveSkuMap, invalidateCache, type SkuItem, type SkuMap } from '@/lib/sku';
-import { loadInventory, saveInventory } from '@/lib/inventory';
+import { loadInventory, saveInventory, inventoryConfigKey } from '@/lib/inventory';
 import * as XLSX from 'xlsx';
 
 interface EditingItem {
@@ -221,16 +221,18 @@ export default function AdminSkuPage() {
     setSkuMap(getSkuMap());
 
     var newProducts: string[] = [];
+    var newConfigKeys: string[] = [];
     var inv = loadInventory();
     validItems.forEach(function(it) {
       var name = it.product.trim();
       if (name && !inv.products[name]) {
         inv.products[name] = { HCM: { initialStock: 0, alertThreshold: 10, leadTimeDays: 10 }, HN: { initialStock: 0, alertThreshold: 10, leadTimeDays: 10 } };
         newProducts.push(name);
+        newConfigKeys.push(inventoryConfigKey(name, 'HCM'), inventoryConfigKey(name, 'HN'));
       }
     });
     if (newProducts.length > 0) {
-      saveInventory(inv);
+      saveInventory(inv, { configIfAbsent: newConfigKeys });
     }
 
     var costVal = parseInt(editing.cost) || 0;

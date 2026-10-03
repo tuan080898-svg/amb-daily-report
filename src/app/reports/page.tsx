@@ -6,7 +6,7 @@ import { toDateString, getDailyTarget, getTargetForDate, getDayType, formatCurre
 import { DailyReport, Shop, PnlImport, PnlDailyData } from '@/lib/types';
 import * as XLSX from 'xlsx';
 import { aggregateProducts, getSkuProducts, ProductSummary } from '@/lib/sku';
-import { loadInventory, addSaleTransactions, type Warehouse } from '@/lib/inventory';
+import { loadInventory, addSaleTransactions, getUntrackedSaleProducts, type Warehouse } from '@/lib/inventory';
 
 export default function ReportFormPage() {
   return (
@@ -928,6 +928,7 @@ function FileUploadForm() {
 
     var inventoryDeducted = 0;
     var inventoryByWh: Record<string, number> = {};
+    var untrackedProducts = new Set<string>();
     if (totalSkuCount > 0) {
       try {
         var invData = loadInventory();
@@ -951,8 +952,10 @@ function FileUploadForm() {
               });
               var sales = Object.entries(productQty).map(function(e) { return { product: e[0], quantity: e[1] }; });
               if (sales.length > 0) {
+                var skippedWh = getUntrackedSaleProducts(invData, sales, wh);
+                skippedWh.forEach(function(p) { untrackedProducts.add(p); });
                 invData = addSaleTransactions(invData, sales, date, shopLabel, wh);
-                var deducted = sales.reduce(function(s, x) { return s + x.quantity; }, 0);
+                var deducted = sales.reduce(function(s, x) { return skippedWh.indexOf(x.product) >= 0 ? s : s + x.quantity; }, 0);
                 inventoryDeducted += deducted;
                 inventoryByWh[wh] = (inventoryByWh[wh] || 0) + deducted;
               }
@@ -971,8 +974,10 @@ function FileUploadForm() {
             });
             var sales = Object.entries(productQty).map(function(e) { return { product: e[0], quantity: e[1] }; });
             if (sales.length > 0) {
+              var skippedRegion = getUntrackedSaleProducts(invData, sales, shopRegion);
+              skippedRegion.forEach(function(p) { untrackedProducts.add(p); });
               invData = addSaleTransactions(invData, sales, date, shopLabel, shopRegion);
-              inventoryDeducted += sales.reduce(function(s, x) { return s + x.quantity; }, 0);
+              inventoryDeducted += sales.reduce(function(s, x) { return skippedRegion.indexOf(x.product) >= 0 ? s : s + x.quantity; }, 0);
             }
           });
         }
@@ -1016,7 +1021,11 @@ function FileUploadForm() {
       }
     }
     if (pnlGenerated) parts.push('PnL tự động');
-    setSuccess('Đã import: ' + parts.join(', '));
+    var untrackedList = Array.from(untrackedProducts);
+    var untrackedWarn = untrackedList.length > 0
+      ? ' | ⚠ ' + untrackedList.length + ' SP chưa cài tồn đầu nên CHƯA trừ kho: ' + untrackedList.slice(0, 5).join(', ') + (untrackedList.length > 5 ? '...' : '')
+      : '';
+    setSuccess('Đã import: ' + parts.join(', ') + untrackedWarn);
 
     setParsedRows([]);
     setFileNames([]);

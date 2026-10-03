@@ -23,7 +23,7 @@ import {
   dbGetWeeklyActions, dbAddWeeklyAction, dbUpdateWeeklyAction, dbDeleteWeeklyAction,
   dbGetMonthlyPlanNotes, dbSaveMonthlyPlanNote,
 } from '@/lib/db';
-import { hydrateInventory } from '@/lib/inventory';
+import { hydrateInventory, flushInventoryOutbox } from '@/lib/inventory';
 import { initSkuMapFromSupabase } from '@/lib/sku';
 
 const IS_SUPABASE = IS_SUPABASE_CONFIGURED;
@@ -54,11 +54,15 @@ export default function AppProvider({ children }: { children: ReactNode }) {
         const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss, cogsData, pnlCfg, pnlImps, clTasks, clEntries, invData, wkActions, planNotes] = await Promise.all([
           dbGetUsers(), dbGetShops(), dbGetReports(), dbGetKPIs(), dbGetPlans(), dbGetConfig(), dbGetSkuImports(), dbGetAnalytics(),
           dbGetCskhReviews(), dbGetCskhIssues(), dbGetCogs(), dbGetPnlConfig(), dbGetPnlImports(),
-          dbGetChecklistTasks(), dbGetChecklistEntries(), dbGetInventory(), dbGetWeeklyActions(),
+          dbGetChecklistTasks(), dbGetChecklistEntries(),
+          dbGetInventory().catch(function(e) { console.error('[Inventory] Không đọc được kho từ cloud, dùng bản trên máy:', e); return null; }),
+          dbGetWeeklyActions(),
           dbGetMonthlyPlanNotes(),
         ]);
-        if (invData && (invData.transactions.length > 0 || Object.keys(invData.products).length > 0)) {
+        if (invData) {
           hydrateInventory(invData);
+        } else {
+          flushInventoryOutbox();
         }
         initSkuMapFromSupabase().catch(function(e) { console.error('[SKU] init sync error:', e); });
         if (cancelled) return;

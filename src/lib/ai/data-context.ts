@@ -3,7 +3,7 @@ import {
   dbGetInventory, dbGetCskhReviews, dbGetCskhIssues, dbGetCogs,
   dbGetSkuImports, dbGetPnlImports, dbGetChecklistEntries, dbGetChecklistTasks,
 } from '@/lib/db';
-import { getCurrentStock, getReorderAlerts, getSalesVelocity } from '@/lib/inventory';
+import { getCurrentStock, getReorderAlerts, getSalesVelocity, type InventoryData } from '@/lib/inventory';
 import type { User, Shop, DailyReport, MonthlyKPI } from '@/lib/types';
 
 function fmt(n: number): string {
@@ -216,7 +216,13 @@ function buildKPIContext(kpis: MonthlyKPI[], shops: Shop[], reports: DailyReport
 }
 
 async function buildInventoryContext(): Promise<string> {
-  var invData = await dbGetInventory();
+  var invData: InventoryData;
+  try {
+    invData = await dbGetInventory();
+  } catch (err) {
+    console.error('[AI] Không đọc được tồn kho:', err);
+    return '';
+  }
   if (!invData || Object.keys(invData.products).length === 0) return '';
 
   var alerts = getReorderAlerts(invData);
