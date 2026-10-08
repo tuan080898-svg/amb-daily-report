@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { buildBookingSnapshot } from '@/lib/lark-booking-server';
-import { readBookingSnapshotText, writeBookingSnapshotText } from '@/lib/booking-store';
+import { readBookingSnapshotText, writeBookingSnapshotText, setCachedBookingSnapshot } from '@/lib/booking-store';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -11,6 +11,7 @@ let inFlight: Promise<{ generatedAt: string; contactRows: number; scheduleRows: 
 async function sync() {
   const snap = await buildBookingSnapshot();
   await writeBookingSnapshotText(JSON.stringify(snap));
+  setCachedBookingSnapshot(snap);
   return { generatedAt: snap.generatedAt, contactRows: snap.meta.contactRows, scheduleRows: snap.meta.scheduleRows };
 }
 

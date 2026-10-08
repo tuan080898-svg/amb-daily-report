@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { BookingSnapshot, Granularity, NO_PRODUCT, buildBookingReport, todayVn, addDays } from '@/lib/booking';
+import { BookingSnapshot, BookingLive, Granularity, NO_PRODUCT, buildBookingReport, mergeLive, todayVn, addDays } from '@/lib/booking';
 
 type Preset = '7d' | '30d' | 'month' | '90d' | 'all';
 
@@ -20,7 +20,7 @@ const GRANS: Array<{ key: Granularity; label: string }> = [
   { key: 'month', label: 'Tháng' },
 ];
 
-const STALE_MS = 6 * 3600 * 1000;
+const STALE_MS = 26 * 3600 * 1000;
 
 function presetRange(p: Preset): { from: string; to: string } {
   const today = todayVn();
@@ -73,10 +73,13 @@ function ChartTip(props: { active?: boolean; payload?: Array<{ name: string; val
 }
 
 export default function BookingPage() {
-  const [snap, setSnap] = useState<BookingSnapshot | null>(null);
+  const [baseSnap, setBaseSnap] = useState<BookingSnapshot | null>(null);
+  const [live, setLive] = useState<BookingLive | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [liveLoading, setLiveLoading] = useState(false);
   const [error, setError] = useState('');
+  const [tick, setTick] = useState(0);
   const [preset, setPreset] = useState<Preset>('30d');
   const [from, setFrom] = useState(presetRange('30d').from);
   const [to, setTo] = useState(presetRange('30d').to);
@@ -84,40 +87,67 @@ export default function BookingPage() {
   const [product, setProduct] = useState(-1);
   const [gran, setGran] = useState<Granularity>('day');
   const [unique, setUnique] = useState(true);
+  const baseRef = useRef<BookingSnapshot | null>(null);
+  const liveBusy = useRef(false);
 
-  const loadSnapshot = useCallback(async function(): Promise<BookingSnapshot | null> {
+  const snap = useMemo(function() { return baseSnap ? mergeLive(baseSnap, live) : null; }, [baseSnap, live]);
+
+  const loadBase = useCallback(async function(): Promise<BookingSnapshot | null> {
     const res = await fetch('/api/lark-booking', { cache: 'no-store' });
     if (res.status === 404) return null;
     const json = await res.json();
     if (json.error) throw new Error(json.error);
-    return json as BookingSnapshot;
+    return json.version === 2 ? (json as BookingSnapshot) : null;
   }, []);
 
-  const runSync = useCallback(async function(): Promise<void> {
+  // Đọc trực tiếp từ Lark phần dữ liệu từ đầu tháng (vài giây)
+  const refreshLive = useCallback(async function(): Promise<void> {
+    const base = baseRef.current;
+    if (!base || liveBusy.current) return;
+    liveBusy.current = true;
+    setLiveLoading(true);
+    try {
+      const res = await fetch('/api/lark-booking/live?base=' + encodeURIComponent(base.generatedAt), { cache: 'no-store' });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error === 'base-mismatch' ? 'Dữ liệu lịch sử vừa được cập nhật, hãy tải lại trang' : json.error);
+      if (json.baseGeneratedAt === base.generatedAt) { setLive(json as BookingLive); setError(''); }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Không đọc được dữ liệu trực tiếp từ Lark');
+    } finally {
+      liveBusy.current = false;
+      setLiveLoading(false);
+    }
+  }, []);
+
+  // Đọc lại toàn bộ lịch sử từ Lark (khoảng 30 giây)
+  const runFullSync = useCallback(async function(): Promise<void> {
     setSyncing(true);
     setError('');
     try {
       const res = await fetch('/api/lark-booking/sync', { cache: 'no-store' });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      const fresh = await loadSnapshot();
-      if (fresh) setSnap(fresh);
+      const fresh = await loadBase();
+      if (fresh) { baseRef.current = fresh; setBaseSnap(fresh); setLive(null); }
+      await refreshLive();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Không cập nhật được từ Lark');
     } finally {
       setSyncing(false);
     }
-  }, [loadSnapshot]);
+  }, [loadBase, refreshLive]);
 
   useEffect(function() {
     let alive = true;
     (async function() {
       try {
-        const s = await loadSnapshot();
+        const b = await loadBase();
         if (!alive) return;
-        setSnap(s);
+        baseRef.current = b;
+        setBaseSnap(b);
         setLoading(false);
-        if (!s || Date.now() - Date.parse(s.generatedAt) > STALE_MS) runSync();
+        if (!b || Date.now() - Date.parse(b.generatedAt) > STALE_MS) await runFullSync();
+        else await refreshLive();
       } catch (e) {
         if (!alive) return;
         setError(e instanceof Error ? e.message : 'Không tải được dữ liệu booking');
@@ -125,7 +155,18 @@ export default function BookingPage() {
       }
     })();
     return function() { alive = false; };
-  }, [loadSnapshot, runSync]);
+  }, [loadBase, runFullSync, refreshLive]);
+
+  // Tự làm mới mỗi phút khi đang xem; quay lại tab thì làm mới ngay
+  useEffect(function() {
+    const id = setInterval(function() {
+      setTick(function(t) { return t + 1; });
+      if (document.visibilityState === 'visible') refreshLive();
+    }, 60000);
+    function onVisible() { if (document.visibilityState === 'visible') refreshLive(); }
+    document.addEventListener('visibilitychange', onVisible);
+    return function() { clearInterval(id); document.removeEventListener('visibilitychange', onVisible); };
+  }, [refreshLive]);
 
   function applyPreset(p: Preset) {
     const r = presetRange(p);
@@ -153,7 +194,7 @@ export default function BookingPage() {
         ) : (
           <>
             <p className="text-sm text-slate-400">Chưa có dữ liệu booking.</p>
-            <button onClick={runSync} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg">Lấy dữ liệu từ Lark</button>
+            <button onClick={runFullSync} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded-lg">Lấy dữ liệu từ Lark</button>
           </>
         )}
         {error && <p className="text-sm text-rose-400">Lỗi: {error}</p>}
@@ -162,6 +203,7 @@ export default function BookingPage() {
   }
 
   const r = report!;
+  void tick;
   const periodLabel = fmtDate(from) + ' → ' + (to > todayVn() ? 'nay' : fmtDate(to));
   const noProductRow = r.byProduct.find(function(x) { return x.name === NO_PRODUCT; });
   const noProductContacted = noProductRow ? noProductRow.contacted - noProductRow.booked : 0;
@@ -174,13 +216,22 @@ export default function BookingPage() {
         <div>
           <h1 className="text-lg font-semibold text-gray-100">Báo cáo booking KOC</h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Dữ liệu từ Lark Base, cập nhật {ago(snap.generatedAt)} · {fmt(snap.meta.contactRows)} KOC đã liên hệ · {fmt(snap.meta.scheduleRows)} lượt hẹn lên video
+            {live
+              ? 'Từ ' + fmtDate(live.liveFrom).slice(0, 5) + ' đọc trực tiếp từ Lark (cập nhật ' + ago(live.generatedAt) + '); dữ liệu cũ hơn cập nhật ' + ago(snap.generatedAt)
+              : 'Dữ liệu từ Lark Base, cập nhật ' + ago(snap.generatedAt)}
+            {' · '}{fmt(snap.meta.contactRows)} KOC đã liên hệ · {fmt(snap.meta.scheduleRows)} lượt hẹn lên video
           </p>
         </div>
-        <button onClick={runSync} disabled={syncing}
-          className={'px-3 py-1.5 text-sm rounded-lg border ' + (syncing ? 'border-slate-700 text-slate-500' : 'border-slate-600 text-slate-200 hover:bg-slate-800')}>
-          {syncing ? 'Đang cập nhật từ Lark...' : 'Làm mới từ Lark'}
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={refreshLive} disabled={liveLoading || syncing}
+            className={'px-3 py-1.5 text-sm rounded-lg border ' + (liveLoading || syncing ? 'border-slate-700 text-slate-500' : 'border-slate-600 text-slate-200 hover:bg-slate-800')}>
+            {liveLoading ? 'Đang đọc từ Lark...' : 'Làm mới'}
+          </button>
+          <button onClick={runFullSync} disabled={syncing} title="Đọc lại toàn bộ lịch sử từ Lark (khoảng 30 giây)"
+            className={'px-3 py-1.5 text-xs rounded-lg border ' + (syncing ? 'border-slate-700 text-slate-500' : 'border-slate-700 text-slate-400 hover:bg-slate-800')}>
+            {syncing ? 'Đang cập nhật lịch sử...' : 'Cập nhật cả lịch sử'}
+          </button>
+        </div>
       </div>
       {error && <p className="text-sm text-rose-400">Lỗi cập nhật: {error}</p>}
 

@@ -1,4 +1,4 @@
-import { BookingSnapshot, ContactRow, ScheduleRow, UNKNOWN_STAFF, splitProducts, stageOf, toVnDate, STAGE } from './booking';
+import { BookingSnapshot, BookingLive, ContactRow, ScheduleRow, UNKNOWN_STAFF, splitProducts, stageOf, toVnDate, STAGE } from './booking';
 
 const LARK_API = 'https://open.larksuite.com/open-apis';
 
@@ -91,7 +91,9 @@ async function resolveColumns(baseToken: string, tableId: string, specs: ColSpec
   return out;
 }
 
-async function fetchTable(baseToken: string, tableId: string, fieldNames: string[]): Promise<LarkRecord[]> {
+interface LarkFilter { conjunction: 'and'; conditions: Array<{ field_name: string; operator: string; value: string[] }> }
+
+async function fetchTable(baseToken: string, tableId: string, fieldNames: string[], filter?: LarkFilter): Promise<LarkRecord[]> {
   const items: LarkRecord[] = [];
   let pageToken: string | undefined;
   do {
@@ -103,7 +105,7 @@ async function fetchTable(baseToken: string, tableId: string, fieldNames: string
       const res = await fetch(url, {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ field_names: fieldNames }),
+        body: JSON.stringify(filter ? { field_names: fieldNames, filter: filter } : { field_names: fieldNames }),
       });
       json = await res.json();
       if (json && json.code === 0) break;
@@ -118,29 +120,54 @@ async function fetchTable(baseToken: string, tableId: string, fieldNames: string
   return items;
 }
 
-export async function buildBookingSnapshot(): Promise<BookingSnapshot> {
+// Lọc các dòng có ngày từ liveFrom trở đi (lùi thêm 1 ngày cho chắc, dòng thừa được bỏ sau khi đọc)
+function sinceFilter(dateField: string, liveFrom: string): LarkFilter {
+  const ms = Date.parse(liveFrom + 'T00:00:00+07:00') - 86400000;
+  return { conjunction: 'and', conditions: [{ field_name: dateField, operator: 'isGreater', value: ['ExactDate', String(ms)] }] };
+}
+
+interface ReadResult {
+  staff: string[];
+  products: string[];
+  kocs: string[];
+  contacts: ContactRow[];
+  schedules: ScheduleRow[];
+  skippedNoDate: number;
+  tables: Array<{ name: string; rows: number }>;
+}
+
+// Đọc các bảng booking từ Lark. Không truyền opts = đọc toàn bộ. Có liveFrom = chỉ đọc các dòng từ ngày đó trở đi,
+// dùng từ điển (nhân sự, sản phẩm, KOC) của bản lưu sẵn để mã số khớp nhau khi ghép.
+async function readBooking(opts: { base?: BookingSnapshot; liveFrom?: string }): Promise<ReadResult> {
   const baseToken = process.env.LARK_BOOKING_BASE_TOKEN || '';
   if (!process.env.LARK_APP_ID || !process.env.LARK_APP_SECRET) throw new Error('Chưa cấu hình LARK_APP_ID / LARK_APP_SECRET');
   if (!baseToken) throw new Error('Chưa cấu hình LARK_BOOKING_BASE_TOKEN');
+  const liveFrom = opts.liveFrom;
 
   const results = await Promise.all([
     Promise.all(CONTACT_TABLES.map(async function(t) {
       const cols = await resolveColumns(baseToken, t.tableId, CONTACT_COLS);
-      return { cols: cols, records: await fetchTable(baseToken, t.tableId, Object.values(cols)) };
+      const filter = liveFrom ? sinceFilter(cols.date, liveFrom) : undefined;
+      return { cols: cols, records: await fetchTable(baseToken, t.tableId, Object.values(cols), filter) };
     })),
     (async function() {
       const cols = await resolveColumns(baseToken, SCHEDULE_TABLE, SCHEDULE_COLS);
-      return { cols: cols, records: await fetchTable(baseToken, SCHEDULE_TABLE, Object.values(cols)) };
+      const filter = liveFrom ? sinceFilter(cols.date, liveFrom) : undefined;
+      return { cols: cols, records: await fetchTable(baseToken, SCHEDULE_TABLE, Object.values(cols), filter) };
     })(),
   ]);
   const contactTables = results[0];
   const scheduleRecords = results[1].records;
   const scheduleCols = results[1].cols;
 
-  const staff: string[] = CONTACT_TABLES.map(function(t) { return t.staff; });
-  const products: string[] = [];
+  const base = opts.base;
+  const staff: string[] = base ? base.staff.slice() : CONTACT_TABLES.map(function(t) { return t.staff; });
+  const products: string[] = base ? base.products.slice() : [];
+  const kocs: string[] = base ? base.kocs.slice() : [];
   const productIdx = new Map<string, number>();
   const kocIdx = new Map<string, number>();
+  products.forEach(function(n, i) { productIdx.set(n, i); });
+  kocs.forEach(function(k, i) { kocIdx.set(k, i); });
   let skippedNoDate = 0;
 
   function productIds(raw: string | string[]): number[] {
@@ -153,9 +180,10 @@ export async function buildBookingSnapshot(): Promise<BookingSnapshot> {
   function kocId(name: string, code: string, fallback: string): number {
     const key = (name.replace(/^@/, '').trim().toLowerCase()) || code.trim().toLowerCase() || fallback;
     let i = kocIdx.get(key);
-    if (i === undefined) { i = kocIdx.size; kocIdx.set(key, i); }
+    if (i === undefined) { i = kocs.length; kocs.push(key); kocIdx.set(key, i); }
     return i;
   }
+  const tooOld = function(date: string): boolean { return !!liveFrom && date < liveFrom; };
 
   const contacts: ContactRow[] = [];
   contactTables.forEach(function(tbl, ti) {
@@ -166,6 +194,7 @@ export async function buildBookingSnapshot(): Promise<BookingSnapshot> {
       if (stage === STAGE.NONE) return;
       const date = toVnDate(f[c.date]);
       if (!date) { skippedNoDate++; return; }
+      if (tooOld(date)) return;
       const pv = c.product ? f[c.product] : '';
       const rawProducts = Array.isArray(pv) ? (pv as unknown[]).map(flat) : flat(pv);
       contacts.push([date, ti, stage, kocId(c.name ? flat(f[c.name]) : '', c.code ? flat(f[c.code]) : '', 'c-' + rec.record_id), productIds(rawProducts)]);
@@ -178,6 +207,7 @@ export async function buildBookingSnapshot(): Promise<BookingSnapshot> {
     const sc = scheduleCols;
     const date = toVnDate(f[sc.date]);
     if (!date) { skippedNoDate++; return; }
+    if (tooOld(date)) return;
     const rawStaff = sc.staff ? flat(f[sc.staff]).trim() : '';
     const sName = rawStaff || UNKNOWN_STAFF;
     let si = staff.indexOf(sName);
@@ -187,17 +217,33 @@ export async function buildBookingSnapshot(): Promise<BookingSnapshot> {
   });
 
   return {
-    version: 1,
-    generatedAt: new Date().toISOString(),
     staff: staff,
     products: products,
+    kocs: kocs,
     contacts: contacts,
     schedules: schedules,
-    meta: {
-      contactRows: contacts.length,
-      scheduleRows: schedules.length,
-      skippedNoDate: skippedNoDate,
-      tables: CONTACT_TABLES.map(function(t, i) { return { name: t.staff, rows: contactTables[i].records.length }; }).concat([{ name: 'Lịch ON AIR', rows: scheduleRecords.length }]),
-    },
+    skippedNoDate: skippedNoDate,
+    tables: CONTACT_TABLES.map(function(t, i) { return { name: t.staff, rows: contactTables[i].records.length }; }).concat([{ name: 'Lịch ON AIR', rows: scheduleRecords.length }]),
   };
+}
+
+// Đọc toàn bộ (làm bản lưu sẵn cho phần lịch sử)
+export async function buildBookingSnapshot(): Promise<BookingSnapshot> {
+  const r = await readBooking({});
+  return {
+    version: 2,
+    generatedAt: new Date().toISOString(),
+    staff: r.staff,
+    products: r.products,
+    kocs: r.kocs,
+    contacts: r.contacts,
+    schedules: r.schedules,
+    meta: { contactRows: r.contacts.length, scheduleRows: r.schedules.length, skippedNoDate: r.skippedNoDate, tables: r.tables },
+  };
+}
+
+// Đọc trực tiếp phần mới (từ liveFrom trở đi) để ghép lên bản lưu sẵn
+export async function buildBookingLive(base: BookingSnapshot, liveFrom: string): Promise<BookingLive> {
+  const r = await readBooking({ base: base, liveFrom: liveFrom });
+  return { generatedAt: new Date().toISOString(), baseGeneratedAt: base.generatedAt, liveFrom: liveFrom, staff: r.staff, products: r.products, contacts: r.contacts, schedules: r.schedules };
 }

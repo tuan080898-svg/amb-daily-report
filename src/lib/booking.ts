@@ -13,13 +13,42 @@ export type ContactRow = [string, number, number, number, number[]];
 export type ScheduleRow = [string, number, number, number, number[]];
 
 export interface BookingSnapshot {
-  version: 1;
+  version: 2;
   generatedAt: string;
+  staff: string[];
+  products: string[];
+  kocs: string[];
+  contacts: ContactRow[];
+  schedules: ScheduleRow[];
+  meta: { contactRows: number; scheduleRows: number; skippedNoDate: number; tables: Array<{ name: string; rows: number }> };
+}
+
+// Phần dữ liệu đọc trực tiếp từ Lark (các dòng từ liveFrom trở đi). Từ điển staff/products mở rộng từ bản lưu sẵn (giữ nguyên mã số cũ).
+export interface BookingLive {
+  generatedAt: string;
+  baseGeneratedAt: string;
+  liveFrom: string;
   staff: string[];
   products: string[];
   contacts: ContactRow[];
   schedules: ScheduleRow[];
-  meta: { contactRows: number; scheduleRows: number; skippedNoDate: number; tables: Array<{ name: string; rows: number }> };
+}
+
+// Ghép: giữ phần lịch sử (trước liveFrom) của bản lưu sẵn, thay phần từ liveFrom bằng dữ liệu trực tiếp
+export function mergeLive(base: BookingSnapshot, live: BookingLive | null): BookingSnapshot {
+  if (!live) return base;
+  const contacts = base.contacts.filter(function(r) { return r[0] < live.liveFrom; }).concat(live.contacts);
+  const schedules = base.schedules.filter(function(r) { return r[0] < live.liveFrom; }).concat(live.schedules);
+  return {
+    version: base.version,
+    generatedAt: base.generatedAt,
+    staff: live.staff,
+    products: live.products,
+    kocs: base.kocs,
+    contacts: contacts,
+    schedules: schedules,
+    meta: { contactRows: contacts.length, scheduleRows: schedules.length, skippedNoDate: base.meta.skippedNoDate, tables: base.meta.tables },
+  };
 }
 
 export function stageOf(raw: string): number {
