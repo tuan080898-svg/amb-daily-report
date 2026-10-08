@@ -48,6 +48,7 @@ function getPageTitle(pathname: string): string {
     '/reports/analytics': 'Phân tích',
     '/cskh': 'CSKH Dashboard',
     '/cskh/report': 'Báo cáo CSKH',
+    '/booking': 'Báo cáo Booking KOC',
     '/checklist': 'Checklist',
     '/admin/pnl': 'Lãi lỗ (PnL)',
     '/admin/sku': 'Quản lý SKU',

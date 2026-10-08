@@ -51,6 +51,14 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    key: 'booking',
+    label: 'Booking KOC',
+    icon: '🎬',
+    items: [
+      { href: '/booking', label: 'Báo cáo booking', icon: '🎬', roles: ['admin', 'employee'] },
+    ],
+  },
+  {
     key: 'admin',
     label: 'Quản trị',
     icon: '⚙️',
