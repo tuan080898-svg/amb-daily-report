@@ -4,9 +4,10 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { BookingSnapshot, BookingLive, Granularity, NO_PRODUCT, buildBookingReport, mergeLive, todayVn, addDays } from '@/lib/booking';
 
-type Preset = '7d' | '30d' | 'month' | '90d' | 'all';
+type Preset = 'today' | '7d' | '30d' | 'month' | '90d' | 'all';
 
 const PRESETS: Array<{ key: Preset; label: string }> = [
+  { key: 'today', label: 'Hôm nay' },
   { key: '7d', label: '7 ngày' },
   { key: '30d', label: '30 ngày' },
   { key: 'month', label: 'Tháng này' },
@@ -24,6 +25,7 @@ const STALE_MS = 26 * 3600 * 1000;
 
 function presetRange(p: Preset): { from: string; to: string } {
   const today = todayVn();
+  if (p === 'today') return { from: today, to: today };
   if (p === '7d') return { from: addDays(today, -6), to: today };
   if (p === '30d') return { from: addDays(today, -29), to: today };
   if (p === '90d') return { from: addDays(today, -89), to: today };
