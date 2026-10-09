@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { useAppState } from '@/lib/store';
 import { toDateString } from '@/lib/utils';
-import { aggregateProducts, getAllSkuCodes } from '@/lib/sku';
+import { aggregateProducts, getAllSkuCodes, getSkuProducts, subscribeSkuMap } from '@/lib/sku';
 import { Channel } from '@/lib/types';
 
 function getMonthStart(d: Date): string {
@@ -81,10 +81,31 @@ export default function SkuReportPage() {
     });
   }, [filteredImports, dateFrom, dateTo]);
 
+  const [skuVer, setSkuVer] = useState(0);
+  useEffect(function() { return subscribeSkuMap(function() { setSkuVer(function(v) { return v + 1; }); }); }, []);
+
   const productSummary = useMemo(function() {
     if (allSkuCodes.length === 0) return [];
     return aggregateProducts(allSkuCodes);
-  }, [allSkuCodes]);
+  }, [allSkuCodes, skuVer]);
+
+  // Mã SKU đã bán của từng sản phẩm trong kỳ (xếp theo số lượt bán giảm dần)
+  const skuByProduct = useMemo(function() {
+    var counts: Record<string, Record<string, number>> = {};
+    allSkuCodes.forEach(function(code) {
+      getSkuProducts(code).forEach(function(it) {
+        if (!counts[it.product]) counts[it.product] = {};
+        counts[it.product][code] = (counts[it.product][code] || 0) + 1;
+      });
+    });
+    var out: Record<string, Array<{ code: string; count: number }>> = {};
+    Object.keys(counts).forEach(function(product) {
+      out[product] = Object.keys(counts[product])
+        .map(function(code) { return { code: code, count: counts[product][code] }; })
+        .sort(function(a, b) { return b.count - a.count; });
+    });
+    return out;
+  }, [allSkuCodes, skuVer]);
 
   const totalQty = useMemo(function() {
     return productSummary.reduce(function(sum, p) { return sum + p.totalQuantity; }, 0);
@@ -111,7 +132,7 @@ export default function SkuReportPage() {
     return Object.entries(byCode)
       .map(function(e) { return { sku: e[0], count: e[1].count, shops: Array.from(e[1].shops) }; })
       .sort(function(a, b) { return b.count - a.count; });
-  }, [filteredImports, dateFrom, dateTo, shops]);
+  }, [filteredImports, dateFrom, dateTo, shops, skuVer]);
 
   const unmatchedCount = unmatchedDetails.reduce(function(s, d) { return s + d.count; }, 0);
   const [showUnmapped, setShowUnmapped] = useState(false);
@@ -318,6 +339,7 @@ export default function SkuReportPage() {
                   <tr className="bg-slate-800/80 border-b border-slate-700/50">
                     <th className="text-center px-4 py-2.5 font-medium text-gray-400 w-14">#</th>
                     <th className="text-left px-4 py-2.5 font-medium text-gray-400">Tên sản phẩm</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-gray-400">Mã SKU</th>
                     <th className="text-right px-4 py-2.5 font-medium text-gray-400">Số lượng</th>
                     <th className="text-right px-4 py-2.5 font-medium text-gray-400">Số đơn chứa SP</th>
                     <th className="text-center px-4 py-2.5 font-medium text-gray-400 w-40">Tỷ trọng</th>
@@ -341,6 +363,22 @@ export default function SkuReportPage() {
                         </td>
                         <td className="px-4 py-3">
                           <span className={'font-medium ' + (i < 3 ? 'text-gray-100' : 'text-gray-300')}>{item.product}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1 max-w-[340px]">
+                            {(skuByProduct[item.product] || []).slice(0, 6).map(function(c) {
+                              return (
+                                <span key={c.code} title={c.code + ': ' + c.count.toLocaleString() + ' lượt bán'}
+                                  className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-[11px] font-mono text-gray-300">{c.code}</span>
+                              );
+                            })}
+                            {(skuByProduct[item.product] || []).length > 6 && (
+                              <span className="text-[11px] text-gray-500 self-center"
+                                title={(skuByProduct[item.product] || []).slice(6).map(function(c) { return c.code; }).join(', ')}>
+                                +{(skuByProduct[item.product] || []).length - 6}
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="px-4 py-3 text-right">
                           <span className={'font-semibold ' + (i < 3 ? 'text-emerald-400 text-base' : 'text-gray-200')}>{item.totalQuantity.toLocaleString()}</span>
