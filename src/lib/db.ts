@@ -9,6 +9,29 @@ function db() {
   return supabase;
 }
 
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+// Tải file từ Storage và bỏ qua bộ nhớ đệm của trình duyệt. Supabase mặc định dặn trình duyệt giữ bản cũ 1 giờ,
+// nên dữ liệu vừa ghi (bảng quy đổi SKU, import SKU...) có thể không hiện khi tải lại trang.
+async function downloadFresh(bucket: string, path: string): Promise<{ data: Blob | null; error: { message: string; statusCode?: string } | null }> {
+  try {
+    const res = await fetch(SUPABASE_URL + '/storage/v1/object/authenticated/' + bucket + '/' + path, {
+      headers: { apikey: SUPABASE_KEY, Authorization: 'Bearer ' + SUPABASE_KEY },
+      cache: 'no-store',
+    });
+    if (!res.ok) {
+      let message = 'HTTP ' + res.status;
+      let statusCode = String(res.status);
+      try { const j = await res.json(); message = j.message || j.error || message; statusCode = String(j.statusCode || statusCode); } catch { /* không phải JSON */ }
+      return { data: null, error: { message: message, statusCode: statusCode } };
+    }
+    return { data: await res.blob(), error: null };
+  } catch (e) {
+    return { data: null, error: { message: e instanceof Error ? e.message : 'fetch failed' } };
+  }
+}
+
 // ==================== Users ====================
 
 export async function dbGetUsers(): Promise<User[]> {
@@ -240,7 +263,7 @@ const SKU_MAPPINGS_FILE = 'mappings.json';
 
 export async function dbGetSkuMappings(): Promise<Record<string, Array<{ product: string; quantity: number }>> | null> {
   try {
-    const { data, error } = await db().storage.from(SKU_BUCKET).download(SKU_MAPPINGS_FILE);
+    const { data, error } = await downloadFresh(SKU_BUCKET, SKU_MAPPINGS_FILE);
     if (error) return null;
     if (!data) return null;
     const text = await data.text();
@@ -252,7 +275,7 @@ export async function dbGetSkuMappings(): Promise<Record<string, Array<{ product
 
 // Trả null khi file chưa tồn tại; ném lỗi khi lỗi mạng/quyền (để không nhầm "lỗi" với "rỗng").
 export async function dbGetSkuMappingsStrict(): Promise<Record<string, Array<{ product: string; quantity: number }>> | null> {
-  const { data, error } = await db().storage.from(SKU_BUCKET).download(SKU_MAPPINGS_FILE);
+  const { data, error } = await downloadFresh(SKU_BUCKET, SKU_MAPPINGS_FILE);
   if (error) {
     const e = error as { message?: string; statusCode?: string | number; status?: number };
     const msg = (e.message || '').toLowerCase();
@@ -266,7 +289,7 @@ export async function dbGetSkuMappingsStrict(): Promise<Record<string, Array<{ p
 export async function dbSaveSkuMappings(map: Record<string, Array<{ product: string; quantity: number }>>): Promise<void> {
   const json = JSON.stringify(map);
   const blob = new Blob([json], { type: 'application/json' });
-  const { error } = await db().storage.from(SKU_BUCKET).upload(SKU_MAPPINGS_FILE, blob, { upsert: true });
+  const { error } = await db().storage.from(SKU_BUCKET).upload(SKU_MAPPINGS_FILE, blob, { upsert: true, cacheControl: '0' });
   if (error) throw new Error('Lưu SKU mappings thất bại: ' + error.message);
 }
 
@@ -276,7 +299,7 @@ const SKU_FILE = 'imports.json';
 
 export async function dbGetSkuImports(): Promise<SkuImport[]> {
   try {
-    const { data, error } = await db().storage.from(SKU_BUCKET).download(SKU_FILE);
+    const { data, error } = await downloadFresh(SKU_BUCKET, SKU_FILE);
     if (error) {
       console.warn('[SKU] download error:', error.message);
       return [];
@@ -299,7 +322,7 @@ async function saveSkuList(list: SkuImport[]): Promise<void> {
   const json = JSON.stringify(list);
   const blob = new Blob([json], { type: 'application/json' });
   console.log('[SKU] saving', list.length, 'imports, size:', json.length, 'bytes');
-  const { error } = await db().storage.from(SKU_BUCKET).upload(SKU_FILE, blob, { upsert: true });
+  const { error } = await db().storage.from(SKU_BUCKET).upload(SKU_FILE, blob, { upsert: true, cacheControl: '0' });
   if (error) {
     console.error('[SKU] save error:', error.message);
     throw new Error('Lưu SKU thất bại: ' + error.message);
@@ -329,7 +352,7 @@ const ANALYTICS_FILE = 'imports.json';
 
 export async function dbGetAnalytics(): Promise<AnalyticsImport[]> {
   try {
-    const { data, error } = await db().storage.from(ANALYTICS_BUCKET).download(ANALYTICS_FILE);
+    const { data, error } = await downloadFresh(ANALYTICS_BUCKET, ANALYTICS_FILE);
     if (error) {
       console.warn('[Analytics] download error:', error.message);
       return [];
@@ -352,7 +375,7 @@ async function saveAnalyticsList(list: AnalyticsImport[]): Promise<void> {
   const json = JSON.stringify(list);
   const blob = new Blob([json], { type: 'application/json' });
   console.log('[Analytics] saving', list.length, 'imports, size:', json.length, 'bytes');
-  const { error } = await db().storage.from(ANALYTICS_BUCKET).upload(ANALYTICS_FILE, blob, { upsert: true });
+  const { error } = await db().storage.from(ANALYTICS_BUCKET).upload(ANALYTICS_FILE, blob, { upsert: true, cacheControl: '0' });
   if (error) {
     console.error('[Analytics] save error:', error.message);
     throw new Error('Lưu Analytics thất bại: ' + error.message);
@@ -500,7 +523,7 @@ export async function dbGetCogs(): Promise<CogsEntry[]> {
     });
   }
   try {
-    const res = await db().storage.from('pnl-data').download('cogs.json');
+    const res = await downloadFresh('pnl-data', 'cogs.json');
     if (!res.error && res.data) {
       const list = JSON.parse(await res.data.text()) as CogsEntry[];
       if (list.length > 0) { await dbSaveCogs(list); return list; }
@@ -537,7 +560,7 @@ export async function dbGetPnlConfig(): Promise<PnlConfig> {
     };
   }
   try {
-    const res = await db().storage.from('pnl-data').download('config.json');
+    const res = await downloadFresh('pnl-data', 'config.json');
     if (!res.error && res.data) {
       const parsed = JSON.parse(await res.data.text()) as PnlConfig;
       if (parsed.opexRate === undefined) parsed.opexRate = 16;
@@ -578,7 +601,7 @@ export async function dbGetPnlImports(): Promise<PnlImport[]> {
     });
   }
   try {
-    const res = await db().storage.from('pnl-data').download('imports.json');
+    const res = await downloadFresh('pnl-data', 'imports.json');
     if (!res.error && res.data) {
       const list = JSON.parse(await res.data.text()) as PnlImport[];
       if (list.length > 0) { await dbSavePnlImports(list); return list; }
@@ -662,7 +685,7 @@ export async function dbGetChecklistTasks(): Promise<ChecklistTask[]> {
     });
   }
   try {
-    const res = await db().storage.from('pnl-data').download('checklist-tasks.json');
+    const res = await downloadFresh('pnl-data', 'checklist-tasks.json');
     if (!res.error && res.data) {
       const list = JSON.parse(await res.data.text()) as ChecklistTask[];
       if (list.length > 0) { await dbSaveChecklistTasks(list); return list; }
@@ -708,7 +731,7 @@ export async function dbGetChecklistEntries(): Promise<ChecklistEntry[]> {
     });
   }
   try {
-    const res = await db().storage.from('pnl-data').download('checklist-entries.json');
+    const res = await downloadFresh('pnl-data', 'checklist-entries.json');
     if (!res.error && res.data) {
       const list = JSON.parse(await res.data.text()) as ChecklistEntry[];
       if (list.length > 0) { await dbSaveChecklistEntries(list); return list; }
