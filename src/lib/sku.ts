@@ -12,6 +12,18 @@ const STORAGE_KEY = 'amb_sku_mappings';
 const PENDING_KEY = 'amb_sku_pending';
 
 let cachedMap: SkuMap | null = null;
+
+const skuListeners = new Set<() => void>();
+
+// Cho các trang đăng ký để tự vẽ lại khi bảng quy đổi SKU từ cloud về tới
+export function subscribeSkuMap(cb: () => void): () => void {
+  skuListeners.add(cb);
+  return function() { skuListeners.delete(cb); };
+}
+
+function notifySkuMap(): void {
+  skuListeners.forEach(function(cb) { try { cb(); } catch (err) { console.error('[SKU] listener error:', err); } });
+}
 let supabaseSynced = false;
 
 function loadSkuMap(): SkuMap {
@@ -96,6 +108,7 @@ async function flushSkuPending(): Promise<void> {
 
       cachedMap = applyPending(merged, cur);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(cachedMap));
+      notifySkuMap();
     } while (skuFlushAgain);
   } catch (err) {
     console.error('[SKU] Supabase save error (sẽ tự gửi lại):', err);
@@ -115,6 +128,7 @@ export async function initSkuMapFromSupabase(): Promise<void> {
     if (remote && Object.keys(remote).length > 0) {
       cachedMap = applyPending(remote as SkuMap, readPending());
       localStorage.setItem(STORAGE_KEY, JSON.stringify(cachedMap));
+      notifySkuMap();
     } else {
       const local = loadSkuMap();
       if (Object.keys(local).length > 0) {

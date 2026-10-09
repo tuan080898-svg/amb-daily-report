@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useAppState } from '@/lib/store';
-import { getSkuMap, saveSkuMap, invalidateCache, type SkuItem, type SkuMap } from '@/lib/sku';
+import { getSkuMap, saveSkuMap, invalidateCache, subscribeSkuMap, type SkuItem, type SkuMap } from '@/lib/sku';
 import { loadInventory, saveInventory, inventoryConfigKey } from '@/lib/inventory';
 import * as XLSX from 'xlsx';
 
@@ -111,6 +111,10 @@ export default function AdminSkuPage() {
     });
     e.target.value = '';
   }
+
+  useEffect(function() {
+    return subscribeSkuMap(function() { setSkuMap(getSkuMap()); });
+  }, []);
 
   useEffect(function() {
     setSkuMap(getSkuMap());

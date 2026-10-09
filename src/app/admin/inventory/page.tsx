@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useAppState } from '@/lib/store';
 import { toDateString } from '@/lib/utils';
-import { getProductSkuCodes, getAllComboSkus } from '@/lib/sku';
+import { getProductSkuCodes, getAllComboSkus, subscribeSkuMap } from '@/lib/sku';
 import {
   loadInventory, saveInventory, refreshInventory, makeStockBaselineTx, getCurrentStock, getStockStatus,
   getProductTransactions, getLowStockProducts, getTrackedProducts,
@@ -53,8 +53,10 @@ export default function AdminInventoryPage() {
     return function() { document.removeEventListener('mousedown', handleClickOutside); };
   }, []);
 
-  var allProducts = useMemo(function() { return getTrackedProducts(); }, []);
-  var productSkuMap = useMemo(function() { return getProductSkuCodes(); }, []);
+  var [skuVer, setSkuVer] = useState(0);
+  useEffect(function() { return subscribeSkuMap(function() { setSkuVer(function(v) { return v + 1; }); }); }, []);
+  var allProducts = useMemo(function() { return getTrackedProducts(); }, [skuVer]);
+  var productSkuMap = useMemo(function() { return getProductSkuCodes(); }, [skuVer]);
 
   var opResults = useMemo(function() {
     if (!opSearch.trim()) return [];
@@ -130,7 +132,7 @@ export default function AdminInventoryPage() {
       var canMake = Math.min.apply(null, componentStocks.map(function(c) { return c.available; }));
       return { code: combo.code, items: componentStocks, canMake: Math.max(0, canMake) };
     });
-  }, [inv, selectedWh]);
+  }, [inv, selectedWh, skuVer]);
 
   var reorderAlerts = useMemo(function() {
     return getReorderAlerts(inv, selectedWh === 'ALL' ? undefined : selectedWh);
