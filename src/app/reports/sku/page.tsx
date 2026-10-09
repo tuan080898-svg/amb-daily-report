@@ -29,6 +29,7 @@ export default function SkuReportPage() {
   const imports = useMemo(() => skuImports.filter(imp => userShopIds.has(imp.shopId)), [skuImports, userShopIds]);
   const [filterShop, setFilterShop] = useState('all');
   const [filterChannel, setFilterChannel] = useState<Channel | 'all'>('all');
+  const [filterRegion, setFilterRegion] = useState<'all' | 'HN' | 'HCM'>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [activeRange, setActiveRange] = useState<string>('all');
@@ -47,6 +48,10 @@ export default function SkuReportPage() {
     const seen = new Set<string>();
     return imports
       .filter(function(imp) {
+        if (filterRegion !== 'all') {
+          const sh = shops.find(function(x) { return x.id === imp.shopId; });
+          if (!sh || sh.region !== filterRegion) return false;
+        }
         if (seen.has(imp.shopId)) return false;
         seen.add(imp.shopId);
         return true;
@@ -55,11 +60,15 @@ export default function SkuReportPage() {
         const shop = shops.find(function(s) { return s.id === imp.shopId; });
         return { id: imp.shopId, name: shop?.name || imp.shopName, channel: shop?.channel || '' };
       });
-  }, [imports, shops]);
+  }, [imports, shops, filterRegion]);
 
   const filteredImports = useMemo(function() {
     return imports.filter(function(imp) {
       if (filterShop !== 'all' && imp.shopId !== filterShop) return false;
+      if (filterRegion !== 'all') {
+        const rs = shops.find(function(s) { return s.id === imp.shopId; });
+        if (!rs || rs.region !== filterRegion) return false;
+      }
       if (filterChannel !== 'all') {
         const shop = shops.find(function(s) { return s.id === imp.shopId; });
         if (shop && shop.channel !== filterChannel) return false;
@@ -68,7 +77,7 @@ export default function SkuReportPage() {
       if (dateTo && imp.dateFrom > dateTo) return false;
       return true;
     });
-  }, [imports, filterShop, filterChannel, dateFrom, dateTo, shops]);
+  }, [imports, filterShop, filterChannel, filterRegion, dateFrom, dateTo, shops]);
 
   const allSkuCodes = useMemo(function() {
     return filteredImports.flatMap(function(f) {
@@ -192,6 +201,22 @@ export default function SkuReportPage() {
         </div>
         {imports.length > 0 && (
           <div className="flex flex-wrap items-center gap-3">
+            <select
+              value={filterRegion}
+              onChange={function(e) {
+                var r = e.target.value as 'all' | 'HN' | 'HCM';
+                setFilterRegion(r);
+                if (r !== 'all' && filterShop !== 'all') {
+                  var cur = shops.find(function(x) { return x.id === filterShop; });
+                  if (!cur || cur.region !== r) setFilterShop('all');
+                }
+              }}
+              className="px-3 py-2 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-200"
+            >
+              <option value="all">Tất cả khu vực</option>
+              <option value="HCM">Khu vực HCM</option>
+              <option value="HN">Khu vực HN</option>
+            </select>
             <select
               value={filterShop}
               onChange={function(e) { setFilterShop(e.target.value); }}
