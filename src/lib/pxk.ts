@@ -1,7 +1,7 @@
 // Phiếu xuất kho từ file PDF in đơn của Shopee / TikTok.
 // Đọc PDF ngay trên máy nhân sự (không gửi file đi đâu, không dùng AI), gom theo SKU để kho đi nhặt.
 
-import { getSkuProducts } from './sku';
+import { getSkuProducts, getSkuMap } from './sku';
 
 export type PxkPlatform = 'shopee' | 'tiktok';
 export var PXK_PLATFORM_LABELS: Record<PxkPlatform, string> = { shopee: 'Shopee', tiktok: 'TikTok Shop' };
@@ -244,7 +244,22 @@ export function splitShopeeName(text: string): { name: string; variation: string
 
 export interface PxkProductLine {
   product: string;
+  skus: string; // mã SKU lẻ (1 sản phẩm, SL 1) của sản phẩm gốc, ngăn cách bằng " / "
   qty: number;
+}
+
+// Sản phẩm gốc -> các mã SKU lẻ của nó trong bảng quy đổi (bỏ qua combo / mã nhân số lượng)
+function baseSkusByProduct(): Record<string, string[]> {
+  var out: Record<string, string[]> = {};
+  var map = getSkuMap();
+  Object.keys(map).forEach(function(code) {
+    var items = map[code];
+    if (items.length === 1 && items[0].quantity === 1) {
+      (out[items[0].product] || (out[items[0].product] = [])).push(code);
+    }
+  });
+  Object.keys(out).forEach(function(p) { out[p].sort(function(a, b) { return a.localeCompare(b, undefined, { numeric: true }); }); });
+  return out;
 }
 
 export interface PxkSummary {
@@ -275,6 +290,7 @@ export function summarizePxk(orders: Array<{ orderId: string; items: PxkItem[] }
   var unmapped = new Set<string>();
   var hasCombo = false;
   var totalQty = 0;
+  var baseSkus = baseSkusByProduct();
   orders.forEach(function(o) {
     var seenSku = new Set<string>();
     var seenUn = new Set<string>();
@@ -311,7 +327,7 @@ export function summarizePxk(orders: Array<{ orderId: string; items: PxkItem[] }
     skuLines: Object.values(bySku).sort(function(a, b) { return a.sku.localeCompare(b.sku, undefined, { numeric: true }); }),
     unresolved: Object.values(unresolvedMap).sort(function(a, b) { return b.qty - a.qty; }),
     unmappedSkus: Array.from(unmapped).sort(),
-    productLines: Object.entries(prodMap).map(function(e) { return { product: e[0], qty: e[1] }; }).sort(function(a, b) { return a.product.localeCompare(b.product, 'vi'); }),
+    productLines: Object.entries(prodMap).map(function(e) { return { product: e[0], skus: (baseSkus[e[0]] || []).join(' / '), qty: e[1] }; }).sort(function(a, b) { return a.product.localeCompare(b.product, 'vi'); }),
     hasCombo: hasCombo,
     totalQty: totalQty,
     orderCount: orders.length,
@@ -360,8 +376,8 @@ export function buildPxkHtml(batch: PxkBatch, opts: { showOrders: boolean }): st
 
   var prodTable = '';
   if (sum.hasCombo && sum.productLines.length > 0) {
-    prodTable = '<h2>2. Quy ra sản phẩm gốc cần nhặt</h2><table><thead><tr><th style="width:32px">#</th><th>Sản phẩm</th><th style="width:90px">Số lượng</th><th style="width:70px">Đã nhặt</th></tr></thead><tbody>' +
-      sum.productLines.map(function(p, i) { return '<tr><td class="c">' + (i + 1) + '</td><td>' + esc(p.product) + '</td><td class="c big">' + p.qty + '</td><td></td></tr>'; }).join('') + '</tbody></table>';
+    prodTable = '<h2>2. Quy ra sản phẩm gốc cần nhặt</h2><table><thead><tr><th style="width:32px">#</th><th style="width:110px">SKU</th><th>Sản phẩm</th><th style="width:90px">Số lượng</th><th style="width:70px">Đã nhặt</th></tr></thead><tbody>' +
+      sum.productLines.map(function(p, i) { return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(p.skus || '—') + '</td><td>' + esc(p.product) + '</td><td class="c big">' + p.qty + '</td><td></td></tr>'; }).join('') + '</tbody></table>';
   }
 
   var sign = '<div class="sign"><div>Người lập phiếu<br><span>(ký, ghi rõ họ tên)</span></div><div>Người nhặt hàng<br><span>(ký, ghi rõ họ tên)</span></div><div>Người kiểm hàng<br><span>(ký, ghi rõ họ tên)</span></div></div>';

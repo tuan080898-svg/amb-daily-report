@@ -384,7 +384,7 @@ export default function PhieuXuatKhoPage() {
               <table className="w-full text-sm">
                 <tbody>
                   {summary.productLines.map(function(p) {
-                    return <tr key={p.product} className="border-b border-slate-800"><td className="px-4 py-2 text-gray-300">{p.product}</td><td className="px-4 py-2 text-right font-bold text-gray-100 w-24">{p.qty}</td></tr>;
+                    return <tr key={p.product} className="border-b border-slate-800"><td className="px-4 py-2 font-mono text-gray-200 w-40">{p.skus || '—'}</td><td className="px-4 py-2 text-gray-300">{p.product}</td><td className="px-4 py-2 text-right font-bold text-gray-100 w-24">{p.qty}</td></tr>;
                   })}
                 </tbody>
               </table>
