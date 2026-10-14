@@ -15,12 +15,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email và mật khẩu không được để trống' }, { status: 400 });
     }
 
-    const { data } = await supabase.from('users').select('*').eq('email', email).limit(1);
-    if (!data || data.length === 0) {
+    // So khớp email không phân biệt hoa/thường (tài khoản cũ có thể lưu chữ hoa, vd "Thao@gmail.com")
+    const pattern = email.replace(/[\\%_]/g, function (c: string) { return '\\' + c; });
+    const { data } = await supabase.from('users').select('*').ilike('email', pattern).limit(5);
+    const row = (data || []).find(function (r) { return String(r.email || '').trim().toLowerCase() === email; });
+    if (!row) {
       return NextResponse.json({ error: 'Email hoặc mật khẩu không đúng' }, { status: 401 });
     }
-
-    const row = data[0];
     const storedPassword = row.password || '';
 
     let matched = false;

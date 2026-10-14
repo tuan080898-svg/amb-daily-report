@@ -52,7 +52,7 @@ export async function dbAddUser(user: User): Promise<void> {
   const hashed = await bcrypt.hash(rawPassword, 10);
   const { error } = await db().from('users').insert({
     id: user.id,
-    email: user.email,
+    email: user.email.trim().toLowerCase(),
     name: user.name,
     role: user.role,
     assigned_shops: user.assignedShops,
@@ -63,7 +63,7 @@ export async function dbAddUser(user: User): Promise<void> {
 
 export async function dbUpdateUser(user: User): Promise<void> {
   const updateData: Record<string, unknown> = {
-    email: user.email,
+    email: user.email.trim().toLowerCase(),
     name: user.name,
     role: user.role,
     assigned_shops: user.assignedShops,
