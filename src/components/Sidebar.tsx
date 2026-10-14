@@ -51,6 +51,14 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    key: 'warehouse',
+    label: 'Kho vận',
+    icon: '📦',
+    items: [
+      { href: '/kho/phieu-xuat', label: 'Phiếu xuất kho', icon: '🧾', roles: ['admin', 'employee'] },
+    ],
+  },
+  {
     key: 'booking',
     label: 'Booking KOC',
     icon: '🎬',

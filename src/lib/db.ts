@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry, WeeklyAction, MonthlyPlanNote } from './types';
 import type { InventoryData, InventoryTransaction, InventoryConfig, InventoryPushBatch, Warehouse } from './inventory';
 import { DEFAULT_CONFIG } from './utils';
+import type { PxkData, PxkBatch } from './pxk';
 import bcrypt from 'bcryptjs';
 
 function db() {
@@ -291,6 +292,39 @@ export async function dbSaveSkuMappings(map: Record<string, Array<{ product: str
   const blob = new Blob([json], { type: 'application/json' });
   const { error } = await db().storage.from(SKU_BUCKET).upload(SKU_MAPPINGS_FILE, blob, { upsert: true, cacheControl: '0' });
   if (error) throw new Error('Lưu SKU mappings thất bại: ' + error.message);
+}
+
+// ==================== Phiếu xuất kho (Supabase Storage) ====================
+
+const PXK_FILE = 'pxk.json';
+const PXK_MAX_BATCHES = 120;
+
+async function readPxkStrict(): Promise<PxkData> {
+  const { data, error } = await downloadFresh(SKU_BUCKET, PXK_FILE);
+  if (error) {
+    const e = error as { message?: string; statusCode?: string | number };
+    const msg = (e.message || '').toLowerCase();
+    if (msg.includes('not found') || String(e.statusCode) === '404') return { names: {}, ambiguous: {}, batches: [] };
+    throw new Error('Đọc dữ liệu phiếu xuất kho thất bại: ' + (e.message || 'lỗi không rõ'));
+  }
+  if (!data) return { names: {}, ambiguous: {}, batches: [] };
+  const j = JSON.parse(await data.text()) as Partial<PxkData>;
+  return { names: j.names || {}, ambiguous: j.ambiguous || {}, batches: j.batches || [] };
+}
+
+export async function dbGetPxk(): Promise<PxkData> {
+  return readPxkStrict();
+}
+
+// Đọc bản mới nhất -> áp thay đổi -> ghi lại (không ghi đè phiếu/tên SKU của máy khác vừa lưu).
+export async function dbUpdatePxk(apply: (cur: PxkData) => PxkData): Promise<PxkData> {
+  const cur = await readPxkStrict();
+  const next = apply(cur);
+  next.batches = next.batches.sort((a: PxkBatch, b: PxkBatch) => b.createdAt.localeCompare(a.createdAt)).slice(0, PXK_MAX_BATCHES);
+  const blob = new Blob([JSON.stringify(next)], { type: 'application/json' });
+  const { error } = await db().storage.from(SKU_BUCKET).upload(PXK_FILE, blob, { upsert: true, cacheControl: '0' });
+  if (error) throw new Error('Lưu phiếu xuất kho thất bại: ' + error.message);
+  return next;
 }
 
 // ==================== SKU Imports (Supabase Storage) ====================

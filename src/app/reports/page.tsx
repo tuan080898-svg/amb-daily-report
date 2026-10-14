@@ -7,6 +7,8 @@ import { DailyReport, Shop, PnlImport, PnlDailyData } from '@/lib/types';
 import * as XLSX from 'xlsx';
 import { aggregateProducts, getSkuProducts, ProductSummary } from '@/lib/sku';
 import { loadInventory, addSaleTransactions, planSaleDeduction, type Warehouse } from '@/lib/inventory';
+import { IS_SUPABASE_CONFIGURED } from '@/lib/supabase';
+import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 
 export default function ReportFormPage() {
   return (
@@ -527,6 +529,11 @@ function FileUploadForm() {
             if (pending === 0) {
               setDetectedPlatform(detPlat);
               setRawDataList(worksheets);
+              if (detPlat === 'shopee' && IS_SUPABASE_CONFIGURED) {
+                // Nhân tiện học quy luật "tên sản phẩm + phân loại -> SKU" để in phiếu xuất kho từ nhãn Shopee
+                learnShopeeFromRowSets(worksheets.map(function(w) { return XLSX.utils.sheet_to_json(w) as Record<string, unknown>[]; }))
+                  .catch(function(e) { console.error('[PXK] Không học được quy luật SKU:', e); });
+              }
               if (selectedShopId) {
                 processWithShop(worksheets, detPlat, selectedShopId);
               }
