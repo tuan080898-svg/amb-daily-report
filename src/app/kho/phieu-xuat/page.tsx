@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useAppState } from '@/lib/store';
 import { getAllSkuCodes, subscribeSkuMap } from '@/lib/sku';
-import { refreshInventory, addPxkTransactions, WAREHOUSES, WAREHOUSE_LABELS, type Warehouse } from '@/lib/inventory';
+import { WAREHOUSES, WAREHOUSE_LABELS, type Warehouse } from '@/lib/inventory';
 import { dbGetPxk, dbUpdatePxk } from '@/lib/db';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
@@ -60,8 +60,7 @@ export default function PhieuXuatKhoPage() {
   // Đơn đã có trong các phiếu trước (cùng sàn) hoặc bị lặp trong lần tải này
   const knownIds = useMemo(function() {
     var s = new Set<string>();
-    // Chỉ các phiếu đã trừ kho mới khoá đơn lại; phiếu "chỉ in" không ngăn việc lập phiếu trừ kho sau đó
-    data.batches.forEach(function(b) { if (b.platform === platform && b.deducted) b.orders.forEach(function(o) { s.add(o.orderId); }); });
+    data.batches.forEach(function(b) { if (b.platform === platform) b.orders.forEach(function(o) { s.add(o.orderId); }); });
     return s;
   }, [data, platform]);
 
@@ -153,18 +152,18 @@ export default function PhieuXuatKhoPage() {
     setTimeout(function() { try { w.print(); } catch { /* người dùng tự in */ } }, 500);
   }
 
-  async function createSlip(deduct: boolean) {
+  async function createSlip() {
     setError(''); setNotice('');
     if (resolved.length === 0) { setError('Chưa có đơn mới nào để lập phiếu.'); return; }
     var noSku = summary.unresolved.reduce(function(s, u) { return s + u.qty; }, 0);
     var lines = [
-      (deduct ? 'LẬP PHIẾU VÀ TRỪ KHO ' : 'CHỈ IN PHIẾU (không trừ kho) ') + WAREHOUSE_LABELS[wh] + ' — ' + PXK_PLATFORM_LABELS[platform],
+      'LẬP VÀ IN PHIẾU ' + WAREHOUSE_LABELS[wh] + ' — ' + PXK_PLATFORM_LABELS[platform],
       resolved.length + ' đơn, ' + summary.totalQty + ' sản phẩm, ngày ' + fmtDate(printDate),
     ];
-    if (noSku > 0) lines.push('⚠ ' + noSku + ' sản phẩm chưa có SKU: vẫn in lên phiếu nhưng KHÔNG được trừ kho.');
-    if (summary.unmappedSkus.length > 0) lines.push('⚠ SKU chưa có trong bảng quy đổi (không trừ kho): ' + summary.unmappedSkus.join(', '));
+    if (noSku > 0) lines.push('⚠ ' + noSku + ' sản phẩm chưa có SKU: vẫn in lên phiếu theo tên sản phẩm.');
+    if (summary.unmappedSkus.length > 0) lines.push('⚠ SKU chưa có trong bảng quy đổi (vẫn in, không quy ra sản phẩm gốc): ' + summary.unmappedSkus.join(', '));
     if (badLabels.length > 0) lines.push('⚠ ' + badLabels.length + ' nhãn đọc chưa chắc chắn, nên kiểm tra lại.');
-    if (includeOld && analysis.old.length > 0) lines.push('⚠ Có ' + analysis.old.length + ' đơn đã lập phiếu trước đó — chúng sẽ bị trừ kho LẠI.');
+    if (includeOld && analysis.old.length > 0) lines.push('⚠ Có ' + analysis.old.length + ' đơn đã lập phiếu trước đó — chúng sẽ được in lại.');
     lines.push('', 'Tiếp tục?');
     if (!window.confirm(lines.join('\n'))) return;
 
@@ -173,20 +172,10 @@ export default function PhieuXuatKhoPage() {
     try {
       var batch: PxkBatch = {
         id: makeBatchId(), platform: platform, warehouse: wh, printDate: printDate,
-        createdAt: new Date().toISOString(), createdBy: currentUser ? currentUser.name : '', deducted: deduct,
+        createdAt: new Date().toISOString(), createdBy: currentUser ? currentUser.name : '',
         orders: resolved,
       };
-      var msg = '';
-      if (deduct) {
-        var inv = await refreshInventory();
-        var res = addPxkTransactions(inv, summary.productLines.map(function(p) { return { product: p.product, quantity: p.qty }; }), printDate, PXK_PLATFORM_LABELS[platform] + ' ' + batch.id, wh);
-        var done = res.plan.deduct.reduce(function(s, x) { return s + x.quantity; }, 0);
-        msg = 'Đã trừ kho ' + WAREHOUSE_LABELS[wh] + ': ' + done + ' sản phẩm gốc (' + res.plan.deduct.length + ' mặt hàng).';
-        if (res.plan.noConfig.length > 0) msg += ' Chưa cài tồn đầu nên không trừ: ' + Array.from(new Set(res.plan.noConfig)).join(', ') + '.';
-        if (res.plan.beforeBaseline.length > 0) msg += ' Ngày in nằm trước mốc chốt tồn nên không trừ: ' + Array.from(new Set(res.plan.beforeBaseline)).join(', ') + '.';
-      } else {
-        msg = 'Đã lập phiếu, không trừ kho.';
-      }
+      var msg = 'Đã lập phiếu ' + batch.id + '.';
       try {
         var learned: Record<string, string> = {};
         Object.keys(assign).forEach(function(k) { if (assign[k]) learned[k] = assign[k]; });
@@ -197,7 +186,7 @@ export default function PhieuXuatKhoPage() {
         });
         setData(next);
       } catch (e) {
-        msg += ' ⚠ Chưa lưu được lịch sử phiếu (' + (e instanceof Error ? e.message : String(e)) + ') — KHÔNG tải lại file này để tránh trừ kho hai lần.';
+        msg += ' ⚠ Chưa lưu được lịch sử phiếu (' + (e instanceof Error ? e.message : String(e)) + '). Phiếu vẫn được in, nhưng sẽ không có trong Lịch sử.';
       }
       setNotice(msg);
       openPrint(buildPxkHtml(batch, { showOrders: showOrders }), w);
@@ -221,7 +210,7 @@ export default function PhieuXuatKhoPage() {
     <div className="max-w-5xl mx-auto">
       <div className="mb-5">
         <h1 className="text-2xl font-bold text-gray-100">Phiếu xuất kho</h1>
-        <p className="text-sm text-gray-500 mt-1">Tải file PDF in đơn của Shopee / TikTok → app tổng hợp sản phẩm để kho nhặt hàng, in phiếu và trừ kho.</p>
+        <p className="text-sm text-gray-500 mt-1">Tải file PDF in đơn của Shopee / TikTok → app tổng hợp sản phẩm theo SKU để kho nhặt hàng và in phiếu.</p>
       </div>
 
       {platform === 'shopee' && (
@@ -294,7 +283,7 @@ export default function PhieuXuatKhoPage() {
           {(analysis.old.length > 0 || analysis.dupInUpload > 0 || analysis.noId.length > 0) && (
             <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-sm text-amber-200 space-y-1">
               {analysis.old.length > 0 && (
-                <div>{analysis.old.length} đơn đã có trong phiếu trước đó nên được bỏ qua (tránh trừ kho hai lần).{' '}
+                <div>{analysis.old.length} đơn đã có trong phiếu trước đó nên được bỏ qua (tránh in trùng).{' '}
                   <label className="inline-flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={includeOld} onChange={function(e) { setIncludeOld(e.target.checked); }} /> vẫn lập lại cả các đơn này</label>
                 </div>
               )}
@@ -313,7 +302,7 @@ export default function PhieuXuatKhoPage() {
           {summary.unresolved.length > 0 && (
             <div className="mb-4 bg-slate-900 border border-amber-500/40 rounded-xl overflow-hidden">
               <div className="px-4 py-3 border-b border-slate-700 text-sm text-amber-200">
-                Nhãn Shopee không có mã SKU — chọn SKU cho {summary.unresolved.length} sản phẩm dưới đây (app nhớ cho lần sau). Dòng chưa chọn vẫn lên phiếu theo tên nhưng không trừ kho.
+                Nhãn Shopee không có mã SKU — chọn SKU cho {summary.unresolved.length} sản phẩm dưới đây (app nhớ cho lần sau). Dòng chưa chọn vẫn lên phiếu theo tên sản phẩm.
               </div>
               <datalist id="pxk-skus">{skuCodes.map(function(c) { return <option key={c} value={c} />; })}</datalist>
               <div className="divide-y divide-slate-800">
@@ -344,7 +333,7 @@ export default function PhieuXuatKhoPage() {
 
           {summary.unmappedSkus.length > 0 && (
             <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-sm text-amber-200">
-              SKU chưa có trong bảng quy đổi (vẫn in, không trừ kho): {summary.unmappedSkus.join(', ')}. Thêm ở Quản lý SKU rồi lập lại phiếu nếu cần trừ kho.
+              SKU chưa có trong bảng quy đổi (vẫn in, không quy ra được sản phẩm gốc): {summary.unmappedSkus.join(', ')}. Thêm ở Quản lý SKU để lần sau có tên sản phẩm gốc.
             </div>
           )}
 
@@ -386,7 +375,7 @@ export default function PhieuXuatKhoPage() {
 
           {summary.hasCombo && summary.productLines.length > 0 && (
             <div className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden mb-4">
-              <div className="px-4 py-3 border-b border-slate-700 text-sm font-semibold text-gray-200">Quy ra sản phẩm gốc cần nhặt (cũng là số sẽ trừ kho)</div>
+              <div className="px-4 py-3 border-b border-slate-700 text-sm font-semibold text-gray-200">Quy ra sản phẩm gốc cần nhặt</div>
               <table className="w-full text-sm">
                 <tbody>
                   {summary.productLines.map(function(p) {
@@ -398,12 +387,10 @@ export default function PhieuXuatKhoPage() {
           )}
 
           <div className="flex flex-wrap items-center gap-3 mb-8">
-            <button onClick={function() { createSlip(true); }} disabled={busy || resolved.length === 0 || !!dataErr}
+            <button onClick={function() { createSlip(); }} disabled={busy || resolved.length === 0 || !!dataErr}
               className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg">
-              {busy ? 'Đang xử lý...' : '🖨 Lập phiếu + trừ kho (' + WAREHOUSE_LABELS[wh] + ')'}
+              {busy ? 'Đang xử lý...' : '🖨 Lập và in phiếu (' + WAREHOUSE_LABELS[wh] + ')'}
             </button>
-            <button onClick={function() { createSlip(false); }} disabled={busy || resolved.length === 0 || !!dataErr}
-              className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-gray-200 text-sm rounded-lg">Chỉ in phiếu, không trừ kho</button>
             <label className="inline-flex items-center gap-1.5 text-sm text-gray-400 cursor-pointer">
               <input type="checkbox" checked={showOrders} onChange={function(e) { setShowOrders(e.target.checked); }} /> Kèm trang danh sách từng đơn
             </label>
@@ -421,7 +408,7 @@ export default function PhieuXuatKhoPage() {
               <thead><tr className="text-xs text-gray-400 border-b border-slate-700">
                 <th className="px-4 py-2 text-left">Mã phiếu</th><th className="px-4 py-2 text-left">Sàn</th><th className="px-4 py-2 text-left">Kho</th>
                 <th className="px-4 py-2 text-left">Ngày in</th><th className="px-4 py-2 text-right">Đơn</th><th className="px-4 py-2 text-right">SL</th>
-                <th className="px-4 py-2 text-left">Trừ kho</th><th className="px-4 py-2 text-left">Người lập</th><th className="px-4 py-2"></th>
+                <th className="px-4 py-2 text-left">Người lập</th><th className="px-4 py-2"></th>
               </tr></thead>
               <tbody>
                 {data.batches.slice().sort(function(a, b) { return b.createdAt.localeCompare(a.createdAt); }).slice(0, 30).map(function(b) {
@@ -434,7 +421,6 @@ export default function PhieuXuatKhoPage() {
                       <td className="px-4 py-2 text-gray-300">{fmtDate(b.printDate)}</td>
                       <td className="px-4 py-2 text-right text-gray-300">{b.orders.length}</td>
                       <td className="px-4 py-2 text-right text-gray-300">{qty}</td>
-                      <td className="px-4 py-2">{b.deducted ? <span className="text-emerald-400">Đã trừ</span> : <span className="text-gray-500">Không</span>}</td>
                       <td className="px-4 py-2 text-gray-400">{b.createdBy}</td>
                       <td className="px-4 py-2 text-right"><button onClick={function() { reprint(b); }} className="text-blue-400 hover:text-blue-300">In lại</button></td>
                     </tr>

@@ -514,16 +514,6 @@ export function planSaleDeduction(data: InventoryData, sales: Array<{ product: s
   return plan;
 }
 
-// Phiếu xuất kho trừ kho ngay lúc nhặt hàng (trừ tạm). Khi báo cáo bán hàng của ngày đó được tải lên,
-// số trừ tạm của các sản phẩm có trong báo cáo được thay bằng số liệu chính thức để không trừ hai lần.
-export var PXK_NOTE_PREFIX = 'Phiếu xuất kho';
-
-function nextDayStr(date: string): string {
-  var d = new Date(date + 'T00:00:00Z');
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
-
 export function addSaleTransactions(data: InventoryData, sales: Array<{ product: string; quantity: number }>, date: string, shopName: string, wh: Warehouse): InventoryData {
   var newTxs = planSaleDeduction(data, sales, date, wh).deduct
     .map(function(s) {
@@ -538,45 +528,19 @@ export function addSaleTransactions(data: InventoryData, sales: Array<{ product:
       };
     });
   if (newTxs.length === 0) return data;
-  var soldProducts = new Set(newTxs.map(function(t) { return t.product; }));
-  var pxkDates = [date, nextDayStr(date)];
-  function isReplaced(t: InventoryTransaction): boolean {
-    if (t.type !== 'sale' || t.warehouse !== wh) return false;
-    if (t.date === date && t.note === shopName) return true;
-    return t.note.indexOf(PXK_NOTE_PREFIX) === 0 && pxkDates.indexOf(t.date) >= 0 && soldProducts.has(t.product);
+  function isSameDaySale(t: InventoryTransaction): boolean {
+    return t.type === 'sale' && t.date === date && t.note === shopName && t.warehouse === wh;
   }
   var removeIds: string[] = [];
   var seen = new Set<string>();
   data.transactions.concat(loadInventory().transactions).forEach(function(t) {
-    if (isReplaced(t) && !seen.has(t.id)) { seen.add(t.id); removeIds.push(t.id); }
+    if (isSameDaySale(t) && !seen.has(t.id)) { seen.add(t.id); removeIds.push(t.id); }
   });
   var updated = {
     products: JSON.parse(JSON.stringify(data.products)),
-    transactions: data.transactions.filter(function(t) { return !isReplaced(t); }).concat(newTxs),
+    transactions: data.transactions.filter(function(t) { return !isSameDaySale(t); }).concat(newTxs),
   };
   return saveInventory(updated, { deleteTxIds: removeIds });
-}
-
-// Trừ kho theo phiếu xuất kho. sales là số lượng theo sản phẩm gốc (combo đã tách).
-export function addPxkTransactions(data: InventoryData, sales: Array<{ product: string; quantity: number }>, date: string, label: string, wh: Warehouse): { data: InventoryData; plan: SaleDeductionPlan } {
-  var plan = planSaleDeduction(data, sales, date, wh);
-  if (plan.deduct.length === 0) return { data: data, plan: plan };
-  var newTxs = plan.deduct.map(function(s) {
-    return {
-      id: 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-      date: date,
-      product: s.product,
-      quantity: -s.quantity,
-      type: 'sale' as const,
-      note: PXK_NOTE_PREFIX + ' ' + label,
-      warehouse: wh,
-    };
-  });
-  var updated = {
-    products: JSON.parse(JSON.stringify(data.products)),
-    transactions: data.transactions.concat(newTxs),
-  };
-  return { data: saveInventory(updated), plan: plan };
 }
 
 export function getTrackedProducts(): string[] {

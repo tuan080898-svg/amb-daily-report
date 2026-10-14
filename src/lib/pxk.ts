@@ -28,7 +28,7 @@ export interface PxkBatch {
   printDate: string; // YYYY-MM-DD
   createdAt: string; // ISO
   createdBy: string;
-  deducted: boolean;
+  deducted?: boolean; // không còn dùng (phiếu cũ có thể còn trường này)
   orders: Array<{ orderId: string; items: PxkItem[] }>;
 }
 
@@ -251,7 +251,7 @@ export interface PxkSummary {
   skuLines: PxkSkuLine[];
   unresolved: PxkUnresolvedLine[]; // Shopee: chưa có SKU
   unmappedSkus: string[];
-  productLines: PxkProductLine[]; // quy ra sản phẩm gốc (để trừ kho)
+  productLines: PxkProductLine[]; // quy ra sản phẩm gốc (để kho nhặt)
   hasCombo: boolean;
   totalQty: number;
   orderCount: number;
