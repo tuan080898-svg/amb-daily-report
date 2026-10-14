@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useAppState } from '@/lib/store';
-import { getAllSkuCodes, subscribeSkuMap } from '@/lib/sku';
+import { getAllSkuCodes, getSkuProducts, subscribeSkuMap } from '@/lib/sku';
 import { WAREHOUSES, WAREHOUSE_LABELS, type Warehouse } from '@/lib/inventory';
 import { dbGetPxk, dbUpdatePxk } from '@/lib/db';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
@@ -41,7 +41,9 @@ export default function PhieuXuatKhoPage() {
   const [notice, setNotice] = useState('');
   const [data, setData] = useState<PxkData>({ names: {}, batches: [] });
   const [dataErr, setDataErr] = useState('');
-  const [assign, setAssign] = useState<Record<string, string>>({});
+  // SKU nhân sự đã gắn trong lần này (khoá tên chuẩn hoá -> { sku, tên }); cũng được lưu ngay lên cloud để nhớ cho lần sau
+  const [assign, setAssign] = useState<Record<string, { sku: string; name: string }>>({});
+  const saveChain = useRef<Promise<unknown>>(Promise.resolve());
   const [includeOld, setIncludeOld] = useState(false);
   const [showOrders, setShowOrders] = useState(true);
   const [skuVer, setSkuVer] = useState(0);
@@ -90,7 +92,7 @@ export default function PhieuXuatKhoPage() {
       var items: PxkItem[] = o.items.map(function(it) {
         if (it.sku) return it;
         var key = pxkNameKey(it.name);
-        var sku = assign[key] || data.names[key] || '';
+        var sku = (assign[key] && assign[key].sku) || data.names[key] || '';
         return sku ? { sku: sku, name: it.name, qty: it.qty } : it;
       });
       return { orderId: o.orderId, items: items };
@@ -145,6 +147,37 @@ export default function PhieuXuatKhoPage() {
     }
   }
 
+  // Gắn SKU cho một dòng Shopee: dòng chuyển xuống bảng tổng hợp ngay, và được ghi nhớ ngay (không chờ bấm lập phiếu)
+  function commitSku(key: string, name: string, sku: string) {
+    setAssign(function(a) { var n = Object.assign({}, a); n[key] = { sku: sku, name: name }; return n; });
+    setError('');
+    saveChain.current = saveChain.current.then(function() {
+      return dbUpdatePxk(function(cur) {
+        var amb = Object.assign({}, cur.ambiguous || {});
+        delete amb[key];
+        var names = Object.assign({}, cur.names);
+        names[key] = sku;
+        return { names: names, ambiguous: amb, batches: cur.batches };
+      }).then(setData);
+    }).catch(function(e) {
+      setError('Chưa lưu được ghi nhớ SKU (' + (e instanceof Error ? e.message : String(e)) + '). Lần sau app có thể hỏi lại dòng này.');
+    });
+  }
+
+  function uncommitSku(key: string) {
+    var cur = assign[key];
+    setAssign(function(a) { var n = Object.assign({}, a); delete n[key]; return n; });
+    saveChain.current = saveChain.current.then(function() {
+      return dbUpdatePxk(function(c) {
+        var names = Object.assign({}, c.names);
+        if (cur && names[key] === cur.sku) delete names[key];
+        return { names: names, ambiguous: c.ambiguous || {}, batches: c.batches };
+      }).then(setData);
+    }).catch(function(e) {
+      setError('Chưa bỏ được ghi nhớ SKU (' + (e instanceof Error ? e.message : String(e)) + ').');
+    });
+  }
+
   function reset() { setOrders([]); setFileNames([]); setAssign({}); setError(''); setNotice(''); setIncludeOld(false); }
 
   function openPrint(html: string, w: Window | null) {
@@ -179,7 +212,7 @@ export default function PhieuXuatKhoPage() {
       var msg = 'Đã lập phiếu ' + batch.id + '.';
       try {
         var learned: Record<string, string> = {};
-        Object.keys(assign).forEach(function(k) { if (assign[k]) learned[k] = assign[k]; });
+        Object.keys(assign).forEach(function(k) { if (assign[k] && assign[k].sku) learned[k] = assign[k].sku; });
         var next = await dbUpdatePxk(function(cur) {
           var amb = Object.assign({}, cur.ambiguous || {});
           Object.keys(learned).forEach(function(k) { delete amb[k]; });
@@ -305,30 +338,43 @@ export default function PhieuXuatKhoPage() {
           )}
 
           {summary.unresolved.length > 0 && (
-            <div className="mb-4 bg-slate-900 border border-amber-500/40 rounded-xl overflow-hidden">
+            <div className="mb-4 bg-slate-900 border border-amber-500/40 rounded-xl overflow-visible">
               <div className="px-4 py-3 border-b border-slate-700 text-sm text-amber-200">
-                Nhãn Shopee không có mã SKU — chọn SKU cho {summary.unresolved.length} sản phẩm dưới đây (app nhớ cho lần sau). Dòng chưa chọn vẫn lên phiếu theo tên sản phẩm.
+                Nhãn Shopee không có mã SKU — gắn SKU cho {summary.unresolved.length} sản phẩm dưới đây. Gõ mã rồi chọn trong danh sách (hoặc bấm Enter); dòng được gắn sẽ tự xuống bảng tổng hợp và app nhớ cho lần sau. Dòng chưa gắn vẫn lên phiếu theo tên sản phẩm.
               </div>
-              <datalist id="pxk-skus">{skuCodes.map(function(c) { return <option key={c} value={c} />; })}</datalist>
               <div className="divide-y divide-slate-800">
                 {summary.unresolved.map(function(u) {
-                  var v = assign[u.key] || '';
-                  var bad = v !== '' && skuCodes.indexOf(v) < 0;
+                  var cands = (data.ambiguous || {})[u.key];
                   return (
                     <div key={u.key} className="px-4 py-2.5 flex flex-wrap items-center gap-3">
                       <div className="flex-1 min-w-[260px] text-sm text-gray-300">{u.name}</div>
                       <div className="text-sm text-gray-400 w-24">SL {u.qty} · {u.orders} đơn</div>
-                      {(data.ambiguous || {})[u.key] && (
+                      {cands && cands.length > 0 && (
                         <div className="flex gap-1 flex-wrap">
-                          {(data.ambiguous || {})[u.key].map(function(c) {
-                            return <button key={c} onClick={function() { setAssign(function(a) { var n = Object.assign({}, a); n[u.key] = c; return n; }); }}
-                              className={'px-2 py-1 rounded text-xs border ' + (v === c ? 'bg-blue-600 border-blue-500 text-white' : 'border-slate-600 text-gray-300 hover:bg-slate-800')}>{c}</button>;
+                          {cands.map(function(c) {
+                            return <button key={c} onClick={function() { commitSku(u.key, u.name, c); }}
+                              className="px-2 py-1 rounded text-xs border border-slate-600 text-gray-300 hover:bg-slate-800">{c}</button>;
                           })}
                         </div>
                       )}
-                      <input list="pxk-skus" value={v} placeholder="Chọn / gõ SKU"
-                        onChange={function(e) { var val = e.target.value.trim(); setAssign(function(a) { var n = Object.assign({}, a); n[u.key] = val; return n; }); }}
-                        className={inputCls + ' w-44 ' + (bad ? 'border-red-500' : '')} />
+                      <SkuPicker codes={skuCodes} onCommit={function(sku) { commitSku(u.key, u.name, sku); }} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {Object.keys(assign).length > 0 && (
+            <div className="mb-4 bg-slate-900 border border-emerald-500/30 rounded-xl overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-slate-700 text-sm text-emerald-300">Đã gắn SKU lần này (đã được ghi nhớ)</div>
+              <div className="divide-y divide-slate-800">
+                {Object.keys(assign).map(function(k) {
+                  return (
+                    <div key={k} className="px-4 py-2 flex flex-wrap items-center gap-3 text-sm">
+                      <div className="flex-1 min-w-[260px] text-gray-400">{assign[k].name}</div>
+                      <div className="font-mono text-gray-100">{assign[k].sku}</div>
+                      <button onClick={function() { uncommitSku(k); }} className="text-xs text-red-400 hover:text-red-300">Bỏ gắn / gắn lại</button>
                     </div>
                   );
                 })}
@@ -445,6 +491,65 @@ function Stat(props: { label: string; value: string; warn?: boolean }) {
     <div className={'rounded-xl border p-3 ' + (props.warn ? 'bg-amber-500/10 border-amber-500/30' : 'bg-slate-900 border-slate-700')}>
       <div className="text-xs text-gray-400">{props.label}</div>
       <div className="text-2xl font-bold text-gray-100 mt-1">{props.value}</div>
+    </div>
+  );
+}
+
+function describeCode(code: string): string {
+  var items = getSkuProducts(code);
+  if (items.length === 0) return '';
+  var qty: Record<string, number> = {};
+  var order: string[] = [];
+  items.forEach(function(p) { if (!(p.product in qty)) { qty[p.product] = 0; order.push(p.product); } qty[p.product] += p.quantity; });
+  return order.map(function(n) { return (qty[n] > 1 ? qty[n] + '× ' : '') + n; }).join(' + ');
+}
+
+// Ô chọn SKU: gõ để lọc, bấm vào gợi ý (hoặc Enter) mới gắn — tránh gắn nhầm khi mới gõ được vài ký tự.
+function SkuPicker(props: { codes: string[]; onCommit: (sku: string) => void }) {
+  const [text, setText] = useState('');
+  const [open, setOpen] = useState(false);
+  const q = text.trim().toUpperCase();
+  const matches = useMemo(function() {
+    if (!q) return [];
+    var starts = props.codes.filter(function(c) { return c.toUpperCase().indexOf(q) === 0; });
+    var has = props.codes.filter(function(c) { return c.toUpperCase().indexOf(q) > 0; });
+    return starts.concat(has).slice(0, 8);
+  }, [q, props.codes]);
+  const exact = props.codes.find(function(c) { return c.toUpperCase() === q; });
+
+  function submit() {
+    if (!q) return;
+    if (exact) { props.onCommit(exact); return; }
+    if (window.confirm('Mã "' + text.trim() + '" chưa có trong bảng quy đổi SKU. Vẫn gắn mã này?\n(Phiếu vẫn in, nhưng không quy ra được sản phẩm gốc cho tới khi thêm mã ở Quản lý SKU.)')) props.onCommit(text.trim());
+  }
+
+  return (
+    <div className="relative">
+      <div className="flex gap-2">
+        <input value={text} placeholder="Gõ mã SKU rồi chọn"
+          onChange={function(e) { setText(e.target.value); setOpen(true); }}
+          onFocus={function() { setOpen(true); }}
+          onBlur={function() { setTimeout(function() { setOpen(false); }, 150); }}
+          onKeyDown={function(e) { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
+          className="px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none w-48" />
+        <button type="button" onClick={submit} disabled={!q}
+          className="px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-sm rounded-lg">Gắn</button>
+      </div>
+      {open && matches.length > 0 && (
+        <div className="absolute z-20 right-0 mt-1 w-80 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-64 overflow-y-auto">
+          {matches.map(function(c) {
+            return (
+              <button key={c} type="button"
+                onMouseDown={function(e) { e.preventDefault(); props.onCommit(c); }}
+                className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-700">
+                <span className="font-mono text-gray-100">{c}</span>
+                <span className="text-gray-400 ml-2 text-xs">{describeCode(c)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {q && !exact && <div className="text-xs text-amber-300 mt-1">Chưa có mã này trong bảng quy đổi SKU</div>}
     </div>
   );
 }
