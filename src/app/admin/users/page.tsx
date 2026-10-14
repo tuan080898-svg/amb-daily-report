@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useAppState } from '@/lib/store';
 import { User, UserRole } from '@/lib/types';
+import { roleLabel } from '@/lib/roles';
 
 export default function AdminUsersPage() {
   const { currentUser, users, shops, addUser, updateUser, deleteUser } = useAppState();
@@ -77,11 +78,11 @@ export default function AdminUsersPage() {
                   <td className="px-4 py-3 text-gray-400">{user.email}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
-                      user.role === 'admin' ? 'bg-purple-500/15 text-purple-400' : 'bg-blue-500/15 text-blue-400'
-                    }`}>{user.role === 'admin' ? 'Admin' : 'Nhân viên'}</span>
+                      user.role === 'admin' ? 'bg-purple-500/15 text-purple-400' : user.role === 'warehouse' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-blue-500/15 text-blue-400'
+                    }`}>{roleLabel(user.role)}</span>
                   </td>
                   <td className="px-4 py-3 text-gray-400 max-w-[300px]">
-                    {user.role === 'admin' ? 'Tất cả' : (assignedShopNames.join(', ') || '—')}
+                    {user.role === 'admin' ? 'Tất cả' : user.role === 'warehouse' ? 'Chỉ trang Phiếu xuất kho' : (assignedShopNames.join(', ') || '—')}
                   </td>
                   <td className="px-4 py-3 text-right space-x-3">
                     <button onClick={() => { setEditing(user); setIsNew(false); }} className="text-blue-400 hover:underline text-xs">Sửa</button>
@@ -146,7 +147,8 @@ function UserForm({ user, shops, onSave, onCancel, isNew }: {
               onChange={e => setForm(f => ({ ...f, role: e.target.value as UserRole }))}
               className="w-full px-3 py-2.5 border border-slate-600 rounded-lg text-sm bg-slate-800 text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
-              <option value="employee">Nhân viên</option>
+              <option value="employee">Nhân viên (báo cáo shop)</option>
+              <option value="warehouse">Nhân sự kho (chỉ Phiếu xuất kho)</option>
               <option value="admin">Admin</option>
             </select>
           </div>

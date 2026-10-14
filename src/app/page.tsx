@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppState } from '@/lib/store';
+import { homeFor } from '@/lib/roles';
 
 export default function Home() {
   const { currentUser } = useAppState();
@@ -10,7 +11,7 @@ export default function Home() {
 
   useEffect(() => {
     if (currentUser) {
-      router.replace('/dashboard');
+      router.replace(homeFor(currentUser.role));
     } else {
       router.replace('/login');
     }

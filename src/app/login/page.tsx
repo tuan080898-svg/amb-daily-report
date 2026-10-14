@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAppState } from '@/lib/store';
+import { homeFor } from '@/lib/roles';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -13,7 +14,7 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (currentUser) {
-      router.replace('/dashboard');
+      router.replace(homeFor(currentUser.role));
     }
   }, [currentUser, router]);
 
@@ -26,7 +27,8 @@ export default function LoginPage() {
     try {
       const ok = await login(email.trim().toLowerCase(), password.trim());
       if (ok) {
-        router.push('/dashboard');
+        // đăng nhập xong currentUser được cập nhật; effect ở trên chuyển đúng trang theo vai trò
+        router.push('/');
       } else {
         setError('Email hoặc mật khẩu không đúng');
       }

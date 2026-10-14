@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useAppState } from '@/lib/store';
 import Sidebar, { MobileBottomNav } from './Sidebar';
 import AiChat from './AiChat';
+import { canAccessPath, homeFor } from '@/lib/roles';
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAppState();
@@ -14,10 +15,13 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
   useEffect(() => {
     if (!currentUser) {
       router.replace('/login');
+    } else if (!canAccessPath(currentUser.role, pathname)) {
+      router.replace(homeFor(currentUser.role));
     }
-  }, [currentUser, router]);
+  }, [currentUser, pathname, router]);
 
   if (!currentUser) return null;
+  if (!canAccessPath(currentUser.role, pathname)) return null;
 
   return (
     <div className="flex min-h-screen">
@@ -33,7 +37,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </div>
       </main>
       <MobileBottomNav />
-      <AiChat />
+      {currentUser.role !== 'warehouse' && <AiChat />}
     </div>
   );
 }

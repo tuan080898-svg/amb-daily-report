@@ -55,6 +55,7 @@ export default function PhieuXuatKhoPage() {
     return subscribeSkuMap(function() { setSkuVer(function(v) { return v + 1; }); });
   }, []);
 
+  const allowed = !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'warehouse');
   const skuCodes = useMemo(function() { return getAllSkuCodes(); }, [skuVer]);
 
   // Đơn đã có trong các phiếu trước (cùng sàn) hoặc bị lặp trong lần tải này
@@ -205,6 +206,10 @@ export default function PhieuXuatKhoPage() {
   }
 
   var inputCls = 'px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none';
+
+  if (!allowed) {
+    return <div className="p-6 text-red-400">Trang này chỉ dành cho nhân sự kho và admin.</div>;
+  }
 
   return (
     <div className="max-w-5xl mx-auto">

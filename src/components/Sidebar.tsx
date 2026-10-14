@@ -55,7 +55,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Kho vận',
     icon: '📦',
     items: [
-      { href: '/kho/phieu-xuat', label: 'Phiếu xuất kho', icon: '🧾', roles: ['admin', 'employee'] },
+      { href: '/kho/phieu-xuat', label: 'Phiếu xuất kho', icon: '🧾', roles: ['admin', 'warehouse'] },
     ],
   },
   {
@@ -89,6 +89,10 @@ const BOTTOM_TABS = [
   { href: '/admin/inventory', label: 'Kho', icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4', adminOnly: true },
 ];
 
+const WAREHOUSE_TABS = [
+  { href: '/kho/phieu-xuat', label: 'Phiếu xuất kho', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+];
+
 function isItemActive(pathname: string, href: string): boolean {
   if (href === '/reports') return pathname === '/reports';
   if (href === '/cskh') return pathname === '/cskh';
@@ -109,7 +113,7 @@ export function MobileBottomNav() {
   const { currentUser } = useAppState();
   if (!currentUser) return null;
 
-  var tabs = BOTTOM_TABS.filter(function(t) {
+  var tabs = currentUser.role === 'warehouse' ? WAREHOUSE_TABS : BOTTOM_TABS.filter(function(t) {
     if ((t as { adminOnly?: boolean }).adminOnly && currentUser.role !== 'admin') return false;
     return true;
   });

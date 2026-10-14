@@ -1,5 +1,5 @@
 export type Channel = 'Shopee' | 'TikTok';
-export type UserRole = 'admin' | 'employee';
+export type UserRole = 'admin' | 'employee' | 'warehouse';
 export type AlertColor = 'green' | 'yellow' | 'red';
 
 export type Region = 'HCM' | 'HN';
