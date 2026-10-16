@@ -173,6 +173,38 @@ export async function parsePxkFile(file: File, platform: PxkPlatform): Promise<P
   return parsePxkPages(await readPages(file), platform, file.name);
 }
 
+// Nhận diện sàn từ chữ trên nhãn: Shopee có "Nội dung hàng / Tổng SL sản phẩm", TikTok có "Product Name / Seller SKU / Qty Total".
+export function detectPxkPlatform(pages: RawItem[][]): PxkPlatform | null {
+  var shopee = 0;
+  var tiktok = 0;
+  pages.slice(0, 5).forEach(function(items) {
+    var text = toLines(items).join('\n');
+    if (/Nội dung hàng|Tổng SL sản phẩm|Mã đơn hàng/.test(text)) shopee++;
+    if (/Seller SKU|Product Name|Qty Total|Order ID:/.test(text)) tiktok++;
+  });
+  if (shopee > tiktok) return 'shopee';
+  if (tiktok > shopee) return 'tiktok';
+  return null;
+}
+
+// Đọc một file PDF, tự nhận diện sàn (hoặc dùng sàn được chỉ định tay).
+export async function parsePxkFileAuto(file: File, force?: PxkPlatform): Promise<{ platform: PxkPlatform | null; orders: PxkOrder[] }> {
+  var pages = await readPages(file);
+  var platform = force || detectPxkPlatform(pages);
+  if (!platform) return { platform: null, orders: [] };
+  return { platform: platform, orders: parsePxkPages(pages, platform, file.name) };
+}
+
+// Đoán kho từ tên file (vd "HN 14.10 hana sáng tt.pdf" -> HN). Không đoán được thì trả null.
+export function guessWarehouse(fileName: string): 'HCM' | 'HN' | null {
+  var n = fileName.normalize('NFC');
+  var hn = /(^|[^A-Za-z])HN([^A-Za-z]|$)|hà\s*nội|ha\s*noi|hanoi/i.test(n);
+  var hcm = /(^|[^A-Za-z])(HCM|SG|TPHCM)([^A-Za-z]|$)|sài\s*gòn|sai\s*gon|hồ\s*chí\s*minh/i.test(n);
+  if (hn && !hcm) return 'HN';
+  if (hcm && !hn) return 'HCM';
+  return null;
+}
+
 // ==================== Gắn SKU cho Shopee ====================
 
 // Khoá so khớp tên: chỉ giữ chữ và số (bỏ khoảng trắng, dấu phẩy...) vì nhãn PDF hay dính/tách chữ khi xuống dòng.
@@ -361,7 +393,7 @@ function fmtDate(d: string): string {
   return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : d;
 }
 
-export function buildPxkHtml(batch: PxkBatch, opts: { showOrders: boolean }): string {
+function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
   var sum = summarizePxk(batch.orders);
   var whLabel = batch.warehouse === 'HN' ? 'Kho Hà Nội' : 'Kho HCM';
   var title = 'PHIẾU XUẤT KHO — ' + PXK_PLATFORM_LABELS[batch.platform].toUpperCase();
@@ -409,18 +441,29 @@ export function buildPxkHtml(batch: PxkBatch, opts: { showOrders: boolean }): st
     orderPage = '<div class="pb"></div><h2>' + (prodTable ? '3' : '2') + '. Danh sách từng đơn (để kiểm tra)</h2><table><thead><tr><th style="width:32px">#</th><th style="width:150px">Mã đơn hàng</th><th>Sản phẩm × SL</th><th style="width:44px">SL</th><th style="width:44px">Đủ</th></tr></thead><tbody>' + orderRows + '</tbody></table>';
   }
 
-  var css = '@page{size:A4;margin:12mm 10mm 14mm;@bottom-right{content:"Trang " counter(page) "/" counter(pages);font-size:10px;color:#555}}' +
-    'html,body{background:#fff;color:#111}body{font-family:Arial,"Segoe UI",sans-serif;font-size:12px;margin:0}' +
-    '.head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:10px}' +
-    'h1{font-size:19px;margin:0}.sub{color:#444;margin-top:3px}.meta{text-align:right;line-height:1.6}' +
-    'h2{font-size:13px;margin:14px 0 6px}table{width:100%;border-collapse:collapse}' +
-    'thead{display:table-header-group}tr{page-break-inside:avoid}' +
-    'th,td{border:1px solid #888;padding:4px 6px;vertical-align:middle}th{background:#eee;text-align:center;font-size:11px}' +
-    '.c{text-align:center}.r{text-align:right;font-weight:bold}.big{font-weight:bold;font-size:14px}.mono{font-family:Consolas,monospace;font-size:11px;word-break:break-all}' +
-    '.alert{border:2px solid #c00;background:#fff0f0;color:#900;padding:6px 10px;margin:0 0 10px;font-weight:bold;font-size:12px}' +
-    '.nosku{font-size:10px;color:#a60;text-align:center}.sn{font-family:Consolas,monospace;font-size:9px;line-height:1.35}.warn td{background:#fff3cd}.total td{background:#f5f5f5}.chk{width:44px}' +
-    '.sign{display:flex;justify-content:space-around;text-align:center;margin-top:28px;page-break-inside:avoid;font-weight:bold}.sign span{font-weight:normal;font-size:10px;color:#666}' +
-    '.sign div{height:80px;width:30%}.pb{page-break-before:always}';
-  return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc('Phieu xuat kho ' + batch.platform + ' ' + batch.warehouse + ' ' + batch.printDate) + '</title><style>' + css + '</style></head><body>' +
-    head + warn + skuTable + prodTable + sign + orderPage + '</body></html>';
+  return head + warn + skuTable + prodTable + sign + orderPage;
+}
+
+var PXK_CSS = '@page{size:A4;margin:12mm 10mm 14mm;@bottom-right{content:"Trang " counter(page) "/" counter(pages);font-size:10px;color:#555}}' +
+  'html,body{background:#fff;color:#111}body{font-family:Arial,"Segoe UI",sans-serif;font-size:12px;margin:0}' +
+  '.head{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #111;padding-bottom:8px;margin-bottom:10px}' +
+  'h1{font-size:19px;margin:0}.sub{color:#444;margin-top:3px}.meta{text-align:right;line-height:1.6}' +
+  'h2{font-size:13px;margin:14px 0 6px}table{width:100%;border-collapse:collapse}' +
+  'thead{display:table-header-group}tr{page-break-inside:avoid}' +
+  'th,td{border:1px solid #888;padding:4px 6px;vertical-align:middle}th{background:#eee;text-align:center;font-size:11px}' +
+  '.c{text-align:center}.r{text-align:right;font-weight:bold}.big{font-weight:bold;font-size:14px}.mono{font-family:Consolas,monospace;font-size:11px;word-break:break-all}' +
+  '.alert{border:2px solid #c00;background:#fff0f0;color:#900;padding:6px 10px;margin:0 0 10px;font-weight:bold;font-size:12px}' +
+  '.nosku{font-size:10px;color:#a60;text-align:center}.sn{font-family:Consolas,monospace;font-size:9px;line-height:1.35}.warn td{background:#fff3cd}.total td{background:#f5f5f5}.chk{width:44px}' +
+  '.sign{display:flex;justify-content:space-around;text-align:center;margin-top:28px;page-break-inside:avoid;font-weight:bold}.sign span{font-weight:normal;font-size:10px;color:#666}' +
+  '.sign div{height:80px;width:30%}.pb{page-break-before:always}.slip + .slip{page-break-before:always}';
+
+// Ghép nhiều phiếu (mỗi sàn/kho một phiếu) vào một lần in; mỗi phiếu bắt đầu ở trang mới.
+export function buildPxkHtmlMulti(batches: PxkBatch[], opts: { showOrders: boolean }): string {
+  var title = batches.length === 1 ? 'Phieu xuat kho ' + batches[0].platform + ' ' + batches[0].warehouse + ' ' + batches[0].printDate : 'Phieu xuat kho ' + batches.length + ' phieu';
+  return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title><style>' + PXK_CSS + '</style></head><body>' +
+    batches.map(function(b) { return '<section class="slip">' + slipBody(b, opts) + '</section>'; }).join('') + '</body></html>';
+}
+
+export function buildPxkHtml(batch: PxkBatch, opts: { showOrders: boolean }): string {
+  return buildPxkHtmlMulti([batch], opts);
 }
