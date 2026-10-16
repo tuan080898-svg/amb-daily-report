@@ -6,7 +6,7 @@ import { toDateString, getDailyTarget, getTargetForDate, getDayType, formatCurre
 import { DailyReport, Shop, PnlImport, PnlDailyData } from '@/lib/types';
 import * as XLSX from 'xlsx';
 import { aggregateProducts, getSkuProducts, ProductSummary } from '@/lib/sku';
-import { loadInventory, addSaleTransactions, planSaleDeduction, type Warehouse } from '@/lib/inventory';
+import type { Warehouse } from '@/lib/inventory';
 import { IS_SUPABASE_CONFIGURED } from '@/lib/supabase';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 
@@ -933,57 +933,6 @@ function FileUploadForm() {
 
     const totalSkuCount = Object.values(collectedSkuByDate).reduce(function(s, arr) { return s + arr.length; }, 0);
 
-    var inventoryDeducted = 0;
-    var inventoryByWh: Record<string, number> = {};
-    var untrackedProducts = new Set<string>();
-    var unmappedCodes = new Set<string>();
-    var baselineSkippedDates = new Set<string>();
-    var inventoryError = '';
-    if (totalSkuCount > 0) {
-      try {
-        var invData = loadInventory();
-        var shopObj = shops.find(function(s) { return s.id === selectedShopId; });
-        var shopLabel = shopObj?.name || selectedShopId;
-        var hasWhData = Object.keys(collectedSkuByDateWh).length > 0;
-
-        var deductDay = function(date: string, codes: string[], wh: Warehouse) {
-          var productQty: Record<string, number> = {};
-          codes.forEach(function(code) {
-            var items = getSkuProducts(code);
-            if (items.length === 0) unmappedCodes.add(code.trim());
-            items.forEach(function(it) {
-              productQty[it.product] = (productQty[it.product] || 0) + it.quantity;
-            });
-          });
-          var sales = Object.entries(productQty).map(function(e) { return { product: e[0], quantity: e[1] }; });
-          if (sales.length === 0) return;
-          var plan = planSaleDeduction(invData, sales, date, wh);
-          plan.noConfig.forEach(function(p) { untrackedProducts.add(p); });
-          if (plan.beforeBaseline.length > 0) baselineSkippedDates.add(date);
-          invData = addSaleTransactions(invData, sales, date, shopLabel, wh);
-          var deducted = plan.deduct.reduce(function(s, x) { return s + x.quantity; }, 0);
-          inventoryDeducted += deducted;
-          inventoryByWh[wh] = (inventoryByWh[wh] || 0) + deducted;
-        };
-
-        if (hasWhData) {
-          Object.entries(collectedSkuByDateWh).forEach(function(dateEntry) {
-            Object.entries(dateEntry[1]).forEach(function(whEntry) {
-              deductDay(dateEntry[0], whEntry[1], whEntry[0] as Warehouse);
-            });
-          });
-        } else {
-          var shopRegion = (shopObj?.region || 'HCM') as Warehouse;
-          Object.entries(collectedSkuByDate).forEach(function(entry) {
-            deductDay(entry[0], entry[1], shopRegion);
-          });
-        }
-      } catch (err) {
-        console.error('[Inventory] Lỗi trừ kho:', err);
-        inventoryError = err instanceof Error ? err.message : String(err);
-      }
-    }
-
     // Auto-generate PnL data
     var pnlGenerated = false;
     if (rawDataList.length > 0 && detectedPlatform && selectedShopId && validRows.length > 0) {
@@ -1011,26 +960,8 @@ function FileUploadForm() {
     if (updated > 0) parts.push('cập nhật ' + updated + ' báo cáo');
     if (mktTotal > 0) parts.push('CP QC ' + formatCurrency(mktTotal));
     if (totalSkuCount > 0) parts.push(totalSkuCount + ' SKU');
-    if (inventoryDeducted > 0) {
-      var whKeys = Object.keys(inventoryByWh);
-      if (whKeys.length > 1) {
-        var whParts = whKeys.map(function(w) { return w + ' ' + inventoryByWh[w]; });
-        parts.push('trừ kho ' + whParts.join(' + ') + ' SP');
-      } else {
-        parts.push('trừ kho ' + inventoryDeducted + ' SP');
-      }
-    }
     if (pnlGenerated) parts.push('PnL tự động');
-    var invWarns: string[] = [];
-    var unmappedList = Array.from(unmappedCodes);
-    if (unmappedList.length > 0) invWarns.push(unmappedList.length + ' mã SKU chưa có trong bảng quy đổi nên CHƯA trừ kho: ' + unmappedList.slice(0, 5).join(', ') + (unmappedList.length > 5 ? '...' : ''));
-    var untrackedList = Array.from(untrackedProducts);
-    if (untrackedList.length > 0) invWarns.push(untrackedList.length + ' SP chưa cài tồn đầu nên CHƯA trừ kho: ' + untrackedList.slice(0, 5).join(', ') + (untrackedList.length > 5 ? '...' : ''));
-    var baselineDatesList = Array.from(baselineSkippedDates).sort();
-    if (baselineDatesList.length > 0) invWarns.push('không trừ kho ' + baselineDatesList.length + ' ngày (' + baselineDatesList.slice(0, 3).join(', ') + (baselineDatesList.length > 3 ? '...' : '') + ') vì đã nằm trong số tồn đã chốt');
-    if (inventoryError) invWarns.push('LỖI khi trừ kho: ' + inventoryError);
-    var untrackedWarn = invWarns.length > 0 ? ' | ⚠ ' + invWarns.join(' | ⚠ ') : '';
-    setSuccess('Đã import: ' + parts.join(', ') + untrackedWarn);
+    setSuccess('Đã import: ' + parts.join(', '));
 
     setParsedRows([]);
     setFileNames([]);

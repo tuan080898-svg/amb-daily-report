@@ -468,11 +468,6 @@ export function addStockImport(data: InventoryData, product: string, quantity: n
   return saveInventory(updated);
 }
 
-function isTrackedIn(data: InventoryData, product: string, wh: Warehouse): boolean {
-  var cfg = data.products[product];
-  return !!(cfg && cfg[wh] && cfg[wh].initialStock > 0);
-}
-
 // Mốc tồn: dòng giao dịch loại 'initial' (số lượng 0) ghi ngày chốt tồn đầu của sản phẩm ở kho.
 // Đơn bán có ngày <= mốc đã nằm sẵn trong số tồn đã chốt nên không được trừ lại.
 export function makeStockBaselineTx(product: string, wh: Warehouse, date: string, note: string): InventoryTransaction {
@@ -485,62 +480,6 @@ export function makeStockBaselineTx(product: string, wh: Warehouse, date: string
     note: note,
     warehouse: wh,
   };
-}
-
-function baselineDates(data: InventoryData, wh: Warehouse): Record<string, string> {
-  var out: Record<string, string> = {};
-  data.transactions.forEach(function(t) {
-    if (t.type === 'initial' && t.warehouse === wh && (!out[t.product] || t.date > out[t.product])) out[t.product] = t.date;
-  });
-  return out;
-}
-
-export interface SaleDeductionPlan {
-  deduct: Array<{ product: string; quantity: number }>;
-  noConfig: string[];
-  beforeBaseline: string[];
-}
-
-// Phân loại các dòng bán của một ngày: trừ được / chưa cài tồn đầu / đã nằm trong số tồn chốt.
-export function planSaleDeduction(data: InventoryData, sales: Array<{ product: string; quantity: number }>, date: string, wh: Warehouse): SaleDeductionPlan {
-  var baselines = baselineDates(data, wh);
-  var plan: SaleDeductionPlan = { deduct: [], noConfig: [], beforeBaseline: [] };
-  sales.forEach(function(s) {
-    if (s.quantity <= 0) return;
-    if (!isTrackedIn(data, s.product, wh)) plan.noConfig.push(s.product);
-    else if (baselines[s.product] && date <= baselines[s.product]) plan.beforeBaseline.push(s.product);
-    else plan.deduct.push(s);
-  });
-  return plan;
-}
-
-export function addSaleTransactions(data: InventoryData, sales: Array<{ product: string; quantity: number }>, date: string, shopName: string, wh: Warehouse): InventoryData {
-  var newTxs = planSaleDeduction(data, sales, date, wh).deduct
-    .map(function(s) {
-      return {
-        id: 'tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-        date: date,
-        product: s.product,
-        quantity: -s.quantity,
-        type: 'sale' as const,
-        note: shopName,
-        warehouse: wh,
-      };
-    });
-  if (newTxs.length === 0) return data;
-  function isSameDaySale(t: InventoryTransaction): boolean {
-    return t.type === 'sale' && t.date === date && t.note === shopName && t.warehouse === wh;
-  }
-  var removeIds: string[] = [];
-  var seen = new Set<string>();
-  data.transactions.concat(loadInventory().transactions).forEach(function(t) {
-    if (isSameDaySale(t) && !seen.has(t.id)) { seen.add(t.id); removeIds.push(t.id); }
-  });
-  var updated = {
-    products: JSON.parse(JSON.stringify(data.products)),
-    transactions: data.transactions.filter(function(t) { return !isSameDaySale(t); }).concat(newTxs),
-  };
-  return saveInventory(updated, { deleteTxIds: removeIds });
 }
 
 export function getTrackedProducts(): string[] {
