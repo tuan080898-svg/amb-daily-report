@@ -3,12 +3,11 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useAppState } from '@/lib/store';
 import { getAllSkuCodes, getSkuProducts, subscribeSkuMap } from '@/lib/sku';
-import { WAREHOUSES, WAREHOUSE_LABELS, type Warehouse } from '@/lib/inventory';
 import { dbGetPxk, dbUpdatePxk } from '@/lib/db';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
 import {
-  parsePxkFileAuto, guessWarehouse, summarizePxk, buildPxkHtmlMulti, pxkNameKey, PXK_PLATFORM_LABELS,
+  parsePxkFileAuto, summarizePxk, buildPxkHtmlMulti, pxkNameKey, PXK_PLATFORM_LABELS,
   type PxkPlatform, type PxkOrder, type PxkBatch, type PxkData, type PxkItem,
 } from '@/lib/pxk';
 
@@ -28,14 +27,12 @@ function makeBatchId(): string {
   return 'PX' + ymd + '-' + Math.random().toString(36).slice(2, 6).toUpperCase();
 }
 
-// Một file PDF đã đọc: sàn (tự nhận diện) + kho (đoán từ tên file, sửa được) + các nhãn trong file
+// Một file PDF đã đọc: sàn (tự nhận diện) + các nhãn trong file
 interface PxkFile {
   id: string;
   file: File;
   name: string;
   platform: PxkPlatform | null;
-  wh: Warehouse;
-  whGuessed: boolean;
   orders: PxkOrder[];
   error: string;
 }
@@ -43,7 +40,6 @@ interface PxkFile {
 interface GroupView {
   key: string;
   platform: PxkPlatform;
-  wh: Warehouse;
   used: PxkOrder[];
   oldCount: number;
   resolved: Array<{ orderId: string; items: PxkItem[] }>;
@@ -53,7 +49,6 @@ interface GroupView {
 
 export default function PhieuXuatKhoPage() {
   const { currentUser } = useAppState();
-  const [defaultWh, setDefaultWh] = useState<Warehouse>('HCM');
   const [printDate, setPrintDate] = useState(todayStr());
   const [files, setFiles] = useState<PxkFile[]>([]);
   const [parsingMsg, setParsingMsg] = useState('');
@@ -106,7 +101,7 @@ export default function PhieuXuatKhoPage() {
   // Gộp các file theo (sàn, kho); mã đơn lặp giữa các file chỉ tính một lần
   const analysis = useMemo(function() {
     var seen: Record<PxkPlatform, Set<string>> = { shopee: new Set<string>(), tiktok: new Set<string>() };
-    var map: Record<string, { platform: PxkPlatform; wh: Warehouse; fresh: PxkOrder[]; old: PxkOrder[] }> = {};
+    var map: Record<string, { platform: PxkPlatform; fresh: PxkOrder[]; old: PxkOrder[] }> = {};
     var dupInUpload = 0;
     var noId: PxkOrder[] = [];
     files.forEach(function(f) {
@@ -116,8 +111,7 @@ export default function PhieuXuatKhoPage() {
         if (!o.orderId) { noId.push(o); return; }
         if (seen[plat].has(o.orderId)) { dupInUpload++; return; }
         seen[plat].add(o.orderId);
-        var key = plat + '|' + f.wh;
-        var g = map[key] || (map[key] = { platform: plat, wh: f.wh, fresh: [], old: [] });
+        var g = map[plat] || (map[plat] = { platform: plat, fresh: [], old: [] });
         (prevOrders[plat][o.orderId] ? g.old : g.fresh).push(o);
       });
     });
@@ -129,7 +123,7 @@ export default function PhieuXuatKhoPage() {
       var used = g.fresh.concat(excludeOld ? [] : g.old);
       var resolved = resolveOrders(used);
       return {
-        key: g.key, platform: g.platform, wh: g.wh, used: used, oldCount: g.old.length,
+        key: g.key, platform: g.platform, used: used, oldCount: g.old.length,
         resolved: resolved, summary: summarizePxk(resolved), bad: used.filter(function(o) { return !o.ok; }),
       };
     });
@@ -175,18 +169,16 @@ export default function PhieuXuatKhoPage() {
       if (dup) { skipped.push(f.name); continue; }
       setParsingMsg('Đang đọc ' + (i + 1) + '/' + incoming.length + ': ' + f.name);
       var entry: PxkFile;
-      var guess = guessWarehouse(f.name);
       try {
         var r = await parsePxkFileAuto(f);
-        guess = r.warehouse || guess; // địa chỉ người gửi trên nhãn đáng tin hơn tên file
         entry = {
           id: f.name + '|' + f.size + '|' + Date.now() + i, file: f, name: f.name, platform: r.platform,
-          wh: guess || defaultWh, whGuessed: !!guess, orders: r.orders,
+          orders: r.orders,
           error: r.platform ? (r.orders.length === 0 ? 'Không đọc được nhãn nào trong file này.' : '') : 'Không nhận diện được sàn (không phải nhãn Shopee / TikTok?). Chọn sàn thủ công bên dưới.',
         };
       } catch (e) {
         entry = {
-          id: f.name + '|' + f.size + '|' + Date.now() + i, file: f, name: f.name, platform: null, wh: guess || defaultWh, whGuessed: !!guess, orders: [],
+          id: f.name + '|' + f.size + '|' + Date.now() + i, file: f, name: f.name, platform: null, orders: [],
           error: 'Không đọc được file: ' + (e instanceof Error ? e.message : String(e)),
         };
       }
@@ -213,10 +205,6 @@ export default function PhieuXuatKhoPage() {
       setError('Không đọc lại được file: ' + (e instanceof Error ? e.message : String(e)));
     }
     setParsingMsg('');
-  }
-
-  function setFileWh(id: string, wh: Warehouse) {
-    setFiles(function(prev) { return prev.map(function(f) { return f.id === id ? Object.assign({}, f, { wh: wh, whGuessed: false }) : f; }); });
   }
 
   function removeFile(id: string) {
@@ -302,7 +290,7 @@ export default function PhieuXuatKhoPage() {
     var lines = ['LẬP VÀ IN ' + ready.length + ' PHIẾU (ngày ' + fmtDate(printDate) + ')', ''];
     ready.forEach(function(g) {
       var noSku = g.summary.unresolved.reduce(function(s, u) { return s + u.qty; }, 0);
-      lines.push('• ' + PXK_PLATFORM_LABELS[g.platform] + ' — ' + WAREHOUSE_LABELS[g.wh] + ': ' + g.resolved.length + ' đơn, ' + g.summary.totalQty + ' sản phẩm' +
+      lines.push('• ' + PXK_PLATFORM_LABELS[g.platform] + ': ' + g.resolved.length + ' đơn, ' + g.summary.totalQty + ' sản phẩm' +
         (noSku > 0 ? ' (⚠ ' + noSku + ' sản phẩm chưa có SKU)' : '') + (g.bad.length > 0 ? ' (⚠ ' + g.bad.length + ' nhãn đọc chưa chắc)' : ''));
     });
     if (unmappedAll.length > 0) lines.push('', '⚠ SKU chưa có trong bảng quy đổi (vẫn in, không quy ra sản phẩm gốc): ' + unmappedAll.join(', '));
@@ -317,7 +305,7 @@ export default function PhieuXuatKhoPage() {
       var by = currentUser ? currentUser.name : '';
       var batches: PxkBatch[] = ready.map(function(g) {
         return {
-          id: makeBatchId(), platform: g.platform, warehouse: g.wh, printDate: printDate, createdAt: createdAt, createdBy: by,
+          id: makeBatchId(), platform: g.platform, printDate: printDate, createdAt: createdAt, createdBy: by,
           issues: g.bad.map(function(o) { return o.orderId || ('trang ' + o.pages.join('-')); }),
           notes: noteForOld(g),
           orders: g.resolved,
@@ -363,7 +351,7 @@ export default function PhieuXuatKhoPage() {
     <div className="max-w-5xl mx-auto">
       <div className="mb-5">
         <h1 className="text-2xl font-bold text-gray-100">Phiếu xuất kho</h1>
-        <p className="text-sm text-gray-500 mt-1">Chọn một lúc nhiều file PDF in đơn (Shopee và TikTok, nhiều kho) → app tự nhận diện sàn, tổng hợp theo SKU để kho nhặt hàng, mỗi sàn/kho một phiếu và in một lượt.</p>
+        <p className="text-sm text-gray-500 mt-1">Chọn một lúc nhiều file PDF in đơn (Shopee và TikTok cùng lúc được) → app tự nhận diện sàn, tổng hợp theo SKU để kho nhặt hàng, mỗi sàn một phiếu và in một lượt.</p>
       </div>
 
       {(hasShopee || files.length === 0) && (
@@ -394,18 +382,9 @@ export default function PhieuXuatKhoPage() {
           onClick={function() { if (!parsingMsg && !busy) fileRef.current?.click(); }}
           className={'cursor-pointer rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors ' + (dragging ? 'border-blue-400 bg-blue-500/10' : 'border-slate-600 hover:border-slate-500')}>
           <div className="text-sm font-medium text-gray-200">{parsingMsg ? parsingMsg : '📄 Kéo thả hoặc bấm để chọn nhiều file PDF in đơn'}</div>
-          <div className="text-xs text-gray-500 mt-1">Chọn cả file Shopee và TikTok cùng lúc được · có thể thêm file nhiều lần · app tự nhận diện sàn; kho tự nhận từ địa chỉ người gửi trên nhãn Shopee hoặc từ tên file (có HN / HCM)</div>
+          <div className="text-xs text-gray-500 mt-1">Chọn cả file Shopee và TikTok cùng lúc được · có thể thêm file nhiều lần · app tự nhận diện sàn từng file</div>
         </div>
         <div className="flex flex-wrap gap-4 items-end mt-4">
-          <div>
-            <div className="text-xs text-gray-400 mb-1.5">Kho mặc định (file không có HN/HCM trong tên)</div>
-            <div className="flex gap-1 bg-slate-800 rounded-lg p-1">
-              {WAREHOUSES.map(function(w) {
-                return <button key={w} onClick={function() { setDefaultWh(w); }}
-                  className={'px-3 py-1.5 rounded-md text-sm font-medium ' + (defaultWh === w ? (w === 'HCM' ? 'bg-blue-600 text-white' : 'bg-violet-600 text-white') : 'text-gray-400 hover:text-gray-200')}>{WAREHOUSE_LABELS[w]}</button>;
-              })}
-            </div>
-          </div>
           <div>
             <div className="text-xs text-gray-400 mb-1.5">Ngày in phiếu</div>
             <input type="date" value={printDate} onChange={function(e) { setPrintDate(e.target.value); }} className={inputCls} />
@@ -418,7 +397,7 @@ export default function PhieuXuatKhoPage() {
             <table className="w-full text-sm">
               <thead><tr className="text-xs text-gray-400 border-b border-slate-700">
                 <th className="px-2 py-2 text-left">File</th><th className="px-2 py-2 text-left">Sàn</th><th className="px-2 py-2 text-right">Số nhãn</th>
-                <th className="px-2 py-2 text-left">Kho</th><th className="px-2 py-2"></th>
+                <th className="px-2 py-2"></th>
               </tr></thead>
               <tbody>
                 {files.map(function(f) {
@@ -436,12 +415,6 @@ export default function PhieuXuatKhoPage() {
                             </select>}
                       </td>
                       <td className="px-2 py-2 text-right text-gray-300">{f.orders.length}</td>
-                      <td className="px-2 py-2">
-                        <select value={f.wh} onChange={function(e) { setFileWh(f.id, e.target.value as Warehouse); }} className={inputCls + ' py-1'}>
-                          {WAREHOUSES.map(function(w) { return <option key={w} value={w}>{WAREHOUSE_LABELS[w]}</option>; })}
-                        </select>
-                        {f.whGuessed && <span className="ml-2 text-xs text-gray-500">tự nhận</span>}
-                      </td>
                       <td className="px-2 py-2 text-right"><button onClick={function() { removeFile(f.id); }} className="text-xs text-red-400 hover:text-red-300">Gỡ</button></td>
                     </tr>
                   );
@@ -542,7 +515,6 @@ export default function PhieuXuatKhoPage() {
               <details key={g.key} open={groups.length === 1} className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden mb-4">
                 <summary className="px-4 py-3 cursor-pointer flex flex-wrap items-center gap-3 text-sm">
                   <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + (g.platform === 'shopee' ? 'bg-orange-500/15 text-orange-400' : 'bg-pink-500/15 text-pink-400')}>{PXK_PLATFORM_LABELS[g.platform]}</span>
-                  <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + (g.wh === 'HCM' ? 'bg-blue-500/15 text-blue-300' : 'bg-violet-500/15 text-violet-300')}>{WAREHOUSE_LABELS[g.wh]}</span>
                   <span className="font-semibold text-gray-100">1 phiếu: {g.resolved.length} đơn · {s.totalQty} sản phẩm · {s.skuLines.length + s.unresolved.length} mã SKU</span>
                   {g.oldCount > 0 && <span className="text-xs text-amber-300">({g.oldCount} đơn đã lập phiếu trước{excludeOld ? ', ĐÃ BỎ' : ', vẫn in'})</span>}
                   {g.bad.length > 0 && <span className="text-xs text-amber-300">⚠ {g.bad.length} nhãn chưa chắc</span>}
@@ -614,7 +586,7 @@ export default function PhieuXuatKhoPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="text-xs text-gray-400 border-b border-slate-700">
-                <th className="px-4 py-2 text-left">Mã phiếu</th><th className="px-4 py-2 text-left">Sàn</th><th className="px-4 py-2 text-left">Kho</th>
+                <th className="px-4 py-2 text-left">Mã phiếu</th><th className="px-4 py-2 text-left">Sàn</th>
                 <th className="px-4 py-2 text-left">Ngày in</th><th className="px-4 py-2 text-right">Đơn</th><th className="px-4 py-2 text-right">SL</th>
                 <th className="px-4 py-2 text-left">Người lập</th><th className="px-4 py-2"></th>
               </tr></thead>
@@ -625,7 +597,6 @@ export default function PhieuXuatKhoPage() {
                     <tr key={b.id} className="border-b border-slate-800">
                       <td className="px-4 py-2 font-mono text-gray-300">{b.id}</td>
                       <td className="px-4 py-2 text-gray-300">{PXK_PLATFORM_LABELS[b.platform]}</td>
-                      <td className="px-4 py-2 text-gray-300">{b.warehouse}</td>
                       <td className="px-4 py-2 text-gray-300">{fmtDate(b.printDate)}</td>
                       <td className="px-4 py-2 text-right text-gray-300">{b.orders.length}</td>
                       <td className="px-4 py-2 text-right text-gray-300">{qty}</td>

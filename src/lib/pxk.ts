@@ -24,7 +24,7 @@ export interface PxkOrder {
 export interface PxkBatch {
   id: string;
   platform: PxkPlatform;
-  warehouse: 'HCM' | 'HN';
+  warehouse?: 'HCM' | 'HN'; // phiếu cũ có ghi kho; phiếu mới không phân biệt kho
   printDate: string; // YYYY-MM-DD
   createdAt: string; // ISO
   createdBy: string;
@@ -188,55 +188,12 @@ export function detectPxkPlatform(pages: RawItem[][]): PxkPlatform | null {
   return null;
 }
 
-// Kho xuất hàng của nhãn Shopee: lấy từ địa chỉ người gửi (khối "Từ:", cột bên trái) — Hà Nội hoặc Hồ Chí Minh.
-export function detectShopeeWarehouse(pages: RawItem[][]): 'HCM' | 'HN' | null {
-  var hn = 0;
-  var hcm = 0;
-  pages.slice(0, 10).forEach(function(items) {
-    if (items.length === 0) return;
-    var rows: Array<{ y: number; t: string }> = [];
-    var maxX = 0;
-    items.forEach(function(i) { if (i.x > maxX) maxX = i.x; });
-    items.forEach(function(i) {
-      var r = rows.find(function(r) { return Math.abs(r.y - i.y) < 2.5; });
-      if (!r) { r = { y: i.y, t: '' }; rows.push(r); }
-    });
-    rows.forEach(function(r) {
-      r.t = items.filter(function(i) { return Math.abs(r.y - i.y) < 2.5; }).sort(function(a, b) { return a.x - b.x; }).map(function(i) { return i.s; }).join('');
-    });
-    var from = rows.find(function(r) { return /^Từ:/.test(r.t); });
-    var content = rows.find(function(r) { return /^Nội dung hàng/.test(r.t); });
-    if (!from || !content) return;
-    var fromY = from.y;
-    var contentY = content.y;
-    var txt = items
-      .filter(function(i) { return i.x < maxX * 0.45 && i.y <= fromY + 1 && i.y > contentY; })
-      .sort(function(a, b) { return (b.y - a.y) || (a.x - b.x); })
-      .map(function(i) { return i.s; }).join('');
-    if (/Hà\s*Nội|Ha\s*Noi/i.test(txt)) hn++;
-    else if (/Hồ\s*Chí\s*Minh|TP\.?\s*HCM|Sài\s*Gòn|Ho\s*Chi\s*Minh/i.test(txt)) hcm++;
-  });
-  if (hn > hcm) return 'HN';
-  if (hcm > hn) return 'HCM';
-  return null;
-}
-
-// Đọc một file PDF, tự nhận diện sàn (hoặc dùng sàn được chỉ định tay) và kho (nếu nhãn có ghi).
-export async function parsePxkFileAuto(file: File, force?: PxkPlatform): Promise<{ platform: PxkPlatform | null; orders: PxkOrder[]; warehouse: 'HCM' | 'HN' | null }> {
+// Đọc một file PDF, tự nhận diện sàn (hoặc dùng sàn được chỉ định tay). Không phân biệt kho.
+export async function parsePxkFileAuto(file: File, force?: PxkPlatform): Promise<{ platform: PxkPlatform | null; orders: PxkOrder[] }> {
   var pages = await readPages(file);
   var platform = force || detectPxkPlatform(pages);
-  if (!platform) return { platform: null, orders: [], warehouse: null };
-  return { platform: platform, orders: parsePxkPages(pages, platform, file.name), warehouse: platform === 'shopee' ? detectShopeeWarehouse(pages) : null };
-}
-
-// Đoán kho từ tên file (vd "HN 14.10 hana sáng tt.pdf" -> HN). Không đoán được thì trả null.
-export function guessWarehouse(fileName: string): 'HCM' | 'HN' | null {
-  var n = fileName.normalize('NFC');
-  var hn = /(^|[^A-Za-z])HN([^A-Za-z]|$)|hà\s*nội|ha\s*noi|hanoi/i.test(n);
-  var hcm = /(^|[^A-Za-z])(HCM|SG|TPHCM)([^A-Za-z]|$)|sài\s*gòn|sai\s*gon|hồ\s*chí\s*minh/i.test(n);
-  if (hn && !hcm) return 'HN';
-  if (hcm && !hn) return 'HCM';
-  return null;
+  if (!platform) return { platform: null, orders: [] };
+  return { platform: platform, orders: parsePxkPages(pages, platform, file.name) };
 }
 
 // ==================== Gắn SKU cho Shopee ====================
@@ -429,9 +386,9 @@ function fmtDate(d: string): string {
 
 function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
   var sum = summarizePxk(batch.orders);
-  var whLabel = batch.warehouse === 'HN' ? 'Kho Hà Nội' : 'Kho HCM';
+  var whLabel = batch.warehouse === 'HN' ? 'Kho Hà Nội · ' : batch.warehouse === 'HCM' ? 'Kho HCM · ' : '';
   var title = 'PHIẾU XUẤT KHO — ' + PXK_PLATFORM_LABELS[batch.platform].toUpperCase();
-  var head = '<div class="head"><div><h1>' + esc(title) + '</h1><div class="sub">' + esc(whLabel) + ' · Mã phiếu: ' + esc(batch.id) + '</div></div>' +
+  var head = '<div class="head"><div><h1>' + esc(title) + '</h1><div class="sub">' + esc(whLabel) + 'Mã phiếu: ' + esc(batch.id) + '</div></div>' +
     '<div class="meta">Ngày in phiếu: <b>' + esc(fmtDate(batch.printDate)) + '</b><br>Số đơn: <b>' + sum.orderCount + '</b> · Tổng SL: <b>' + sum.totalQty + '</b></div></div>';
 
   var shopee = batch.platform === 'shopee';
@@ -494,7 +451,7 @@ var PXK_CSS = '@page{size:A4;margin:12mm 10mm 14mm;@bottom-right{content:"Trang 
 
 // Ghép nhiều phiếu (mỗi sàn/kho một phiếu) vào một lần in; mỗi phiếu bắt đầu ở trang mới.
 export function buildPxkHtmlMulti(batches: PxkBatch[], opts: { showOrders: boolean }): string {
-  var title = batches.length === 1 ? 'Phieu xuat kho ' + batches[0].platform + ' ' + batches[0].warehouse + ' ' + batches[0].printDate : 'Phieu xuat kho ' + batches.length + ' phieu';
+  var title = batches.length === 1 ? 'Phieu xuat kho ' + batches[0].platform + ' ' + batches[0].printDate : 'Phieu xuat kho ' + batches.length + ' phieu';
   return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title><style>' + PXK_CSS + '</style></head><body>' +
     batches.map(function(b) { return '<section class="slip">' + slipBody(b, opts) + '</section>'; }).join('') + '</body></html>';
 }
