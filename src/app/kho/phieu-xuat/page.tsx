@@ -313,6 +313,7 @@ export default function PhieuXuatKhoPage() {
       });
       var msg = 'Đã lập ' + batches.length + ' phiếu: ' + batches.map(function(b) { return b.id; }).join(', ') + '.';
       try {
+        await saveChain.current; // đợi các lần ghi nhớ SKU đang chạy xong rồi mới ghi phiếu, tránh ghi đè lẫn nhau
         var learned: Record<string, string> = {};
         Object.keys(assign).forEach(function(k) { if (assign[k] && assign[k].sku) learned[k] = assign[k].sku; });
         var next = await dbUpdatePxk(function(cur) {
