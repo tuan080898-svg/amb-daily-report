@@ -7,7 +7,7 @@ import { dbGetPxk, dbUpdatePxk } from '@/lib/db';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
 import {
-  parsePxkFileAuto, summarizePxk, buildPxkHtmlMulti, pxkNameKey, PXK_PLATFORM_LABELS,
+  parsePxkFileAuto, summarizePxk, findQtyMismatches, buildPxkHtmlMulti, pxkNameKey, PXK_PLATFORM_LABELS,
   type PxkPlatform, type PxkOrder, type PxkBatch, type PxkData, type PxkItem,
 } from '@/lib/pxk';
 
@@ -61,6 +61,7 @@ export default function PhieuXuatKhoPage() {
   // SKU nhân sự đã gắn trong lần này (khoá tên chuẩn hoá -> { sku, tên }); cũng được lưu ngay lên cloud để nhớ cho lần sau
   const [assign, setAssign] = useState<Record<string, { sku: string; name: string }>>({});
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
+  const [okQty, setOkQty] = useState<Record<string, boolean>>({}); // dòng nghi sai SKU mà người dùng xác nhận là đúng
   const [excludeOld, setExcludeOld] = useState(false); // mặc định in ĐỦ mọi đơn đã chọn, kể cả đơn đã lập phiếu trước
   const [showOrders, setShowOrders] = useState(true);
   const [skuVer, setSkuVer] = useState(0);
@@ -136,6 +137,13 @@ export default function PhieuXuatKhoPage() {
     groups.forEach(function(g) { if (g.platform === 'shopee') all = all.concat(g.resolved); });
     return summarizePxk(all).unresolved;
   }, [groups]);
+
+  // Dòng nghi gắn sai SKU: số lượng ghi trên nhãn khác số lượng của SKU
+  const qtyMismatches = useMemo(function() {
+    var all: Array<{ orderId: string; items: PxkItem[] }> = [];
+    groups.forEach(function(g) { all = all.concat(g.resolved); });
+    return findQtyMismatches(all).filter(function(c) { return !okQty[c.key]; });
+  }, [groups, okQty, skuVer]);
 
   const unmappedAll = useMemo(function() {
     var s = new Set<string>();
@@ -277,6 +285,13 @@ export default function PhieuXuatKhoPage() {
     return [Object.values(by).reduce(function(s, n) { return s + n; }, 0) + ' đơn trong phiếu này ĐÃ CÓ trong phiếu lập trước đó: ' + keys.map(function(k) { return k + ' ×' + by[k]; }).join(', ') + '. Kiểm tra để không nhặt hàng hai lần.'];
   }
 
+  // Ghi chú in lên phiếu: các dòng của phiếu còn nghi gắn sai SKU
+  function noteForQty(g: GroupView): string[] {
+    var bad = findQtyMismatches(g.resolved).filter(function(c) { return !okQty[c.key]; });
+    if (bad.length === 0) return [];
+    return ['Có ' + bad.length + ' dòng NGHI GẮN SAI SKU (số lượng ghi trên nhãn khác số lượng của SKU), kiểm tra lại khi đóng gói: ' + bad.map(function(c) { return c.sku + ' — nhãn ghi ' + c.nameQty + ', SKU quy ra ' + c.skuUnits + ' (' + c.qty + ' dòng)'; }).join('; ') + '.'];
+  }
+
   function openPrint(html: string, w: Window | null) {
     if (!w) { setError('Trình duyệt chặn cửa sổ in. Hãy cho phép cửa sổ bật lên (pop-up) cho trang này rồi bấm "In lại" ở mục Lịch sử.'); return; }
     w.document.open(); w.document.write(html); w.document.close(); w.focus();
@@ -293,6 +308,7 @@ export default function PhieuXuatKhoPage() {
       lines.push('• ' + PXK_PLATFORM_LABELS[g.platform] + ': ' + g.resolved.length + ' đơn, ' + g.summary.totalQty + ' sản phẩm' +
         (noSku > 0 ? ' (⚠ ' + noSku + ' sản phẩm chưa có SKU)' : '') + (g.bad.length > 0 ? ' (⚠ ' + g.bad.length + ' nhãn đọc chưa chắc)' : ''));
     });
+    if (qtyMismatches.length > 0) lines.push('', '⚠ ' + qtyMismatches.length + ' dòng nghi gắn sai SKU (số lượng trên nhãn khác số lượng của SKU): ' + qtyMismatches.map(function(c) { return c.sku + ' (nhãn ghi ' + c.nameQty + ', SKU = ' + c.skuUnits + ')'; }).join('; '));
     if (unmappedAll.length > 0) lines.push('', '⚠ SKU chưa có trong bảng quy đổi (vẫn in, không quy ra sản phẩm gốc): ' + unmappedAll.join(', '));
     if (totalOld > 0) lines.push('', (excludeOld ? 'ℹ Đã BỎ ' : '⚠ Có ') + totalOld + (excludeOld ? ' đơn đã lập phiếu trước đó (không in).' : ' đơn đã lập phiếu trước đó — vẫn được in lại trong các phiếu này.'));
     lines.push('', 'Tiếp tục?');
@@ -307,7 +323,7 @@ export default function PhieuXuatKhoPage() {
         return {
           id: makeBatchId(), platform: g.platform, printDate: printDate, createdAt: createdAt, createdBy: by,
           issues: g.bad.map(function(o) { return o.orderId || ('trang ' + o.pages.join('-')); }),
-          notes: noteForOld(g),
+          notes: noteForOld(g).concat(noteForQty(g)),
           orders: g.resolved,
         };
       });
@@ -497,6 +513,26 @@ export default function PhieuXuatKhoPage() {
                       <div className="flex-1 min-w-[260px] text-gray-400">{assign[k].name}</div>
                       <div className="font-mono text-gray-100">{assign[k].sku}</div>
                       <button onClick={function() { uncommitSku(k); }} className="text-xs text-red-400 hover:text-red-300">Bỏ gắn / gắn lại</button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {qtyMismatches.length > 0 && (
+            <div className="mb-4 bg-slate-900 border border-red-500/40 rounded-xl overflow-visible">
+              <div className="px-4 py-3 border-b border-slate-700 text-sm text-red-300">
+                Nghi gắn SAI SKU — {qtyMismatches.length} dòng có số lượng ghi trên nhãn khác số lượng của SKU đã gắn (dễ làm phiếu thiếu hàng). Chọn lại SKU đúng, hoặc bấm "Đúng rồi" nếu SKU đã đúng.
+              </div>
+              <div className="divide-y divide-slate-800">
+                {qtyMismatches.map(function(c) {
+                  return (
+                    <div key={c.key} className="px-4 py-2.5 flex flex-wrap items-center gap-3">
+                      <div className="flex-1 min-w-[260px] text-sm text-gray-300">{c.name}</div>
+                      <div className="text-sm text-gray-400">đang gắn <b className="font-mono text-gray-100">{c.sku}</b> = {c.skuUnits} · nhãn ghi <b className="text-red-300">{c.nameQty}</b> · {c.orders} đơn</div>
+                      <SkuPicker codes={skuCodes} onCommit={function(sku) { commitSku(c.key, c.name, sku); }} />
+                      <button onClick={function() { setOkQty(function(m) { var n = Object.assign({}, m); n[c.key] = true; return n; }); }} className="px-3 py-2 text-xs text-gray-300 border border-slate-600 rounded-lg hover:bg-slate-800">Đúng rồi</button>
                     </div>
                   );
                 })}

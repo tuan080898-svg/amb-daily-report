@@ -307,6 +307,48 @@ export interface PxkSummary {
   orderCount: number;
 }
 
+// Số lượng ghi trong tên/phân loại trên nhãn Shopee ("Combo 3 hộp", "2 tuýp", "3 chai"...). Không thấy thì trả null.
+export function nameQtyHint(name: string): number | null {
+  var v = name.split(',').slice(-1)[0] + ' ' + name.slice(-40);
+  var m = v.match(/combo\s*(\d+)/i) || v.match(/(\d+)\s*(tu[ýy]p|hộp|chai|túi|lọ|bình|miếng|gói|cây|bộ)\b/i);
+  return m ? Number(m[1]) : null;
+}
+
+export interface PxkQtyCheck {
+  key: string; // khoá tên chuẩn hoá (để sửa SKU)
+  name: string;
+  sku: string;
+  nameQty: number; // số lượng ghi trên nhãn
+  skuUnits: number; // số sản phẩm gốc mà SKU đang gắn quy ra
+  qty: number; // tổng SL các dòng này
+  orders: number;
+}
+
+// Tìm dòng nghi gắn SKU sai: số lượng ghi trong tên/phân loại trên nhãn khác số lượng của SKU (chỉ xét SKU một loại sản phẩm,
+// bỏ qua combo gồm nhiều loại sản phẩm vì số trong tên không so sánh được).
+export function findQtyMismatches(orders: Array<{ orderId: string; items: PxkItem[] }>): PxkQtyCheck[] {
+  var out: Record<string, PxkQtyCheck> = {};
+  orders.forEach(function(o) {
+    o.items.forEach(function(it) {
+      if (!it.sku || !it.name || it.qty <= 0) return;
+      var n = nameQtyHint(it.name);
+      if (n === null) return;
+      var m = getSkuProducts(it.sku);
+      if (m.length === 0) return;
+      var distinct: Record<string, boolean> = {};
+      m.forEach(function(p) { distinct[p.product] = true; });
+      if (Object.keys(distinct).length !== 1) return;
+      var units = m.reduce(function(s, p) { return s + p.quantity; }, 0);
+      if (units === n) return;
+      var key = pxkNameKey(it.name);
+      var c = out[key] || (out[key] = { key: key, name: it.name, sku: it.sku, nameQty: n, skuUnits: units, qty: 0, orders: 0 });
+      c.qty += it.qty;
+      c.orders += 1;
+    });
+  });
+  return Object.values(out);
+}
+
 // Gộp các dòng cùng sản phẩm trong combo: "5× Thuốc diệt gián" thay vì lặp 5 lần.
 function describeSku(items: Array<{ product: string; quantity: number }>): string {
   var qty: Record<string, number> = {};
