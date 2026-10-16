@@ -207,6 +207,7 @@ export default function PhieuXuatKhoPage() {
       var batch: PxkBatch = {
         id: makeBatchId(), platform: platform, warehouse: wh, printDate: printDate,
         createdAt: new Date().toISOString(), createdBy: currentUser ? currentUser.name : '',
+        issues: badLabels.map(function(o) { return o.orderId || ('trang ' + o.pages.join('-')); }),
         orders: resolved,
       };
       var msg = 'Đã lập phiếu ' + batch.id + '.';

@@ -29,6 +29,7 @@ export interface PxkBatch {
   createdAt: string; // ISO
   createdBy: string;
   deducted?: boolean; // không còn dùng (phiếu cũ có thể còn trường này)
+  issues?: string[]; // các nhãn đọc chưa chắc chắn lúc lập phiếu (in cảnh báo lên phiếu)
   orders: Array<{ orderId: string; items: PxkItem[] }>;
 }
 
@@ -125,6 +126,14 @@ function parseTiktokPages(pages: RawItem[][], fileName: string): PxkOrder[] {
   return orders;
 }
 
+// Một dòng hàng trên nhãn Shopee: "Tên sản phẩm, Phân loại, SL: n". Có nhãn viết ",SL: n" (dính dấu phẩy) hoặc "SL:n".
+export function parseShopeeItemText(raw: string): { name: string; qty: number } {
+  var c = raw.replace(/\s+/g, ' ').trim();
+  var m = c.match(/^(.*?)[,\s]*SL\s*:\s*(\d+)\s*$/i);
+  if (m) return { name: m[1].replace(/[,\s]+$/, '').trim(), qty: Number(m[2]) };
+  return { name: c, qty: 0 };
+}
+
 function parseShopeePages(pages: RawItem[][], fileName: string): PxkOrder[] {
   var orders: PxkOrder[] = [];
   pages.forEach(function(items, idx) {
@@ -144,10 +153,13 @@ function parseShopeePages(pages: RawItem[][], fileName: string): PxkOrder[] {
       else if (chunks.length) chunks[chunks.length - 1] += t;
     }
     var its: PxkItem[] = chunks.map(function(c) {
-      var m = c.replace(/\s+/g, ' ').match(/^(.*),\sSL:\s*(\d+)\s*$/);
-      return m ? { sku: '', name: m[1].trim(), qty: Number(m[2]) } : { sku: '', name: c.trim(), qty: 0 };
+      var p = parseShopeeItemText(c);
+      return { sku: '', name: p.name, qty: p.qty };
     });
     var sum = its.reduce(function(s, x) { return s + x.qty; }, 0);
+    // Một dòng không đọc được số lượng nhưng tổng SL trên nhãn đã biết: suy ra số lượng còn thiếu
+    var unparsed = its.filter(function(i) { return i.qty <= 0; });
+    if (unparsed.length === 1 && tot > sum) { unparsed[0].qty = tot - sum; sum = tot; }
     orders.push({ orderId: orderId, items: its, totalQty: tot, ok: sum === tot && its.every(function(i) { return i.qty > 0; }), pages: [idx + 1], file: fileName });
   });
   return orders;
@@ -358,6 +370,12 @@ export function buildPxkHtml(batch: PxkBatch, opts: { showOrders: boolean }): st
 
   var shopee = batch.platform === 'shopee';
   var snCell = function(ids: string[]) { return '<td class="sn">' + ids.map(esc).join('<br>') + '</td>'; };
+  var warn = '';
+  var noSkuQty = sum.unresolved.reduce(function(s, u) { return s + u.qty; }, 0);
+  var warnLines: string[] = [];
+  if (batch.issues && batch.issues.length > 0) warnLines.push('Có ' + batch.issues.length + ' nhãn đọc CHƯA CHẮC CHẮN, hãy nhặt theo nhãn gốc cho các đơn: ' + batch.issues.slice(0, 30).map(esc).join(', ') + (batch.issues.length > 30 ? '...' : ''));
+  if (noSkuQty > 0) warnLines.push(noSkuQty + ' sản phẩm chưa có SKU (dòng nền vàng) nên chưa quy ra được sản phẩm gốc, kiểm tra theo tên.');
+  if (warnLines.length > 0) warn = '<div class="alert">⚠ ' + warnLines.join('<br>⚠ ') + '</div>';
   var skuRows = shopee ? sum.skuLines.map(function(l, i) {
     return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(l.sku) + '</td><td>' + esc(shorten(l.name || '—')) + '</td><td>' + esc(l.variation) + '</td><td class="c big">' + l.qty + '</td>' + snCell(l.orderIds) + '</tr>';
   }).concat(sum.unresolved.map(function(u, i) {
@@ -399,9 +417,10 @@ export function buildPxkHtml(batch: PxkBatch, opts: { showOrders: boolean }): st
     'thead{display:table-header-group}tr{page-break-inside:avoid}' +
     'th,td{border:1px solid #888;padding:4px 6px;vertical-align:middle}th{background:#eee;text-align:center;font-size:11px}' +
     '.c{text-align:center}.r{text-align:right;font-weight:bold}.big{font-weight:bold;font-size:14px}.mono{font-family:Consolas,monospace;font-size:11px;word-break:break-all}' +
+    '.alert{border:2px solid #c00;background:#fff0f0;color:#900;padding:6px 10px;margin:0 0 10px;font-weight:bold;font-size:12px}' +
     '.nosku{font-size:10px;color:#a60;text-align:center}.sn{font-family:Consolas,monospace;font-size:9px;line-height:1.35}.warn td{background:#fff3cd}.total td{background:#f5f5f5}.chk{width:44px}' +
     '.sign{display:flex;justify-content:space-around;text-align:center;margin-top:28px;page-break-inside:avoid;font-weight:bold}.sign span{font-weight:normal;font-size:10px;color:#666}' +
     '.sign div{height:80px;width:30%}.pb{page-break-before:always}';
   return '<!doctype html><html><head><meta charset="utf-8"><title>' + esc('Phieu xuat kho ' + batch.platform + ' ' + batch.warehouse + ' ' + batch.printDate) + '</title><style>' + css + '</style></head><body>' +
-    head + skuTable + prodTable + sign + orderPage + '</body></html>';
+    head + warn + skuTable + prodTable + sign + orderPage + '</body></html>';
 }
