@@ -5,7 +5,7 @@ import { useAppState } from '@/lib/store';
 import { toDateString, getDailyTarget, getTargetForDate, getDayType, formatCurrency, formatPercent } from '@/lib/utils';
 import { DailyReport, Shop, PnlImport, PnlDailyData } from '@/lib/types';
 import * as XLSX from 'xlsx';
-import { aggregateProducts, getSkuProducts, ProductSummary } from '@/lib/sku';
+import { aggregateProducts } from '@/lib/sku';
 import type { Warehouse } from '@/lib/inventory';
 import { IS_SUPABASE_CONFIGURED } from '@/lib/supabase';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';

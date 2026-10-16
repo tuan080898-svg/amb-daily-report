@@ -528,7 +528,7 @@ export default function PhieuXuatKhoPage() {
           {qtyMismatches.length > 0 && (
             <div className="mb-4 bg-slate-900 border border-red-500/40 rounded-xl overflow-visible">
               <div className="px-4 py-3 border-b border-slate-700 text-sm text-red-300">
-                Nghi gắn SAI SKU — {qtyMismatches.length} dòng có số lượng ghi trên nhãn khác số lượng của SKU đã gắn (dễ làm phiếu thiếu hàng). Chọn lại SKU đúng, hoặc bấm "Đúng rồi" nếu SKU đã đúng.
+                Nghi gắn SAI SKU — {qtyMismatches.length} dòng có số lượng ghi trên nhãn khác số lượng của SKU đã gắn (dễ làm phiếu thiếu hàng). Chọn lại SKU đúng, hoặc bấm &quot;Đúng rồi&quot; nếu SKU đã đúng.
               </div>
               <div className="divide-y divide-slate-800">
                 {qtyMismatches.map(function(c) {
