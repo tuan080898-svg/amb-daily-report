@@ -141,6 +141,11 @@ function parseShopeePages(pages: RawItem[][], fileName: string): PxkOrder[] {
     var lines = toLines(items);
     var iStart = lines.findIndex(function(t) { return /^Nội dung hàng/.test(t); });
     var orderId = (lines.find(function(t) { return /^Mã đơn hàng/.test(t); }) || '').replace(/^Mã đơn hàng:?\s*/, '').trim();
+    // Có nhãn bị mất chữ "Mã đơn hàng:", mã đơn nằm trơ một dòng (vd 261016R6C55S0S): nhận theo dạng mã Shopee (6 chữ số ngày + 6-10 ký tự)
+    if (!orderId) {
+      var bare = lines.find(function(t) { return /^\d{6}[A-Z0-9]{6,10}$/.test(t.trim()); });
+      if (bare) orderId = bare.trim();
+    }
     if (iStart < 0) {
       orders.push({ orderId: orderId, items: [], totalQty: 0, ok: false, pages: [idx + 1], file: fileName });
       return;

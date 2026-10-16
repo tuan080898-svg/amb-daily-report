@@ -108,8 +108,13 @@ export default function PhieuXuatKhoPage() {
     files.forEach(function(f) {
       if (!f.platform) return;
       var plat = f.platform;
-      f.orders.forEach(function(o) {
-        if (!o.orderId) { noId.push(o); return; }
+      f.orders.forEach(function(o0) {
+        var o = o0;
+        if (!o.orderId) {
+          // Không bỏ nhãn: vẫn đưa lên phiếu với mã tạm theo file/trang và đánh dấu "chưa chắc" để kiểm tra tay
+          noId.push(o0);
+          o = Object.assign({}, o0, { orderId: '(không đọc được mã đơn) ' + o0.file + ' trang ' + o0.pages.join('-'), ok: false });
+        }
         if (seen[plat].has(o.orderId)) { dupInUpload++; return; }
         seen[plat].add(o.orderId);
         var g = map[plat] || (map[plat] = { platform: plat, fresh: [], old: [] });
@@ -464,7 +469,7 @@ export default function PhieuXuatKhoPage() {
                 </div>
               )}
               {analysis.dupInUpload > 0 && <div>{analysis.dupInUpload} nhãn bị lặp mã đơn giữa các file vừa chọn — chỉ tính một lần.</div>}
-              {analysis.noId.length > 0 && <div>{analysis.noId.length} nhãn không đọc được mã đơn — bỏ qua, hãy kiểm tra tay ({analysis.noId.map(function(o) { return o.file + ' trang ' + o.pages.join('-'); }).slice(0, 8).join('; ')}).</div>}
+              {analysis.noId.length > 0 && <div>{analysis.noId.length} nhãn không đọc được mã đơn — VẪN được đưa lên phiếu (đánh dấu chưa chắc chắn), hãy kiểm tra tay ({analysis.noId.map(function(o) { return o.file + ' trang ' + o.pages.join('-'); }).slice(0, 8).join('; ')}).</div>}
             </div>
           )}
 
