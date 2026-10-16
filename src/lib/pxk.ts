@@ -30,6 +30,7 @@ export interface PxkBatch {
   createdBy: string;
   deducted?: boolean; // không còn dùng (phiếu cũ có thể còn trường này)
   issues?: string[]; // các nhãn đọc chưa chắc chắn lúc lập phiếu (in cảnh báo lên phiếu)
+  notes?: string[]; // ghi chú in lên phiếu (vd: có đơn đã lập phiếu trước đó)
   orders: Array<{ orderId: string; items: PxkItem[] }>;
 }
 
@@ -187,12 +188,45 @@ export function detectPxkPlatform(pages: RawItem[][]): PxkPlatform | null {
   return null;
 }
 
-// Đọc một file PDF, tự nhận diện sàn (hoặc dùng sàn được chỉ định tay).
-export async function parsePxkFileAuto(file: File, force?: PxkPlatform): Promise<{ platform: PxkPlatform | null; orders: PxkOrder[] }> {
+// Kho xuất hàng của nhãn Shopee: lấy từ địa chỉ người gửi (khối "Từ:", cột bên trái) — Hà Nội hoặc Hồ Chí Minh.
+export function detectShopeeWarehouse(pages: RawItem[][]): 'HCM' | 'HN' | null {
+  var hn = 0;
+  var hcm = 0;
+  pages.slice(0, 10).forEach(function(items) {
+    if (items.length === 0) return;
+    var rows: Array<{ y: number; t: string }> = [];
+    var maxX = 0;
+    items.forEach(function(i) { if (i.x > maxX) maxX = i.x; });
+    items.forEach(function(i) {
+      var r = rows.find(function(r) { return Math.abs(r.y - i.y) < 2.5; });
+      if (!r) { r = { y: i.y, t: '' }; rows.push(r); }
+    });
+    rows.forEach(function(r) {
+      r.t = items.filter(function(i) { return Math.abs(r.y - i.y) < 2.5; }).sort(function(a, b) { return a.x - b.x; }).map(function(i) { return i.s; }).join('');
+    });
+    var from = rows.find(function(r) { return /^Từ:/.test(r.t); });
+    var content = rows.find(function(r) { return /^Nội dung hàng/.test(r.t); });
+    if (!from || !content) return;
+    var fromY = from.y;
+    var contentY = content.y;
+    var txt = items
+      .filter(function(i) { return i.x < maxX * 0.45 && i.y <= fromY + 1 && i.y > contentY; })
+      .sort(function(a, b) { return (b.y - a.y) || (a.x - b.x); })
+      .map(function(i) { return i.s; }).join('');
+    if (/Hà\s*Nội|Ha\s*Noi/i.test(txt)) hn++;
+    else if (/Hồ\s*Chí\s*Minh|TP\.?\s*HCM|Sài\s*Gòn|Ho\s*Chi\s*Minh/i.test(txt)) hcm++;
+  });
+  if (hn > hcm) return 'HN';
+  if (hcm > hn) return 'HCM';
+  return null;
+}
+
+// Đọc một file PDF, tự nhận diện sàn (hoặc dùng sàn được chỉ định tay) và kho (nếu nhãn có ghi).
+export async function parsePxkFileAuto(file: File, force?: PxkPlatform): Promise<{ platform: PxkPlatform | null; orders: PxkOrder[]; warehouse: 'HCM' | 'HN' | null }> {
   var pages = await readPages(file);
   var platform = force || detectPxkPlatform(pages);
-  if (!platform) return { platform: null, orders: [] };
-  return { platform: platform, orders: parsePxkPages(pages, platform, file.name) };
+  if (!platform) return { platform: null, orders: [], warehouse: null };
+  return { platform: platform, orders: parsePxkPages(pages, platform, file.name), warehouse: platform === 'shopee' ? detectShopeeWarehouse(pages) : null };
 }
 
 // Đoán kho từ tên file (vd "HN 14.10 hana sáng tt.pdf" -> HN). Không đoán được thì trả null.
@@ -406,6 +440,7 @@ function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
   var noSkuQty = sum.unresolved.reduce(function(s, u) { return s + u.qty; }, 0);
   var warnLines: string[] = [];
   if (batch.issues && batch.issues.length > 0) warnLines.push('Có ' + batch.issues.length + ' nhãn đọc CHƯA CHẮC CHẮN, hãy nhặt theo nhãn gốc cho các đơn: ' + batch.issues.slice(0, 30).map(esc).join(', ') + (batch.issues.length > 30 ? '...' : ''));
+  if (batch.notes) batch.notes.forEach(function(n) { warnLines.push(esc(n)); });
   if (noSkuQty > 0) warnLines.push(noSkuQty + ' sản phẩm chưa có SKU (dòng nền vàng) nên chưa quy ra được sản phẩm gốc, kiểm tra theo tên.');
   if (warnLines.length > 0) warn = '<div class="alert">⚠ ' + warnLines.join('<br>⚠ ') + '</div>';
   var skuRows = shopee ? sum.skuLines.map(function(l, i) {

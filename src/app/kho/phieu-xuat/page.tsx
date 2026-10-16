@@ -66,7 +66,7 @@ export default function PhieuXuatKhoPage() {
   // SKU nhân sự đã gắn trong lần này (khoá tên chuẩn hoá -> { sku, tên }); cũng được lưu ngay lên cloud để nhớ cho lần sau
   const [assign, setAssign] = useState<Record<string, { sku: string; name: string }>>({});
   const saveChain = useRef<Promise<unknown>>(Promise.resolve());
-  const [includeOld, setIncludeOld] = useState(false);
+  const [excludeOld, setExcludeOld] = useState(false); // mặc định in ĐỦ mọi đơn đã chọn, kể cả đơn đã lập phiếu trước
   const [showOrders, setShowOrders] = useState(true);
   const [skuVer, setSkuVer] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -82,10 +82,12 @@ export default function PhieuXuatKhoPage() {
   const allowed = !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'warehouse');
   const skuCodes = useMemo(function() { return getAllSkuCodes(); }, [skuVer]);
 
-  // Đơn đã có trong các phiếu trước (cùng sàn)
-  const knownIds = useMemo(function() {
-    var out: Record<PxkPlatform, Set<string>> = { shopee: new Set<string>(), tiktok: new Set<string>() };
-    data.batches.forEach(function(b) { b.orders.forEach(function(o) { out[b.platform].add(o.orderId); }); });
+  // Đơn đã có trong các phiếu trước (cùng sàn): mã đơn -> phiếu gần nhất chứa đơn đó
+  const prevOrders = useMemo(function() {
+    var out: Record<PxkPlatform, Record<string, { id: string; by: string; at: string }>> = { shopee: {}, tiktok: {} };
+    data.batches.slice().sort(function(a, b) { return a.createdAt.localeCompare(b.createdAt); }).forEach(function(b) {
+      b.orders.forEach(function(o) { out[b.platform][o.orderId] = { id: b.id, by: b.createdBy, at: b.createdAt }; });
+    });
     return out;
   }, [data]);
 
@@ -116,15 +118,15 @@ export default function PhieuXuatKhoPage() {
         seen[plat].add(o.orderId);
         var key = plat + '|' + f.wh;
         var g = map[key] || (map[key] = { platform: plat, wh: f.wh, fresh: [], old: [] });
-        (knownIds[plat].has(o.orderId) ? g.old : g.fresh).push(o);
+        (prevOrders[plat][o.orderId] ? g.old : g.fresh).push(o);
       });
     });
     return { groups: Object.keys(map).sort().map(function(k) { return Object.assign({ key: k }, map[k]); }), dupInUpload: dupInUpload, noId: noId };
-  }, [files, knownIds]);
+  }, [files, prevOrders]);
 
   const groups: GroupView[] = useMemo(function() {
     return analysis.groups.map(function(g) {
-      var used = g.fresh.concat(includeOld ? g.old : []);
+      var used = g.fresh.concat(excludeOld ? [] : g.old);
       var resolved = resolveOrders(used);
       return {
         key: g.key, platform: g.platform, wh: g.wh, used: used, oldCount: g.old.length,
@@ -132,7 +134,7 @@ export default function PhieuXuatKhoPage() {
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysis, includeOld, assign, data.names, skuVer]);
+  }, [analysis, excludeOld, assign, data.names, skuVer]);
 
   // Dòng Shopee chưa có SKU: gộp từ mọi nhóm Shopee để gắn một lần
   const shopeeUnresolved = useMemo(function() {
@@ -146,6 +148,15 @@ export default function PhieuXuatKhoPage() {
     groups.forEach(function(g) { g.summary.unmappedSkus.forEach(function(c) { s.add(c); }); });
     return Array.from(s).sort();
   }, [groups]);
+
+  // Đếm số đơn trong phiếu mới trùng với từng phiếu cũ (để báo rõ, không âm thầm bỏ)
+  const oldSummary = useMemo(function() {
+    var by: Record<string, { id: string; by: string; n: number }> = {};
+    analysis.groups.forEach(function(g) {
+      g.old.forEach(function(o) { var p = prevOrders[g.platform][o.orderId]; if (!p) return; (by[p.id] = by[p.id] || { id: p.id, by: p.by, n: 0 }).n++; });
+    });
+    return Object.values(by).sort(function(a, b) { return b.n - a.n; });
+  }, [analysis, prevOrders]);
 
   const totalOrders = groups.reduce(function(s, g) { return s + g.used.length; }, 0);
   const totalQty = groups.reduce(function(s, g) { return s + g.summary.totalQty; }, 0);
@@ -167,6 +178,7 @@ export default function PhieuXuatKhoPage() {
       var guess = guessWarehouse(f.name);
       try {
         var r = await parsePxkFileAuto(f);
+        guess = r.warehouse || guess; // địa chỉ người gửi trên nhãn đáng tin hơn tên file
         entry = {
           id: f.name + '|' + f.size + '|' + Date.now() + i, file: f, name: f.name, platform: r.platform,
           wh: guess || defaultWh, whGuessed: !!guess, orders: r.orders,
@@ -266,7 +278,16 @@ export default function PhieuXuatKhoPage() {
     });
   }
 
-  function reset() { setFiles([]); setAssign({}); setError(''); setNotice(''); setIncludeOld(false); setParsingMsg(''); }
+  function reset() { setFiles([]); setAssign({}); setError(''); setNotice(''); setExcludeOld(false); setParsingMsg(''); }
+
+  // Ghi chú in lên phiếu: bao nhiêu đơn trong phiếu đã nằm trong phiếu cũ nào
+  function noteForOld(g: GroupView): string[] {
+    var by: Record<string, number> = {};
+    g.used.forEach(function(o) { var p = prevOrders[g.platform][o.orderId]; if (p) by[p.id + ' (' + p.by + ')'] = (by[p.id + ' (' + p.by + ')'] || 0) + 1; });
+    var keys = Object.keys(by);
+    if (keys.length === 0) return [];
+    return [Object.values(by).reduce(function(s, n) { return s + n; }, 0) + ' đơn trong phiếu này ĐÃ CÓ trong phiếu lập trước đó: ' + keys.map(function(k) { return k + ' ×' + by[k]; }).join(', ') + '. Kiểm tra để không nhặt hàng hai lần.'];
+  }
 
   function openPrint(html: string, w: Window | null) {
     if (!w) { setError('Trình duyệt chặn cửa sổ in. Hãy cho phép cửa sổ bật lên (pop-up) cho trang này rồi bấm "In lại" ở mục Lịch sử.'); return; }
@@ -285,7 +306,7 @@ export default function PhieuXuatKhoPage() {
         (noSku > 0 ? ' (⚠ ' + noSku + ' sản phẩm chưa có SKU)' : '') + (g.bad.length > 0 ? ' (⚠ ' + g.bad.length + ' nhãn đọc chưa chắc)' : ''));
     });
     if (unmappedAll.length > 0) lines.push('', '⚠ SKU chưa có trong bảng quy đổi (vẫn in, không quy ra sản phẩm gốc): ' + unmappedAll.join(', '));
-    if (includeOld && totalOld > 0) lines.push('', '⚠ Có ' + totalOld + ' đơn đã lập phiếu trước đó — chúng sẽ được in lại.');
+    if (totalOld > 0) lines.push('', (excludeOld ? 'ℹ Đã BỎ ' : '⚠ Có ') + totalOld + (excludeOld ? ' đơn đã lập phiếu trước đó (không in).' : ' đơn đã lập phiếu trước đó — vẫn được in lại trong các phiếu này.'));
     lines.push('', 'Tiếp tục?');
     if (!window.confirm(lines.join('\n'))) return;
 
@@ -298,6 +319,7 @@ export default function PhieuXuatKhoPage() {
         return {
           id: makeBatchId(), platform: g.platform, warehouse: g.wh, printDate: printDate, createdAt: createdAt, createdBy: by,
           issues: g.bad.map(function(o) { return o.orderId || ('trang ' + o.pages.join('-')); }),
+          notes: noteForOld(g),
           orders: g.resolved,
         };
       });
@@ -316,7 +338,7 @@ export default function PhieuXuatKhoPage() {
       }
       setNotice(msg);
       openPrint(buildPxkHtmlMulti(batches, { showOrders: showOrders }), w);
-      setFiles([]); setAssign({}); setIncludeOld(false);
+      setFiles([]); setAssign({}); setExcludeOld(false);
     } catch (e) {
       if (w) w.close();
       setError('Lỗi: ' + (e instanceof Error ? e.message : String(e)));
@@ -372,7 +394,7 @@ export default function PhieuXuatKhoPage() {
           onClick={function() { if (!parsingMsg && !busy) fileRef.current?.click(); }}
           className={'cursor-pointer rounded-xl border-2 border-dashed px-4 py-6 text-center transition-colors ' + (dragging ? 'border-blue-400 bg-blue-500/10' : 'border-slate-600 hover:border-slate-500')}>
           <div className="text-sm font-medium text-gray-200">{parsingMsg ? parsingMsg : '📄 Kéo thả hoặc bấm để chọn nhiều file PDF in đơn'}</div>
-          <div className="text-xs text-gray-500 mt-1">Chọn cả file Shopee và TikTok cùng lúc được · có thể thêm file nhiều lần · app tự nhận diện sàn và đoán kho từ tên file (có HN hoặc HCM)</div>
+          <div className="text-xs text-gray-500 mt-1">Chọn cả file Shopee và TikTok cùng lúc được · có thể thêm file nhiều lần · app tự nhận diện sàn; kho tự nhận từ địa chỉ người gửi trên nhãn Shopee hoặc từ tên file (có HN / HCM)</div>
         </div>
         <div className="flex flex-wrap gap-4 items-end mt-4">
           <div>
@@ -418,7 +440,7 @@ export default function PhieuXuatKhoPage() {
                         <select value={f.wh} onChange={function(e) { setFileWh(f.id, e.target.value as Warehouse); }} className={inputCls + ' py-1'}>
                           {WAREHOUSES.map(function(w) { return <option key={w} value={w}>{WAREHOUSE_LABELS[w]}</option>; })}
                         </select>
-                        {f.whGuessed && <span className="ml-2 text-xs text-gray-500">tự nhận từ tên file</span>}
+                        {f.whGuessed && <span className="ml-2 text-xs text-gray-500">tự nhận</span>}
                       </td>
                       <td className="px-2 py-2 text-right"><button onClick={function() { removeFile(f.id); }} className="text-xs text-red-400 hover:text-red-300">Gỡ</button></td>
                     </tr>
@@ -437,7 +459,7 @@ export default function PhieuXuatKhoPage() {
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
             <Stat label="Số phiếu sẽ lập" value={String(groups.filter(function(g) { return g.resolved.length > 0; }).length)} />
-            <Stat label="Đơn mới" value={String(totalOrders)} />
+            <Stat label="Đơn sẽ in" value={String(totalOrders)} />
             <Stat label="Tổng sản phẩm" value={String(totalQty)} />
             <Stat label="Đơn đã lập phiếu trước" value={String(totalOld)} warn={totalOld > 0} />
           </div>
@@ -445,8 +467,10 @@ export default function PhieuXuatKhoPage() {
           {(totalOld > 0 || analysis.dupInUpload > 0 || analysis.noId.length > 0) && (
             <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-sm text-amber-200 space-y-1">
               {totalOld > 0 && (
-                <div>{totalOld} đơn đã có trong phiếu trước đó nên được bỏ qua (tránh in trùng).{' '}
-                  <label className="inline-flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={includeOld} onChange={function(e) { setIncludeOld(e.target.checked); }} /> vẫn lập lại cả các đơn này</label>
+                <div>
+                  <b>{totalOld} đơn đã có trong phiếu lập trước đó</b>: {oldSummary.map(function(x) { return x.id + ' (' + x.by + ', ' + x.n + ' đơn)'; }).join('; ')}.{' '}
+                  {excludeOld ? 'Các đơn này ĐANG BỊ BỎ, không in.' : 'Các đơn này VẪN ĐƯỢC IN lại trong phiếu mới (có ghi chú trên phiếu).'}{' '}
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked={excludeOld} onChange={function(e) { setExcludeOld(e.target.checked); }} /> chỉ in các đơn chưa từng lập phiếu</label>
                 </div>
               )}
               {analysis.dupInUpload > 0 && <div>{analysis.dupInUpload} nhãn bị lặp mã đơn giữa các file vừa chọn — chỉ tính một lần.</div>}
@@ -520,7 +544,7 @@ export default function PhieuXuatKhoPage() {
                   <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + (g.platform === 'shopee' ? 'bg-orange-500/15 text-orange-400' : 'bg-pink-500/15 text-pink-400')}>{PXK_PLATFORM_LABELS[g.platform]}</span>
                   <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + (g.wh === 'HCM' ? 'bg-blue-500/15 text-blue-300' : 'bg-violet-500/15 text-violet-300')}>{WAREHOUSE_LABELS[g.wh]}</span>
                   <span className="font-semibold text-gray-100">1 phiếu: {g.resolved.length} đơn · {s.totalQty} sản phẩm · {s.skuLines.length + s.unresolved.length} mã SKU</span>
-                  {g.oldCount > 0 && !includeOld && <span className="text-xs text-amber-300">({g.oldCount} đơn đã lập trước, bỏ qua)</span>}
+                  {g.oldCount > 0 && <span className="text-xs text-amber-300">({g.oldCount} đơn đã lập phiếu trước{excludeOld ? ', ĐÃ BỎ' : ', vẫn in'})</span>}
                   {g.bad.length > 0 && <span className="text-xs text-amber-300">⚠ {g.bad.length} nhãn chưa chắc</span>}
                   <span className="text-xs text-gray-500">bấm để xem chi tiết</span>
                 </summary>
