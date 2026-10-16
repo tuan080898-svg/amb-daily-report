@@ -355,9 +355,9 @@ export default function PhieuXuatKhoPage() {
       </div>
 
       {(hasShopee || files.length === 0) && (
-        <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 mb-4">
-          <div className="text-sm font-semibold text-gray-200 mb-1">Quy luật gắn SKU cho nhãn Shopee</div>
-          <p className="text-xs text-gray-400 mb-3">
+        <details className="bg-slate-900 border border-slate-700 rounded-xl p-4 mb-4">
+          <summary className="cursor-pointer text-sm font-semibold text-gray-200">Quy luật gắn SKU cho nhãn Shopee <span className="font-normal text-xs text-gray-500">· app đã biết {Object.keys(data.names).length} sản phẩm · bấm để nạp thêm</span></summary>
+          <p className="text-xs text-gray-400 mt-3 mb-3">
             Nhãn Shopee không in SKU. App học từ <b>file đơn hàng Shopee</b> (cột Tên sản phẩm + Tên phân loại → SKU phân loại hàng) để tự gắn SKU cho nhãn.
             Mỗi shop đặt tên sản phẩm khác nhau nên cần nạp file đơn của <b>từng shop</b> một lần; file đơn tải ở mục Nhập báo cáo cũng được học tự động.
             Hiện app đã biết <b className="text-gray-200">{Object.keys(data.names).length}</b> sản phẩm/phân loại{Object.keys(data.ambiguous || {}).length > 0 ? ', ' + Object.keys(data.ambiguous || {}).length + ' cái còn mơ hồ' : ''}.
@@ -368,7 +368,7 @@ export default function PhieuXuatKhoPage() {
             {learning ? 'Đang học...' : '📥 Nạp file đơn hàng Shopee để học SKU'}
           </button>
           {learnMsg && <div className="mt-3 text-sm text-emerald-300">{learnMsg}</div>}
-        </div>
+        </details>
       )}
 
       {dataErr && <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-300">Không đọc được lịch sử phiếu: {dataErr}. Chưa nên lập phiếu mới (có thể trùng đơn cũ).</div>}
