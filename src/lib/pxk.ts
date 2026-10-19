@@ -426,9 +426,32 @@ function shorten(t: string): string {
   return t.length > 80 ? t.slice(0, 78).trim() + '…' : t;
 }
 
-function fmtDate(d: string): string {
+export function fmtDate(d: string): string {
   var p = d.split('-');
   return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : d;
+}
+
+// Giờ lập phiếu (giờ Việt Nam) từ mốc thời gian ISO; rỗng nếu không đọc được
+export function fmtTime(iso: string): string {
+  var t = new Date(iso);
+  if (isNaN(t.getTime())) return '';
+  return t.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Ho_Chi_Minh' });
+}
+
+// "19/10/2026 · 15:31"
+export function fmtDateTime(batch: { printDate: string; createdAt: string }): string {
+  var time = fmtTime(batch.createdAt);
+  return fmtDate(batch.printDate) + (time ? ' · ' + time : '');
+}
+
+// Các dòng cảnh báo in ở đầu phiếu (chữ thường, chưa escape) — dùng chung cho bản in và bản tải PDF
+export function slipWarnings(batch: PxkBatch, sum: PxkSummary): string[] {
+  var lines: string[] = [];
+  var noSkuQty = sum.unresolved.reduce(function(s, u) { return s + u.qty; }, 0);
+  if (batch.issues && batch.issues.length > 0) lines.push('Có ' + batch.issues.length + ' nhãn đọc CHƯA CHẮC CHẮN, hãy nhặt theo nhãn gốc cho các đơn: ' + batch.issues.slice(0, 30).join(', ') + (batch.issues.length > 30 ? '...' : ''));
+  if (batch.notes) batch.notes.forEach(function(n) { lines.push(n); });
+  if (noSkuQty > 0) lines.push(noSkuQty + ' sản phẩm chưa có SKU (dòng nền vàng) nên chưa quy ra được sản phẩm gốc, kiểm tra theo tên.');
+  return lines;
 }
 
 function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
@@ -436,17 +459,13 @@ function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
   var whLabel = batch.warehouse === 'HN' ? 'Kho Hà Nội · ' : batch.warehouse === 'HCM' ? 'Kho HCM · ' : '';
   var title = 'PHIẾU XUẤT KHO — ' + PXK_PLATFORM_LABELS[batch.platform].toUpperCase();
   var head = '<div class="head"><div><h1>' + esc(title) + '</h1><div class="sub">' + esc(whLabel) + 'Mã phiếu: ' + esc(batch.id) + '</div></div>' +
-    '<div class="meta">Ngày in phiếu: <b>' + esc(fmtDate(batch.printDate)) + '</b><br>Số đơn: <b>' + sum.orderCount + '</b> · Tổng SL: <b>' + sum.totalQty + '</b></div></div>';
+    '<div class="meta">Ngày in phiếu: <b>' + esc(fmtDateTime(batch)) + '</b><br>Số đơn: <b>' + sum.orderCount + '</b> · Tổng SL: <b>' + sum.totalQty + '</b></div></div>';
 
   var shopee = batch.platform === 'shopee';
   var snCell = function(ids: string[]) { return '<td class="sn">' + ids.map(esc).join('<br>') + '</td>'; };
   var warn = '';
-  var noSkuQty = sum.unresolved.reduce(function(s, u) { return s + u.qty; }, 0);
-  var warnLines: string[] = [];
-  if (batch.issues && batch.issues.length > 0) warnLines.push('Có ' + batch.issues.length + ' nhãn đọc CHƯA CHẮC CHẮN, hãy nhặt theo nhãn gốc cho các đơn: ' + batch.issues.slice(0, 30).map(esc).join(', ') + (batch.issues.length > 30 ? '...' : ''));
-  if (batch.notes) batch.notes.forEach(function(n) { warnLines.push(esc(n)); });
-  if (noSkuQty > 0) warnLines.push(noSkuQty + ' sản phẩm chưa có SKU (dòng nền vàng) nên chưa quy ra được sản phẩm gốc, kiểm tra theo tên.');
-  if (warnLines.length > 0) warn = '<div class="alert">⚠ ' + warnLines.join('<br>⚠ ') + '</div>';
+  var warnLines = slipWarnings(batch, sum);
+  if (warnLines.length > 0) warn = '<div class="alert">⚠ ' + warnLines.map(esc).join('<br>⚠ ') + '</div>';
   var skuRows = shopee ? sum.skuLines.map(function(l, i) {
     return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(l.sku) + '</td><td>' + esc(shorten(l.name || '—')) + '</td><td>' + esc(l.variation) + '</td><td class="c big">' + l.qty + '</td>' + snCell(l.orderIds) + '</tr>';
   }).concat(sum.unresolved.map(function(u, i) {

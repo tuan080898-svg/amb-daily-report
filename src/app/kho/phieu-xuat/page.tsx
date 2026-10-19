@@ -7,9 +7,10 @@ import { dbGetPxk, dbUpdatePxk } from '@/lib/db';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
 import {
-  parsePxkFileAuto, summarizePxk, findQtyMismatches, buildPxkHtmlMulti, pxkNameKey, PXK_PLATFORM_LABELS,
+  parsePxkFileAuto, summarizePxk, findQtyMismatches, buildPxkHtmlMulti, pxkNameKey, fmtDateTime, PXK_PLATFORM_LABELS,
   type PxkPlatform, type PxkOrder, type PxkBatch, type PxkData, type PxkItem,
 } from '@/lib/pxk';
+import { downloadPxkPdf } from '@/lib/pxk-pdf';
 
 function todayStr(): string {
   var d = new Date();
@@ -56,6 +57,8 @@ export default function PhieuXuatKhoPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [lastBatches, setLastBatches] = useState<PxkBatch[]>([]); // phiếu vừa lập, để tải về
+  const [downloading, setDownloading] = useState(false);
   const [data, setData] = useState<PxkData>({ names: {}, batches: [] });
   const [dataErr, setDataErr] = useState('');
   // SKU nhân sự đã gắn trong lần này (khoá tên chuẩn hoá -> { sku, tên }); cũng được lưu ngay lên cloud để nhớ cho lần sau
@@ -347,6 +350,7 @@ export default function PhieuXuatKhoPage() {
         msg += ' ⚠ Chưa lưu được lịch sử phiếu (' + (e instanceof Error ? e.message : String(e)) + '). Phiếu vẫn được in, nhưng sẽ không có trong Lịch sử.';
       }
       setNotice(msg);
+      setLastBatches(batches);
       openPrint(buildPxkHtmlMulti(batches, { showOrders: showOrders }), w);
       setFiles([]); setAssign({}); setExcludeOld(false);
     } catch (e) {
@@ -360,6 +364,17 @@ export default function PhieuXuatKhoPage() {
   function reprint(b: PxkBatch) {
     var w = window.open('', '_blank');
     openPrint(buildPxkHtmlMulti([b], { showOrders: showOrders }), w);
+  }
+
+  async function download(list: PxkBatch[]) {
+    setError(''); setDownloading(true);
+    try {
+      await downloadPxkPdf(list, { showOrders: showOrders });
+    } catch (e) {
+      setError('Không tải được phiếu về: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setDownloading(false);
+    }
   }
 
   var inputCls = 'px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none';
@@ -448,7 +463,17 @@ export default function PhieuXuatKhoPage() {
       </div>
 
       {error && <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-300 whitespace-pre-wrap">{error}</div>}
-      {notice && <div className="mb-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-300">{notice}</div>}
+      {notice && (
+        <div className="mb-4 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-sm text-emerald-300 flex flex-wrap items-center gap-3">
+          <span className="flex-1 min-w-[200px]">{notice}</span>
+          {lastBatches.length > 0 && (
+            <button onClick={function() { download(lastBatches); }} disabled={downloading}
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-medium">
+              {downloading ? 'Đang tạo PDF...' : 'Tải phiếu về (PDF)'}
+            </button>
+          )}
+        </div>
+      )}
 
       {files.some(function(f) { return f.orders.length > 0; }) && (
         <>
@@ -639,11 +664,14 @@ export default function PhieuXuatKhoPage() {
                     <tr key={b.id} className="border-b border-slate-800">
                       <td className="px-4 py-2 font-mono text-gray-300">{b.id}</td>
                       <td className="px-4 py-2 text-gray-300">{PXK_PLATFORM_LABELS[b.platform]}</td>
-                      <td className="px-4 py-2 text-gray-300">{fmtDate(b.printDate)}</td>
+                      <td className="px-4 py-2 text-gray-300 whitespace-nowrap">{fmtDateTime(b)}</td>
                       <td className="px-4 py-2 text-right text-gray-300">{b.orders.length}</td>
                       <td className="px-4 py-2 text-right text-gray-300">{qty}</td>
                       <td className="px-4 py-2 text-gray-400">{b.createdBy}</td>
-                      <td className="px-4 py-2 text-right"><button onClick={function() { reprint(b); }} className="text-blue-400 hover:text-blue-300">In lại</button></td>
+                      <td className="px-4 py-2 text-right whitespace-nowrap">
+                        <button onClick={function() { reprint(b); }} className="text-blue-400 hover:text-blue-300">In lại</button>
+                        <button onClick={function() { download([b]); }} disabled={downloading} className="ml-3 text-emerald-400 hover:text-emerald-300 disabled:opacity-50">Tải về</button>
+                      </td>
                     </tr>
                   );
                 })}
