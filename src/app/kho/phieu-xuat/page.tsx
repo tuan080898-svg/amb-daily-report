@@ -8,7 +8,7 @@ import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
 import {
   parsePxkFileAuto, summarizePxk, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
-  type PxkPlatform, type PxkOrder, type PxkBatch, type PxkData, type PxkItem,
+  type PxkPlatform, type PxkOrder, type PxkBatch, type PxkStoredOrder, type PxkData, type PxkItem,
 } from '@/lib/pxk';
 import { downloadPxkPdf, downloadPxkDayPdf } from '@/lib/pxk-pdf';
 
@@ -60,6 +60,7 @@ export default function PhieuXuatKhoPage() {
   const [lastBatches, setLastBatches] = useState<PxkBatch[]>([]); // phiếu vừa lập, để tải về
   const [downloading, setDownloading] = useState(false);
   const [dayDate, setDayDate] = useState(todayStr()); // ngày cần xuất phiếu tổng hợp
+  const [orderQuery, setOrderQuery] = useState(''); // tìm đơn trong các phiếu đã lập
   const [data, setData] = useState<PxkData>({ names: {}, batches: [] });
   const [dataErr, setDataErr] = useState('');
   // SKU nhân sự đã gắn trong lần này (khoá tên chuẩn hoá -> { sku, tên }); cũng được lưu ngay lên cloud để nhớ cho lần sau
@@ -170,6 +171,25 @@ export default function PhieuXuatKhoPage() {
   }, [analysis, prevOrders]);
 
   const daySum = useMemo(function() { return summarizeDay(dayDate, data.batches); }, [dayDate, data.batches]);
+
+  // Tìm đơn: 1 mã -> khớp một phần; nhiều mã (dán danh sách) -> khớp đúng từng mã
+  const orderSearch = useMemo(function() {
+    var tokens = orderQuery.split(/[\s,;]+/).filter(function(t) { return t.length > 0; });
+    if (tokens.length === 0) return null;
+    var exact = tokens.length > 1;
+    var hits: Array<{ token: string; batch: PxkBatch; order: PxkStoredOrder }> = [];
+    var found: Record<string, boolean> = {};
+    data.batches.slice().sort(function(a, b) { return b.createdAt.localeCompare(a.createdAt); }).forEach(function(b) {
+      b.orders.forEach(function(o) {
+        var id = o.orderId.toLowerCase();
+        tokens.forEach(function(t) {
+          var tl = t.toLowerCase();
+          if (exact ? id === tl : id.indexOf(tl) >= 0) { hits.push({ token: t, batch: b, order: o }); found[t] = true; }
+        });
+      });
+    });
+    return { tokens: tokens, hits: hits, missing: tokens.filter(function(t) { return !found[t]; }) };
+  }, [orderQuery, data.batches]);
 
   const totalOrders = groups.reduce(function(s, g) { return s + g.used.length; }, 0);
   const totalQty = groups.reduce(function(s, g) { return s + g.summary.totalQty; }, 0);
@@ -331,11 +351,20 @@ export default function PhieuXuatKhoPage() {
       var createdAt = new Date().toISOString();
       var by = currentUser ? currentUser.name : '';
       var batches: PxkBatch[] = ready.map(function(g) {
+        // Ghi nhớ đơn nào nằm ở file PDF nào, trang nào (g.resolved cùng thứ tự với g.used)
+        var fileNames: string[] = [];
+        var stored: PxkStoredOrder[] = g.resolved.map(function(r, i) {
+          var src = g.used[i];
+          var fi = fileNames.indexOf(src.file);
+          if (fi < 0) { fileNames.push(src.file); fi = fileNames.length - 1; }
+          return { orderId: r.orderId, items: r.items, fi: fi, pg: src.pages };
+        });
         return {
           id: makeBatchId(), platform: g.platform, printDate: printDate, createdAt: createdAt, createdBy: by,
           issues: g.bad.map(function(o) { return o.orderId || ('trang ' + o.pages.join('-')); }),
           notes: noteForOld(g).concat(noteForQty(g)),
-          orders: g.resolved,
+          orders: stored,
+          files: fileNames,
         };
       });
       var msg = 'Đã lập ' + batches.length + ' phiếu: ' + batches.map(function(b) { return b.id; }).join(', ') + '.';
@@ -718,6 +747,48 @@ export default function PhieuXuatKhoPage() {
 
       <div className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-700 text-sm font-semibold text-gray-200">Lịch sử phiếu đã lập</div>
+        <div className="px-4 py-3 border-b border-slate-700">
+          <div className="flex flex-wrap items-center gap-3">
+            <input value={orderQuery} onChange={function(e) { setOrderQuery(e.target.value); }} placeholder="Tìm đơn theo mã đơn (dán nhiều mã cách nhau bằng dấu cách / xuống dòng)" className={inputCls + ' flex-1 min-w-[260px]'} />
+            {orderQuery && <button onClick={function() { setOrderQuery(''); }} className="text-sm text-gray-400 hover:text-gray-200">Xóa</button>}
+          </div>
+          {orderSearch && (
+            <div className="mt-3 text-sm">
+              <div className="text-gray-300 mb-2">
+                Tìm thấy <b>{orderSearch.hits.length}</b> kết quả{orderSearch.tokens.length > 1 ? ' cho ' + (orderSearch.tokens.length - orderSearch.missing.length) + '/' + orderSearch.tokens.length + ' mã' : ''}
+                <span className="text-gray-500"> (tìm trong {data.batches.length} phiếu đang lưu)</span>
+              </div>
+              {orderSearch.missing.length > 0 && <div className="mb-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">Không thấy trong phiếu nào: {orderSearch.missing.slice(0, 30).join(', ')}{orderSearch.missing.length > 30 ? '...' : ''}</div>}
+              {orderSearch.hits.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead><tr className="text-xs text-gray-400 border-b border-slate-700">
+                      <th className="px-3 py-1.5 text-left">Mã đơn</th><th className="px-3 py-1.5 text-left">Phiếu</th><th className="px-3 py-1.5 text-left">Sàn</th>
+                      <th className="px-3 py-1.5 text-left">Lập lúc</th><th className="px-3 py-1.5 text-left">Người lập</th><th className="px-3 py-1.5 text-left">File PDF (trang)</th><th className="px-3 py-1.5 text-left">Sản phẩm</th>
+                    </tr></thead>
+                    <tbody>
+                      {orderSearch.hits.slice(0, 100).map(function(h, i) {
+                        var fname = h.order.fi !== undefined && h.batch.files ? h.batch.files[h.order.fi] : '';
+                        return (
+                          <tr key={h.batch.id + h.order.orderId + i} className="border-b border-slate-800 align-top">
+                            <td className="px-3 py-1.5 font-mono text-gray-100">{h.order.orderId}</td>
+                            <td className="px-3 py-1.5 font-mono text-gray-300">{h.batch.id}</td>
+                            <td className="px-3 py-1.5 text-gray-300">{PXK_PLATFORM_LABELS[h.batch.platform]}</td>
+                            <td className="px-3 py-1.5 text-gray-300 whitespace-nowrap">{fmtDateTime(h.batch)}</td>
+                            <td className="px-3 py-1.5 text-gray-400">{h.batch.createdBy}</td>
+                            <td className="px-3 py-1.5 text-gray-300">{fname ? fname + (h.order.pg && h.order.pg.length > 0 ? ' (trang ' + h.order.pg.join('-') + ')' : '') : <span className="text-gray-500">không có thông tin file (phiếu lập trước khi app lưu tên file)</span>}</td>
+                            <td className="px-3 py-1.5 text-gray-400 text-xs">{h.order.items.map(function(it) { return (it.sku || it.name || '?') + ' × ' + it.qty; }).join(', ')}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {orderSearch.hits.length > 100 && <div className="text-xs text-gray-500 mt-1">Chỉ hiện 100 kết quả đầu, hãy nhập mã cụ thể hơn.</div>}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
         {data.batches.length === 0 ? (
           <div className="px-4 py-6 text-sm text-gray-500">Chưa có phiếu nào.</div>
         ) : (
@@ -733,7 +804,7 @@ export default function PhieuXuatKhoPage() {
                   var qty = b.orders.reduce(function(s, o) { return s + o.items.reduce(function(a, x) { return a + x.qty; }, 0); }, 0);
                   return (
                     <tr key={b.id} className="border-b border-slate-800">
-                      <td className="px-4 py-2 font-mono text-gray-300">{b.id}</td>
+                      <td className="px-4 py-2 font-mono text-gray-300">{b.id}{b.files && b.files.length > 0 && <div className="font-sans text-xs text-gray-500 mt-0.5 max-w-xs break-words" title={b.files.join(String.fromCharCode(10))}>File: {b.files.join(', ')}</div>}</td>
                       <td className="px-4 py-2 text-gray-300">{PXK_PLATFORM_LABELS[b.platform]}</td>
                       <td className="px-4 py-2 text-gray-300 whitespace-nowrap">{fmtDateTime(b)}</td>
                       <td className="px-4 py-2 text-right text-gray-300">{b.orders.length}</td>

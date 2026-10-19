@@ -21,6 +21,14 @@ export interface PxkOrder {
   file: string;
 }
 
+// Đơn lưu trong phiếu; fi = số thứ tự file trong batch.files, pg = trang trong file đó
+export interface PxkStoredOrder {
+  orderId: string;
+  items: PxkItem[];
+  fi?: number;
+  pg?: number[];
+}
+
 export interface PxkBatch {
   id: string;
   platform: PxkPlatform;
@@ -31,7 +39,8 @@ export interface PxkBatch {
   deducted?: boolean; // không còn dùng (phiếu cũ có thể còn trường này)
   issues?: string[]; // các nhãn đọc chưa chắc chắn lúc lập phiếu (in cảnh báo lên phiếu)
   notes?: string[]; // ghi chú in lên phiếu (vd: có đơn đã lập phiếu trước đó)
-  orders: Array<{ orderId: string; items: PxkItem[] }>;
+  orders: Array<PxkStoredOrder>;
+  files?: string[]; // tên các file PDF đã tải lên để lập phiếu này (phiếu cũ không có)
 }
 
 export interface PxkData {
