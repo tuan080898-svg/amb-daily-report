@@ -1,5 +1,5 @@
 import type { UserOptions, RowInput } from 'jspdf-autotable';
-import { fmtDateTime, slipWarnings, splitShopeeName, summarizePxk, PXK_PLATFORM_LABELS, type PxkBatch } from './pxk';
+import { fmtDate, fmtDateTime, fmtTime, pxkBatchQty, slipWarnings, splitShopeeName, summarizePxk, PXK_PLATFORM_LABELS, type PxkBatch, type PxkDaySummary } from './pxk';
 
 // Tải phiếu xuất kho về máy dưới dạng file PDF (khổ A4, giống bản in).
 // Thư viện PDF và font tiếng Việt (DejaVu Sans) chỉ được tải khi bấm "Tải về".
@@ -31,20 +31,19 @@ export function pxkPdfFileName(batches: PxkBatch[]): string {
   return 'Phieu-xuat-kho-' + batches[0].printDate + '-' + batches.length + '-phieu.pdf';
 }
 
-export async function downloadPxkPdf(batches: PxkBatch[], opts: { showOrders: boolean }): Promise<void> {
-  if (batches.length === 0) return;
+var LEFT = 10, RIGHT = 200, MAXY = 284;
+
+// Tạo tài liệu PDF A4 đã nạp font tiếng Việt, kèm các hàm vẽ bảng dùng chung
+async function openPdf(title: string) {
   var jspdf = await import('jspdf');
   var autoTable = (await import('jspdf-autotable')).default;
   var fonts = await loadFonts();
-
   var doc = new jspdf.jsPDF({ unit: 'mm', format: 'a4' });
   doc.addFileToVFS('DejaVuSans.ttf', fonts.regular);
   doc.addFont('DejaVuSans.ttf', 'DejaVu', 'normal');
   doc.addFileToVFS('DejaVuSans-Bold.ttf', fonts.bold);
   doc.addFont('DejaVuSans-Bold.ttf', 'DejaVu', 'bold');
-  doc.setProperties({ title: batches.length === 1 ? 'Phiếu xuất kho ' + batches[0].id : 'Phiếu xuất kho ' + batches.length + ' phiếu' });
-
-  var LEFT = 10, RIGHT = 200, MAXY = 284;
+  doc.setProperties({ title: title });
   var tableBase: UserOptions = {
     theme: 'grid',
     margin: { left: LEFT, right: 210 - RIGHT, top: 14, bottom: 14 },
@@ -60,6 +59,26 @@ export async function downloadPxkPdf(batches: PxkBatch[], opts: { showOrders: bo
     doc.setFont('DejaVu', 'bold'); doc.setFontSize(10); doc.setTextColor(17, 17, 17);
     doc.text(text, LEFT, y);
   }
+  function signatures(y0: number) {
+    var ys = y0; if (ys > MAXY - 30) { doc.addPage(); ys = 24; }
+    var cols = [['Người lập phiếu', 30], ['Người nhặt hàng', 105], ['Người kiểm hàng', 180]] as Array<[string, number]>;
+    cols.forEach(function(c) { doc.setFont('DejaVu', 'bold'); doc.setFontSize(9); doc.setTextColor(17, 17, 17); doc.text(c[0], c[1], ys, { align: 'center' }); doc.setFont('DejaVu', 'normal'); doc.setFontSize(7.5); doc.setTextColor(102, 102, 102); doc.text('(ký, ghi rõ họ tên)', c[1], ys + 4, { align: 'center' }); doc.setTextColor(17, 17, 17); });
+  }
+  function finish(fileName: string) {
+    var total = doc.getNumberOfPages();
+    for (var p = 1; p <= total; p++) {
+      doc.setPage(p); doc.setFont('DejaVu', 'normal'); doc.setFontSize(8); doc.setTextColor(85, 85, 85);
+      doc.text('Trang ' + p + '/' + total, RIGHT, 291, { align: 'right' });
+    }
+    doc.save(fileName);
+  }
+  return { doc: doc, table: table, lastY: lastY, heading: heading, signatures: signatures, finish: finish };
+}
+
+export async function downloadPxkPdf(batches: PxkBatch[], opts: { showOrders: boolean }): Promise<void> {
+  if (batches.length === 0) return;
+  var pdf = await openPdf(batches.length === 1 ? 'Phiếu xuất kho ' + batches[0].id : 'Phiếu xuất kho ' + batches.length + ' phiếu');
+  var doc = pdf.doc, table = pdf.table, lastY = pdf.lastY, heading = pdf.heading;
 
   batches.forEach(function(batch, bi) {
     if (bi > 0) doc.addPage();
@@ -152,11 +171,64 @@ export async function downloadPxkPdf(batches: PxkBatch[], opts: { showOrders: bo
     }
   });
 
-  // Số trang
-  var total = doc.getNumberOfPages();
-  for (var p = 1; p <= total; p++) {
-    doc.setPage(p); doc.setFont('DejaVu', 'normal'); doc.setFontSize(8); doc.setTextColor(85, 85, 85);
-    doc.text('Trang ' + p + '/' + total, RIGHT, 291, { align: 'right' });
+  pdf.finish(pxkPdfFileName(batches));
+}
+
+// Phiếu tổng hợp cuối ngày: gộp mọi phiếu trong ngày thành một phiếu tên sản phẩm + tổng số lượng
+export async function downloadPxkDayPdf(sum: PxkDaySummary): Promise<void> {
+  if (sum.batches.length === 0) return;
+  var pdf = await openPdf('Phiếu tổng hợp xuất kho ' + fmtDate(sum.date));
+  var doc = pdf.doc, table = pdf.table, lastY = pdf.lastY, heading = pdf.heading;
+  var stamp = fmtTime(new Date().toISOString());
+
+  doc.setTextColor(17, 17, 17);
+  doc.setFont('DejaVu', 'bold'); doc.setFontSize(14);
+  doc.text('PHIẾU TỔNG HỢP XUẤT KHO — NGÀY ' + fmtDate(sum.date), LEFT, 16);
+  doc.setFont('DejaVu', 'normal'); doc.setFontSize(8.5); doc.setTextColor(68, 68, 68);
+  doc.text('Tổng hợp từ ' + sum.batches.length + ' phiếu xuất kho trong ngày', LEFT, 21.5);
+  doc.setTextColor(17, 17, 17);
+  doc.text('Lập lúc: ' + stamp, RIGHT, 14, { align: 'right' });
+  doc.text('Số đơn: ' + (sum.shopeeOrders + sum.tiktokOrders) + ' (Shopee ' + sum.shopeeOrders + ' · TikTok ' + sum.tiktokOrders + ')', RIGHT, 19, { align: 'right' });
+  doc.text('Tổng SL: ' + sum.totalQty, RIGHT, 24, { align: 'right' });
+  doc.setDrawColor(17, 17, 17); doc.setLineWidth(0.6); doc.line(LEFT, 26, RIGHT, 26);
+
+  var y = 31;
+  if (sum.warnings.length > 0) {
+    doc.setFont('DejaVu', 'bold'); doc.setFontSize(8.5);
+    var wrapped: string[] = [];
+    sum.warnings.forEach(function(w) { wrapped = wrapped.concat(doc.splitTextToSize('⚠ ' + w, RIGHT - LEFT - 5) as string[]); });
+    var boxH = wrapped.length * 4 + 3;
+    doc.setFillColor(255, 240, 240); doc.setDrawColor(204, 0, 0); doc.setLineWidth(0.5);
+    doc.rect(LEFT, y - 3, RIGHT - LEFT, boxH, 'FD');
+    doc.setTextColor(153, 0, 0);
+    doc.text(wrapped, LEFT + 2.5, y + 1);
+    doc.setTextColor(17, 17, 17);
+    y += boxH + 3;
   }
-  doc.save(pxkPdfFileName(batches));
+
+  heading('1. Các phiếu trong ngày', y);
+  table({
+    startY: y + 2, head: [['#', 'Mã phiếu', 'Sàn', 'Giờ lập', 'Người lập', 'Số đơn', 'SL']],
+    body: sum.batches.map(function(b, i) { return [i + 1, b.id, PXK_PLATFORM_LABELS[b.platform], fmtTime(b.createdAt), b.createdBy, b.orders.length, pxkBatchQty(b)]; }),
+    columnStyles: { 0: { cellWidth: 9, halign: 'center' }, 1: { cellWidth: 44, fontSize: 8 }, 2: { cellWidth: 24 }, 3: { cellWidth: 20, halign: 'center' }, 4: { cellWidth: 'auto' }, 5: { cellWidth: 18, halign: 'center' }, 6: { cellWidth: 18, halign: 'center' } },
+  });
+
+  var y2 = lastY() + 8; if (y2 > MAXY - 25) { doc.addPage(); y2 = 18; }
+  heading('2. Tổng hợp sản phẩm cần xuất trong ngày', y2);
+  var sumShopee = sum.rows.reduce(function(s, r) { return s + r.shopee; }, 0);
+  var sumTiktok = sum.rows.reduce(function(s, r) { return s + r.tiktok; }, 0);
+  var body: RowInput[] = sum.rows.map(function(r, i) {
+    return [i + 1, r.note ? r.name + '\n(' + r.note + ')' : r.name, r.skus || '—', r.shopee || '', r.tiktok || '', r.total, ''];
+  });
+  body.push([{ content: 'Tổng cộng', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold' } }, { content: String(sumShopee), styles: { halign: 'center', fontStyle: 'bold' } }, { content: String(sumTiktok), styles: { halign: 'center', fontStyle: 'bold' } }, { content: String(sum.totalQty), styles: { halign: 'center', fontStyle: 'bold', fontSize: 10 } }, '']);
+  table({
+    startY: y2 + 2, head: [['#', 'Tên sản phẩm', 'SKU', 'Shopee', 'TikTok', 'Tổng SL', 'Đã xuất']], body: body,
+    columnStyles: { 0: { cellWidth: 9, halign: 'center' }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 34, fontSize: 7.5 }, 3: { cellWidth: 17, halign: 'center' }, 4: { cellWidth: 17, halign: 'center' }, 5: { cellWidth: 20, halign: 'center', fontStyle: 'bold', fontSize: 10 }, 6: { cellWidth: 18 } },
+    didParseCell: function(data) {
+      if (data.section === 'body' && data.row.index < sum.rows.length && sum.rows[data.row.index].note) data.cell.styles.fillColor = [255, 243, 205];
+    },
+  });
+
+  pdf.signatures(lastY() + 14);
+  pdf.finish('Phieu-tong-hop-' + sum.date + '.pdf');
 }

@@ -515,6 +515,89 @@ var PXK_CSS = '@page{size:A4;margin:12mm 10mm 14mm;@bottom-right{content:"Trang 
   '.sign{display:flex;justify-content:space-around;text-align:center;margin-top:28px;page-break-inside:avoid;font-weight:bold}.sign span{font-weight:normal;font-size:10px;color:#666}' +
   '.sign div{height:80px;width:30%}.pb{page-break-before:always}.slip + .slip{page-break-before:always}';
 
+// ==================== Phiếu tổng hợp cuối ngày ====================
+// Gộp mọi phiếu có ngày in = ngày chọn thành một phiếu: tên sản phẩm gốc + tổng số lượng (tách theo sàn).
+// Đơn xuất hiện ở nhiều phiếu trong ngày (in lại) chỉ tính một lần để kho không xuất hai lần.
+
+export interface PxkDayRow { name: string; skus: string; shopee: number; tiktok: number; total: number; note: string }
+
+export interface PxkDaySummary {
+  date: string;
+  batches: PxkBatch[]; // các phiếu trong ngày, theo giờ lập tăng dần
+  rows: PxkDayRow[];
+  shopeeOrders: number;
+  tiktokOrders: number;
+  dupOrders: number; // số đơn lặp giữa các phiếu (chỉ tính một lần)
+  totalQty: number; // tổng số sản phẩm gốc cần xuất
+  warnings: string[];
+}
+
+export function pxkBatchQty(b: PxkBatch): number {
+  return b.orders.reduce(function(s, o) { return s + o.items.reduce(function(a, x) { return a + x.qty; }, 0); }, 0);
+}
+
+export function summarizeDay(date: string, all: PxkBatch[]): PxkDaySummary {
+  var batches = all.filter(function(b) { return b.printDate === date; }).sort(function(a, b) { return a.createdAt.localeCompare(b.createdAt); });
+  var seen: Record<PxkPlatform, Set<string>> = { shopee: new Set<string>(), tiktok: new Set<string>() };
+  var orders: Record<PxkPlatform, Array<{ orderId: string; items: PxkItem[] }>> = { shopee: [], tiktok: [] };
+  var dup = 0;
+  batches.forEach(function(b) {
+    b.orders.forEach(function(o) {
+      if (seen[b.platform].has(o.orderId)) { dup += 1; return; }
+      seen[b.platform].add(o.orderId);
+      orders[b.platform].push(o);
+    });
+  });
+  var rows: Record<string, PxkDayRow> = {};
+  function addRow(key: string, name: string, skus: string, plat: PxkPlatform, qty: number, note: string) {
+    var r = rows[key] || (rows[key] = { name: name, skus: skus, shopee: 0, tiktok: 0, total: 0, note: note });
+    r[plat] += qty;
+    r.total += qty;
+    if (!r.skus && skus) r.skus = skus;
+  }
+  var unmapped = 0;
+  var noSku = 0;
+  (['shopee', 'tiktok'] as PxkPlatform[]).forEach(function(plat) {
+    var s = summarizePxk(orders[plat]);
+    s.productLines.forEach(function(p) { addRow('P:' + p.product, p.product, p.skus, plat, p.qty, ''); });
+    s.skuLines.filter(function(l) { return !l.mapped; }).forEach(function(l) { unmapped += 1; addRow('S:' + l.sku, l.name || l.sku, l.sku, plat, l.qty, 'SKU chưa có trong bảng quy đổi'); });
+    s.unresolved.forEach(function(u) { noSku += 1; addRow('N:' + u.key, u.name, '', plat, u.qty, 'Chưa có SKU'); });
+  });
+  var list = Object.values(rows).sort(function(a, b) {
+    var ra = a.note ? 1 : 0; var rb = b.note ? 1 : 0;
+    return ra - rb || a.name.localeCompare(b.name, 'vi');
+  });
+  var warnings: string[] = [];
+  if (dup > 0) warnings.push(dup + ' đơn xuất hiện ở nhiều phiếu trong ngày (in lại) — chỉ tính một lần.');
+  if (unmapped > 0) warnings.push(unmapped + ' mã SKU chưa có trong bảng quy đổi (dòng nền vàng) nên chưa quy ra được sản phẩm gốc.');
+  if (noSku > 0) warnings.push(noSku + ' sản phẩm chưa có SKU (dòng nền vàng), tính theo tên trên nhãn.');
+  var badBatches = batches.filter(function(b) { return b.issues && b.issues.length > 0; });
+  if (badBatches.length > 0) warnings.push('Phiếu ' + badBatches.map(function(b) { return b.id; }).join(', ') + ' có nhãn đọc chưa chắc chắn, số liệu có thể lệch.');
+  return {
+    date: date, batches: batches, rows: list,
+    shopeeOrders: orders.shopee.length, tiktokOrders: orders.tiktok.length, dupOrders: dup,
+    totalQty: list.reduce(function(s, r) { return s + r.total; }, 0), warnings: warnings,
+  };
+}
+
+export function buildPxkDayHtml(sum: PxkDaySummary, now: Date): string {
+  var stamp = fmtTime(now.toISOString());
+  var head = '<div class="head"><div><h1>PHIẾU TỔNG HỢP XUẤT KHO — NGÀY ' + esc(fmtDate(sum.date)) + '</h1><div class="sub">Tổng hợp từ ' + sum.batches.length + ' phiếu xuất kho trong ngày</div></div>' +
+    '<div class="meta">Lập lúc: <b>' + esc(stamp) + '</b><br>Số đơn: <b>' + (sum.shopeeOrders + sum.tiktokOrders) + '</b> (Shopee ' + sum.shopeeOrders + ' · TikTok ' + sum.tiktokOrders + ')<br>Tổng SL: <b>' + sum.totalQty + '</b></div></div>';
+  var warn = sum.warnings.length > 0 ? '<div class="alert">⚠ ' + sum.warnings.map(esc).join('<br>⚠ ') + '</div>' : '';
+  var batchRows = sum.batches.map(function(b, i) {
+    return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(b.id) + '</td><td>' + esc(PXK_PLATFORM_LABELS[b.platform]) + '</td><td class="c">' + esc(fmtTime(b.createdAt)) + '</td><td>' + esc(b.createdBy) + '</td><td class="c">' + b.orders.length + '</td><td class="c">' + pxkBatchQty(b) + '</td></tr>';
+  }).join('');
+  var t1 = '<h2>1. Các phiếu trong ngày</h2><table><thead><tr><th style="width:28px">#</th><th>Mã phiếu</th><th style="width:70px">Sàn</th><th style="width:56px">Giờ lập</th><th>Người lập</th><th style="width:50px">Số đơn</th><th style="width:50px">SL</th></tr></thead><tbody>' + batchRows + '</tbody></table>';
+  var prodRows = sum.rows.map(function(r, i) {
+    return '<tr' + (r.note ? ' class="warn"' : '') + '><td class="c">' + (i + 1) + '</td><td>' + esc(r.name) + (r.note ? '<br><span style="font-size:10px;color:#a60">' + esc(r.note) + '</span>' : '') + '</td><td class="mono">' + esc(r.skus || '—') + '</td><td class="c">' + (r.shopee || '') + '</td><td class="c">' + (r.tiktok || '') + '</td><td class="c big">' + r.total + '</td><td class="chk"></td></tr>';
+  }).join('');
+  var t2 = '<h2>2. Tổng hợp sản phẩm cần xuất trong ngày</h2><table><thead><tr><th style="width:28px">#</th><th>Tên sản phẩm</th><th style="width:100px">SKU</th><th style="width:50px">Shopee</th><th style="width:50px">TikTok</th><th style="width:60px">Tổng SL</th><th style="width:50px">Đã xuất</th></tr></thead><tbody>' + prodRows +
+    '<tr class="total"><td colspan="3" class="r">Tổng cộng</td><td class="c"><b>' + sum.rows.reduce(function(s, r) { return s + r.shopee; }, 0) + '</b></td><td class="c"><b>' + sum.rows.reduce(function(s, r) { return s + r.tiktok; }, 0) + '</b></td><td class="c big">' + sum.totalQty + '</td><td></td></tr></tbody></table>';
+  var sign = '<div class="sign"><div>Người lập phiếu<br><span>(ký, ghi rõ họ tên)</span></div><div>Người nhặt hàng<br><span>(ký, ghi rõ họ tên)</span></div><div>Người kiểm hàng<br><span>(ký, ghi rõ họ tên)</span></div></div>';
+  return '<!doctype html><html><head><meta charset="utf-8"><title>Phieu tong hop ' + esc(sum.date) + '</title><style>' + PXK_CSS + '</style></head><body><section class="slip">' + head + warn + t1 + t2 + sign + '</section></body></html>';
+}
+
 // Ghép nhiều phiếu (mỗi sàn/kho một phiếu) vào một lần in; mỗi phiếu bắt đầu ở trang mới.
 export function buildPxkHtmlMulti(batches: PxkBatch[], opts: { showOrders: boolean }): string {
   var title = batches.length === 1 ? 'Phieu xuat kho ' + batches[0].platform + ' ' + batches[0].printDate : 'Phieu xuat kho ' + batches.length + ' phieu';

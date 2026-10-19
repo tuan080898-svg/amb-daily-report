@@ -7,10 +7,10 @@ import { dbGetPxk, dbUpdatePxk } from '@/lib/db';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
 import {
-  parsePxkFileAuto, summarizePxk, findQtyMismatches, buildPxkHtmlMulti, pxkNameKey, fmtDateTime, PXK_PLATFORM_LABELS,
+  parsePxkFileAuto, summarizePxk, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
   type PxkPlatform, type PxkOrder, type PxkBatch, type PxkData, type PxkItem,
 } from '@/lib/pxk';
-import { downloadPxkPdf } from '@/lib/pxk-pdf';
+import { downloadPxkPdf, downloadPxkDayPdf } from '@/lib/pxk-pdf';
 
 function todayStr(): string {
   var d = new Date();
@@ -59,6 +59,7 @@ export default function PhieuXuatKhoPage() {
   const [notice, setNotice] = useState('');
   const [lastBatches, setLastBatches] = useState<PxkBatch[]>([]); // phiếu vừa lập, để tải về
   const [downloading, setDownloading] = useState(false);
+  const [dayDate, setDayDate] = useState(todayStr()); // ngày cần xuất phiếu tổng hợp
   const [data, setData] = useState<PxkData>({ names: {}, batches: [] });
   const [dataErr, setDataErr] = useState('');
   // SKU nhân sự đã gắn trong lần này (khoá tên chuẩn hoá -> { sku, tên }); cũng được lưu ngay lên cloud để nhớ cho lần sau
@@ -167,6 +168,8 @@ export default function PhieuXuatKhoPage() {
     });
     return Object.values(by).sort(function(a, b) { return b.n - a.n; });
   }, [analysis, prevOrders]);
+
+  const daySum = useMemo(function() { return summarizeDay(dayDate, data.batches); }, [dayDate, data.batches]);
 
   const totalOrders = groups.reduce(function(s, g) { return s + g.used.length; }, 0);
   const totalQty = groups.reduce(function(s, g) { return s + g.summary.totalQty; }, 0);
@@ -364,6 +367,24 @@ export default function PhieuXuatKhoPage() {
   function reprint(b: PxkBatch) {
     var w = window.open('', '_blank');
     openPrint(buildPxkHtmlMulti([b], { showOrders: showOrders }), w);
+  }
+
+  function printDay() {
+    if (daySum.batches.length === 0) return;
+    var w = window.open('', '_blank');
+    openPrint(buildPxkDayHtml(daySum, new Date()), w);
+  }
+
+  async function downloadDay() {
+    if (daySum.batches.length === 0) return;
+    setError(''); setDownloading(true);
+    try {
+      await downloadPxkDayPdf(daySum);
+    } catch (e) {
+      setError('Không tải được phiếu tổng hợp: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setDownloading(false);
+    }
   }
 
   async function download(list: PxkBatch[]) {
@@ -644,6 +665,56 @@ export default function PhieuXuatKhoPage() {
           </div>
         </>
       )}
+
+      <div className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden mb-6">
+        <div className="px-4 py-3 border-b border-slate-700 text-sm font-semibold text-gray-200">Phiếu tổng hợp cuối ngày</div>
+        <div className="px-4 py-3 flex flex-wrap items-center gap-3">
+          <label className="text-sm text-gray-400">Ngày
+            <input type="date" value={dayDate} onChange={function(e) { setDayDate(e.target.value); }} className={inputCls + ' ml-2'} />
+          </label>
+          {daySum.batches.length === 0 ? (
+            <span className="text-sm text-gray-500">Chưa có phiếu nào được lập trong ngày {fmtDate(dayDate)}.</span>
+          ) : (
+            <>
+              <span className="text-sm text-gray-300">
+                <b>{daySum.batches.length}</b> phiếu · <b>{daySum.shopeeOrders + daySum.tiktokOrders}</b> đơn (Shopee {daySum.shopeeOrders} · TikTok {daySum.tiktokOrders}) · <b>{daySum.totalQty}</b> sản phẩm · {daySum.rows.length} loại
+              </span>
+              <button onClick={printDay} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg">In phiếu tổng hợp</button>
+              <button onClick={function() { downloadDay(); }} disabled={downloading} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg">{downloading ? 'Đang tạo PDF...' : 'Tải về (PDF)'}</button>
+            </>
+          )}
+        </div>
+        {daySum.batches.length > 0 && (
+          <details className="border-t border-slate-700">
+            <summary className="px-4 py-2 text-sm text-gray-400 cursor-pointer">Xem trước: các phiếu và tổng sản phẩm trong ngày</summary>
+            <div className="px-4 pb-3 space-y-3">
+              {daySum.warnings.length > 0 && <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">{daySum.warnings.map(function(w) { return <div key={w}>⚠ {w}</div>; })}</div>}
+              <div className="text-xs text-gray-400">{daySum.batches.map(function(b) { return b.id + ' (' + PXK_PLATFORM_LABELS[b.platform] + ', ' + fmtTime(b.createdAt) + ', ' + b.orders.length + ' đơn, ' + pxkBatchQty(b) + ' SP)'; }).join(' · ')}</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="text-xs text-gray-400 border-b border-slate-700">
+                    <th className="px-3 py-1.5 text-left">Tên sản phẩm</th><th className="px-3 py-1.5 text-left">SKU</th>
+                    <th className="px-3 py-1.5 text-right">Shopee</th><th className="px-3 py-1.5 text-right">TikTok</th><th className="px-3 py-1.5 text-right">Tổng</th>
+                  </tr></thead>
+                  <tbody>
+                    {daySum.rows.map(function(r) {
+                      return (
+                        <tr key={r.name + r.skus} className={'border-b border-slate-800' + (r.note ? ' bg-amber-500/5' : '')}>
+                          <td className="px-3 py-1.5 text-gray-300">{r.name}{r.note && <span className="text-xs text-amber-300"> ({r.note})</span>}</td>
+                          <td className="px-3 py-1.5 font-mono text-xs text-gray-400">{r.skus}</td>
+                          <td className="px-3 py-1.5 text-right text-gray-400">{r.shopee || ''}</td>
+                          <td className="px-3 py-1.5 text-right text-gray-400">{r.tiktok || ''}</td>
+                          <td className="px-3 py-1.5 text-right font-bold text-gray-100">{r.total}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </details>
+        )}
+      </div>
 
       <div className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-700 text-sm font-semibold text-gray-200">Lịch sử phiếu đã lập</div>
