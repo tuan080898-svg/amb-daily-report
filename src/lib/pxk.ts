@@ -3,8 +3,9 @@
 
 import { getSkuProducts, getSkuMap } from './sku';
 
-export type PxkPlatform = 'shopee' | 'tiktok';
-export var PXK_PLATFORM_LABELS: Record<PxkPlatform, string> = { shopee: 'Shopee', tiktok: 'TikTok Shop' };
+export type PxkPlatform = 'shopee' | 'tiktok' | 'sapo';
+export var PXK_PLATFORM_LABELS: Record<PxkPlatform, string> = { shopee: 'Shopee', tiktok: 'TikTok Shop', sapo: 'Đơn Sapo' };
+export var PXK_PLATFORMS: PxkPlatform[] = ['shopee', 'tiktok', 'sapo'];
 
 export interface PxkItem {
   sku: string; // rỗng nếu nhãn không có SKU (Shopee) và chưa gắn được
@@ -25,6 +26,9 @@ export interface PxkOrder {
 export interface PxkStoredOrder {
   orderId: string;
   items: PxkItem[];
+  src?: string; // đơn Sapo: nguồn đơn (CSKH, Khách Sỉ, KOL KOC...)
+  cust?: string; // đơn Sapo: tên khách / người nhận
+  note?: string; // đơn Sapo: ghi chú trên đơn
   fi?: number;
   pg?: number[];
 }
@@ -463,6 +467,11 @@ export function slipWarnings(batch: PxkBatch, sum: PxkSummary): string[] {
   return lines;
 }
 
+// Dòng mô tả đơn Sapo trên phiếu: "CSKH · Hoang203tn · ghi chú"
+export function sapoOrderMeta(o: PxkStoredOrder): string {
+  return [o.src, o.cust, o.note].filter(function(x) { return !!x; }).join(' · ');
+}
+
 function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
   var sum = summarizePxk(batch.orders);
   var whLabel = batch.warehouse === 'HN' ? 'Kho Hà Nội · ' : batch.warehouse === 'HCM' ? 'Kho HCM · ' : '';
@@ -503,6 +512,8 @@ function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
   if (opts.showOrders) {
     var orderRows = batch.orders.map(function(o, i) {
       var detail = o.items.map(function(it) { return esc((it.sku || it.name || '?')) + ' × ' + it.qty; }).join(', ');
+      var meta = sapoOrderMeta(o);
+      if (meta) detail += '<br><span style="font-size:10px;color:#555">' + esc(meta) + '</span>';
       return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(o.orderId) + '</td><td>' + detail + '</td><td class="c">' + o.items.reduce(function(s, x) { return s + x.qty; }, 0) + '</td><td class="chk"></td></tr>';
     }).join('');
     orderPage = '<div class="pb"></div><h2>' + (prodTable ? '3' : '2') + '. Danh sách từng đơn (để kiểm tra)</h2><table><thead><tr><th style="width:32px">#</th><th style="width:150px">Mã đơn hàng</th><th>Sản phẩm × SL</th><th style="width:44px">SL</th><th style="width:44px">Đủ</th></tr></thead><tbody>' + orderRows + '</tbody></table>';
@@ -528,7 +539,7 @@ var PXK_CSS = '@page{size:A4;margin:12mm 10mm 14mm;@bottom-right{content:"Trang 
 // Gộp mọi phiếu có ngày in = ngày chọn thành một phiếu: tên sản phẩm gốc + tổng số lượng (tách theo sàn).
 // Đơn xuất hiện ở nhiều phiếu trong ngày (in lại) chỉ tính một lần để kho không xuất hai lần.
 
-export interface PxkDayRow { name: string; skus: string; shopee: number; tiktok: number; total: number; note: string }
+export interface PxkDayRow { name: string; skus: string; shopee: number; tiktok: number; sapo: number; total: number; note: string }
 
 export interface PxkDaySummary {
   date: string;
@@ -536,6 +547,7 @@ export interface PxkDaySummary {
   rows: PxkDayRow[];
   shopeeOrders: number;
   tiktokOrders: number;
+  sapoOrders: number;
   dupOrders: number; // số đơn lặp giữa các phiếu (chỉ tính một lần)
   totalQty: number; // tổng số sản phẩm gốc cần xuất
   warnings: string[];
@@ -547,8 +559,8 @@ export function pxkBatchQty(b: PxkBatch): number {
 
 export function summarizeDay(date: string, all: PxkBatch[]): PxkDaySummary {
   var batches = all.filter(function(b) { return b.printDate === date; }).sort(function(a, b) { return a.createdAt.localeCompare(b.createdAt); });
-  var seen: Record<PxkPlatform, Set<string>> = { shopee: new Set<string>(), tiktok: new Set<string>() };
-  var orders: Record<PxkPlatform, Array<{ orderId: string; items: PxkItem[] }>> = { shopee: [], tiktok: [] };
+  var seen: Record<PxkPlatform, Set<string>> = { shopee: new Set<string>(), tiktok: new Set<string>(), sapo: new Set<string>() };
+  var orders: Record<PxkPlatform, Array<{ orderId: string; items: PxkItem[] }>> = { shopee: [], tiktok: [], sapo: [] };
   var dup = 0;
   batches.forEach(function(b) {
     b.orders.forEach(function(o) {
@@ -559,14 +571,14 @@ export function summarizeDay(date: string, all: PxkBatch[]): PxkDaySummary {
   });
   var rows: Record<string, PxkDayRow> = {};
   function addRow(key: string, name: string, skus: string, plat: PxkPlatform, qty: number, note: string) {
-    var r = rows[key] || (rows[key] = { name: name, skus: skus, shopee: 0, tiktok: 0, total: 0, note: note });
+    var r = rows[key] || (rows[key] = { name: name, skus: skus, shopee: 0, tiktok: 0, sapo: 0, total: 0, note: note });
     r[plat] += qty;
     r.total += qty;
     if (!r.skus && skus) r.skus = skus;
   }
   var unmapped = 0;
   var noSku = 0;
-  (['shopee', 'tiktok'] as PxkPlatform[]).forEach(function(plat) {
+  PXK_PLATFORMS.forEach(function(plat) {
     var s = summarizePxk(orders[plat]);
     s.productLines.forEach(function(p) { addRow('P:' + p.product, p.product, p.skus, plat, p.qty, ''); });
     s.skuLines.filter(function(l) { return !l.mapped; }).forEach(function(l) { unmapped += 1; addRow('S:' + l.sku, l.name || l.sku, l.sku, plat, l.qty, 'SKU chưa có trong bảng quy đổi'); });
@@ -584,7 +596,7 @@ export function summarizeDay(date: string, all: PxkBatch[]): PxkDaySummary {
   if (badBatches.length > 0) warnings.push('Phiếu ' + badBatches.map(function(b) { return b.id; }).join(', ') + ' có nhãn đọc chưa chắc chắn, số liệu có thể lệch.');
   return {
     date: date, batches: batches, rows: list,
-    shopeeOrders: orders.shopee.length, tiktokOrders: orders.tiktok.length, dupOrders: dup,
+    shopeeOrders: orders.shopee.length, tiktokOrders: orders.tiktok.length, sapoOrders: orders.sapo.length, dupOrders: dup,
     totalQty: list.reduce(function(s, r) { return s + r.total; }, 0), warnings: warnings,
   };
 }
@@ -592,17 +604,17 @@ export function summarizeDay(date: string, all: PxkBatch[]): PxkDaySummary {
 export function buildPxkDayHtml(sum: PxkDaySummary, now: Date): string {
   var stamp = fmtTime(now.toISOString());
   var head = '<div class="head"><div><h1>PHIẾU TỔNG HỢP XUẤT KHO — NGÀY ' + esc(fmtDate(sum.date)) + '</h1><div class="sub">Tổng hợp từ ' + sum.batches.length + ' phiếu xuất kho trong ngày</div></div>' +
-    '<div class="meta">Lập lúc: <b>' + esc(stamp) + '</b><br>Số đơn: <b>' + (sum.shopeeOrders + sum.tiktokOrders) + '</b> (Shopee ' + sum.shopeeOrders + ' · TikTok ' + sum.tiktokOrders + ')<br>Tổng SL: <b>' + sum.totalQty + '</b></div></div>';
+    '<div class="meta">Lập lúc: <b>' + esc(stamp) + '</b><br>Số đơn: <b>' + (sum.shopeeOrders + sum.tiktokOrders + sum.sapoOrders) + '</b> (Shopee ' + sum.shopeeOrders + ' · TikTok ' + sum.tiktokOrders + ' · Sapo ' + sum.sapoOrders + ')<br>Tổng SL: <b>' + sum.totalQty + '</b></div></div>';
   var warn = sum.warnings.length > 0 ? '<div class="alert">⚠ ' + sum.warnings.map(esc).join('<br>⚠ ') + '</div>' : '';
   var batchRows = sum.batches.map(function(b, i) {
     return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(b.id) + '</td><td>' + esc(PXK_PLATFORM_LABELS[b.platform]) + '</td><td class="c">' + esc(fmtTime(b.createdAt)) + '</td><td>' + esc(b.createdBy) + '</td><td class="c">' + b.orders.length + '</td><td class="c">' + pxkBatchQty(b) + '</td></tr>';
   }).join('');
   var t1 = '<h2>1. Các phiếu trong ngày</h2><table><thead><tr><th style="width:28px">#</th><th>Mã phiếu</th><th style="width:70px">Sàn</th><th style="width:56px">Giờ lập</th><th>Người lập</th><th style="width:50px">Số đơn</th><th style="width:50px">SL</th></tr></thead><tbody>' + batchRows + '</tbody></table>';
   var prodRows = sum.rows.map(function(r, i) {
-    return '<tr' + (r.note ? ' class="warn"' : '') + '><td class="c">' + (i + 1) + '</td><td>' + esc(r.name) + (r.note ? '<br><span style="font-size:10px;color:#a60">' + esc(r.note) + '</span>' : '') + '</td><td class="mono">' + esc(r.skus || '—') + '</td><td class="c">' + (r.shopee || '') + '</td><td class="c">' + (r.tiktok || '') + '</td><td class="c big">' + r.total + '</td><td class="chk"></td></tr>';
+    return '<tr' + (r.note ? ' class="warn"' : '') + '><td class="c">' + (i + 1) + '</td><td>' + esc(r.name) + (r.note ? '<br><span style="font-size:10px;color:#a60">' + esc(r.note) + '</span>' : '') + '</td><td class="mono">' + esc(r.skus || '—') + '</td><td class="c">' + (r.shopee || '') + '</td><td class="c">' + (r.tiktok || '') + '</td><td class="c">' + (r.sapo || '') + '</td><td class="c big">' + r.total + '</td><td class="chk"></td></tr>';
   }).join('');
-  var t2 = '<h2>2. Tổng hợp sản phẩm cần xuất trong ngày</h2><table><thead><tr><th style="width:28px">#</th><th>Tên sản phẩm</th><th style="width:100px">SKU</th><th style="width:50px">Shopee</th><th style="width:50px">TikTok</th><th style="width:60px">Tổng SL</th><th style="width:50px">Đã xuất</th></tr></thead><tbody>' + prodRows +
-    '<tr class="total"><td colspan="3" class="r">Tổng cộng</td><td class="c"><b>' + sum.rows.reduce(function(s, r) { return s + r.shopee; }, 0) + '</b></td><td class="c"><b>' + sum.rows.reduce(function(s, r) { return s + r.tiktok; }, 0) + '</b></td><td class="c big">' + sum.totalQty + '</td><td></td></tr></tbody></table>';
+  var t2 = '<h2>2. Tổng hợp sản phẩm cần xuất trong ngày</h2><table><thead><tr><th style="width:28px">#</th><th>Tên sản phẩm</th><th style="width:100px">SKU</th><th style="width:50px">Shopee</th><th style="width:50px">TikTok</th><th style="width:50px">Sapo</th><th style="width:60px">Tổng SL</th><th style="width:50px">Đã xuất</th></tr></thead><tbody>' + prodRows +
+    '<tr class="total"><td colspan="3" class="r">Tổng cộng</td><td class="c"><b>' + sum.rows.reduce(function(s, r) { return s + r.shopee; }, 0) + '</b></td><td class="c"><b>' + sum.rows.reduce(function(s, r) { return s + r.tiktok; }, 0) + '</b></td><td class="c"><b>' + sum.rows.reduce(function(s, r) { return s + r.sapo; }, 0) + '</b></td><td class="c big">' + sum.totalQty + '</td><td></td></tr></tbody></table>';
   var sign = '<div class="sign"><div>Người lập phiếu<br><span>(ký, ghi rõ họ tên)</span></div><div>Người nhặt hàng<br><span>(ký, ghi rõ họ tên)</span></div><div>Người kiểm hàng<br><span>(ký, ghi rõ họ tên)</span></div></div>';
   return '<!doctype html><html><head><meta charset="utf-8"><title>Phieu tong hop ' + esc(sum.date) + '</title><style>' + PXK_CSS + '</style></head><body><section class="slip">' + head + warn + t1 + t2 + sign + '</section></body></html>';
 }

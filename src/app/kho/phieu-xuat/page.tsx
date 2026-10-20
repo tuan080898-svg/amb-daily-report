@@ -11,6 +11,8 @@ import {
   type PxkPlatform, type PxkOrder, type PxkBatch, type PxkStoredOrder, type PxkData, type PxkItem,
 } from '@/lib/pxk';
 import { downloadPxkPdf, downloadPxkDayPdf } from '@/lib/pxk-pdf';
+import type { SapoOrder } from '@/lib/pxk-sapo';
+import SapoPanel from './SapoPanel';
 
 function todayStr(): string {
   var d = new Date();
@@ -20,6 +22,10 @@ function todayStr(): string {
 function fmtDate(d: string): string {
   var p = d.split('-');
   return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : d;
+}
+
+function platformBadge(p: PxkPlatform): string {
+  return p === 'shopee' ? 'bg-orange-500/15 text-orange-400' : p === 'sapo' ? 'bg-sky-500/15 text-sky-300' : 'bg-pink-500/15 text-pink-400';
 }
 
 function makeBatchId(): string {
@@ -85,7 +91,7 @@ export default function PhieuXuatKhoPage() {
 
   // Đơn đã có trong các phiếu trước (cùng sàn): mã đơn -> phiếu gần nhất chứa đơn đó
   const prevOrders = useMemo(function() {
-    var out: Record<PxkPlatform, Record<string, { id: string; by: string; at: string }>> = { shopee: {}, tiktok: {} };
+    var out: Record<PxkPlatform, Record<string, { id: string; by: string; at: string }>> = { shopee: {}, tiktok: {}, sapo: {} };
     data.batches.slice().sort(function(a, b) { return a.createdAt.localeCompare(b.createdAt); }).forEach(function(b) {
       b.orders.forEach(function(o) { out[b.platform][o.orderId] = { id: b.id, by: b.createdBy, at: b.createdAt }; });
     });
@@ -106,7 +112,7 @@ export default function PhieuXuatKhoPage() {
 
   // Gộp các file theo (sàn, kho); mã đơn lặp giữa các file chỉ tính một lần
   const analysis = useMemo(function() {
-    var seen: Record<PxkPlatform, Set<string>> = { shopee: new Set<string>(), tiktok: new Set<string>() };
+    var seen: Record<PxkPlatform, Set<string>> = { shopee: new Set<string>(), tiktok: new Set<string>(), sapo: new Set<string>() };
     var map: Record<string, { platform: PxkPlatform; fresh: PxkOrder[]; old: PxkOrder[] }> = {};
     var dupInUpload = 0;
     var noId: PxkOrder[] = [];
@@ -393,6 +399,72 @@ export default function PhieuXuatKhoPage() {
     }
   }
 
+  // Đơn tay lên bằng Sapo: mỗi kho một phiếu (đơn không có file PDF nên không có tên file / trang)
+  async function createSapoSlips(picked: SapoOrder[]) {
+    setError(''); setNotice('');
+    if (picked.length === 0) return;
+    var groupsBy: Record<string, SapoOrder[]> = {};
+    picked.forEach(function(o) { (groupsBy[o.wh] = groupsBy[o.wh] || []).push(o); });
+    var whs = Object.keys(groupsBy).sort();
+    var lines = ['LẬP VÀ IN ' + whs.length + ' PHIẾU ĐƠN SAPO (ngày ' + fmtDate(printDate) + ')', ''];
+    var unknownSku = new Set<string>();
+    var noSku = 0;
+    whs.forEach(function(w) {
+      var qty = groupsBy[w].reduce(function(s, o) { return s + o.items.reduce(function(a, x) { return a + x.qty; }, 0); }, 0);
+      lines.push('• ' + (w === 'HN' ? 'Kho Hà Nội' : w === 'HCM' ? 'Kho HCM' : '⚠ Chưa rõ kho') + ': ' + groupsBy[w].length + ' đơn, ' + qty + ' sản phẩm');
+    });
+    picked.forEach(function(o) { o.items.forEach(function(it) { if (!it.sku) noSku += 1; else if (getSkuProducts(it.sku).length === 0) unknownSku.add(it.sku); }); });
+    if (unknownSku.size > 0) lines.push('', '⚠ SKU chưa có trong bảng quy đổi (vẫn in, không quy ra sản phẩm gốc): ' + Array.from(unknownSku).sort().join(', '));
+    if (noSku > 0) lines.push('', '⚠ ' + noSku + ' dòng hàng trên Sapo không có SKU.');
+    lines.push('', 'Tiếp tục?');
+    if (!window.confirm(lines.join('\n'))) return;
+
+    var w = window.open('', '_blank');
+    setBusy(true);
+    try {
+      var createdAt = new Date().toISOString();
+      var by = currentUser ? currentUser.name : '';
+      var batches: PxkBatch[] = whs.map(function(k) {
+        return {
+          id: makeBatchId(), platform: 'sapo', warehouse: k === 'HN' || k === 'HCM' ? k : undefined, printDate: printDate, createdAt: createdAt, createdBy: by,
+          orders: groupsBy[k].map(function(o) {
+            return { orderId: o.code, items: o.items, src: o.source, cust: o.cust || undefined, note: o.note || undefined };
+          }),
+        } as PxkBatch;
+      });
+      var msg = 'Đã lập ' + batches.length + ' phiếu đơn Sapo: ' + batches.map(function(b) { return b.id; }).join(', ') + '.';
+      try {
+        await saveChain.current;
+        var skippedDup = 0;
+        var next = await dbUpdatePxk(function(cur) {
+          // Chốt lại với bản mới nhất trên cloud: đơn Sapo vừa được máy khác lập phiếu thì không lập lại
+          var have = new Set<string>();
+          cur.batches.forEach(function(b) { if (b.platform === 'sapo') b.orders.forEach(function(o) { have.add(o.orderId); }); });
+          batches.forEach(function(b) {
+            var keep = b.orders.filter(function(o) { return !have.has(o.orderId); });
+            skippedDup += b.orders.length - keep.length;
+            b.orders = keep;
+          });
+          batches = batches.filter(function(b) { return b.orders.length > 0; });
+          return { names: cur.names, ambiguous: cur.ambiguous || {}, batches: cur.batches.concat(batches) };
+        });
+        setData(next);
+        if (skippedDup > 0) msg += ' Bỏ ' + skippedDup + ' đơn vừa được lập phiếu ở máy khác.';
+      } catch (e) {
+        msg += ' ⚠ Chưa lưu được lịch sử phiếu (' + (e instanceof Error ? e.message : String(e)) + '). Phiếu vẫn được in, nhưng sẽ không có trong Lịch sử.';
+      }
+      if (batches.length === 0) { if (w) w.close(); setNotice('Các đơn đã chọn đều vừa được lập phiếu ở máy khác, không lập thêm.'); return; }
+      setNotice(msg);
+      setLastBatches(batches);
+      openPrint(buildPxkHtmlMulti(batches, { showOrders: true }), w);
+    } catch (e) {
+      if (w) w.close();
+      setError('Lỗi: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function reprint(b: PxkBatch) {
     var w = window.open('', '_blank');
     openPrint(buildPxkHtmlMulti([b], { showOrders: showOrders }), w);
@@ -460,6 +532,8 @@ export default function PhieuXuatKhoPage() {
 
       {dataErr && <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-300">Không đọc được lịch sử phiếu: {dataErr}. Chưa nên lập phiếu mới (có thể trùng đơn cũ).</div>}
 
+      <SapoPanel batches={data.batches} busy={busy} disabled={!!dataErr} onCreate={createSapoSlips} />
+
       <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 mb-4">
         <input ref={fileRef} type="file" accept="application/pdf,.pdf" multiple className="hidden" onChange={function(e) { addFiles(e.target.files); }} />
         <div
@@ -496,7 +570,7 @@ export default function PhieuXuatKhoPage() {
                       </td>
                       <td className="px-2 py-2">
                         {f.platform
-                          ? <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + (f.platform === 'shopee' ? 'bg-orange-500/15 text-orange-400' : 'bg-pink-500/15 text-pink-400')}>{PXK_PLATFORM_LABELS[f.platform]}</span>
+                          ? <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + platformBadge(f.platform)}>{PXK_PLATFORM_LABELS[f.platform]}</span>
                           : <select value="" onChange={function(e) { if (e.target.value) forcePlatform(f.id, e.target.value as PxkPlatform); }} className={inputCls + ' py-1'}>
                               <option value="">Chọn sàn...</option><option value="shopee">Shopee</option><option value="tiktok">TikTok Shop</option>
                             </select>}
@@ -631,7 +705,7 @@ export default function PhieuXuatKhoPage() {
             return (
               <details key={g.key} open={groups.length === 1} className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden mb-4">
                 <summary className="px-4 py-3 cursor-pointer flex flex-wrap items-center gap-3 text-sm">
-                  <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + (g.platform === 'shopee' ? 'bg-orange-500/15 text-orange-400' : 'bg-pink-500/15 text-pink-400')}>{PXK_PLATFORM_LABELS[g.platform]}</span>
+                  <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + platformBadge(g.platform)}>{PXK_PLATFORM_LABELS[g.platform]}</span>
                   <span className="font-semibold text-gray-100">1 phiếu: {g.resolved.length} đơn · {s.totalQty} sản phẩm · {s.skuLines.length + s.unresolved.length} mã SKU</span>
                   {g.oldCount > 0 && <span className="text-xs text-amber-300">({g.oldCount} đơn đã lập phiếu trước{excludeOld ? ', ĐÃ BỎ' : ', vẫn in'})</span>}
                   {g.bad.length > 0 && <span className="text-xs text-amber-300">⚠ {g.bad.length} nhãn chưa chắc</span>}
@@ -706,7 +780,7 @@ export default function PhieuXuatKhoPage() {
           ) : (
             <>
               <span className="text-sm text-gray-300">
-                <b>{daySum.batches.length}</b> phiếu · <b>{daySum.shopeeOrders + daySum.tiktokOrders}</b> đơn (Shopee {daySum.shopeeOrders} · TikTok {daySum.tiktokOrders}) · <b>{daySum.totalQty}</b> sản phẩm · {daySum.rows.length} loại
+                <b>{daySum.batches.length}</b> phiếu · <b>{daySum.shopeeOrders + daySum.tiktokOrders + daySum.sapoOrders}</b> đơn (Shopee {daySum.shopeeOrders} · TikTok {daySum.tiktokOrders} · Sapo {daySum.sapoOrders}) · <b>{daySum.totalQty}</b> sản phẩm · {daySum.rows.length} loại
               </span>
               <button onClick={printDay} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg">In phiếu tổng hợp</button>
               <button onClick={function() { downloadDay(); }} disabled={downloading} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg">{downloading ? 'Đang tạo PDF...' : 'Tải về (PDF)'}</button>
