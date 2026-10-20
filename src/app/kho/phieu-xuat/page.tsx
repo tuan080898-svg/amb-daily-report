@@ -7,7 +7,7 @@ import { dbGetPxk, dbUpdatePxk } from '@/lib/db';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
 import {
-  parsePxkFileAuto, summarizePxk, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
+  parsePxkFileAuto, summarizePxk, repackOrders, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
   type PxkPlatform, type PxkOrder, type PxkBatch, type PxkStoredOrder, type PxkData, type PxkItem,
 } from '@/lib/pxk';
 import { downloadPxkPdf, downloadPxkDayPdf } from '@/lib/pxk-pdf';
@@ -43,7 +43,8 @@ interface GroupView {
   platform: PxkPlatform;
   used: PxkOrder[];
   oldCount: number;
-  resolved: Array<{ orderId: string; items: PxkItem[] }>;
+  resolved: Array<{ orderId: string; items: PxkItem[] }>; // đã gắn SKU
+  packed: Array<{ orderId: string; items: PxkItem[] }>; // đã đổi sang gói sẵn (cùng thứ tự với resolved)
   summary: ReturnType<typeof summarizePxk>;
   bad: PxkOrder[];
 }
@@ -133,13 +134,14 @@ export default function PhieuXuatKhoPage() {
     return analysis.groups.map(function(g) {
       var used = g.fresh.concat(excludeOld ? [] : g.old);
       var resolved = resolveOrders(used);
+      var packed = repackOrders(resolved, data.packProducts);
       return {
         key: g.key, platform: g.platform, used: used, oldCount: g.old.length,
-        resolved: resolved, summary: summarizePxk(resolved), bad: used.filter(function(o) { return !o.ok; }),
+        resolved: resolved, packed: packed, summary: summarizePxk(packed), bad: used.filter(function(o) { return !o.ok; }),
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysis, excludeOld, assign, data.names, skuVer]);
+  }, [analysis, excludeOld, assign, data.names, data.packProducts, skuVer]);
 
   // Dòng Shopee chưa có SKU: gộp từ mọi nhóm Shopee để gắn một lần
   const shopeeUnresolved = useMemo(function() {
@@ -169,6 +171,8 @@ export default function PhieuXuatKhoPage() {
     });
     return Object.values(by).sort(function(a, b) { return b.n - a.n; });
   }, [analysis, prevOrders]);
+
+  const packList = useMemo(function() { return packProductList(data.packProducts); }, [data.packProducts, skuVer]);
 
   const daySum = useMemo(function() { return summarizeDay(dayDate, data.batches); }, [dayDate, data.batches]);
 
@@ -284,7 +288,7 @@ export default function PhieuXuatKhoPage() {
         delete amb[key];
         var names = Object.assign({}, cur.names);
         names[key] = sku;
-        return { names: names, ambiguous: amb, batches: cur.batches };
+        return Object.assign({}, cur, { names: names, ambiguous: amb });
       }).then(setData);
     }).catch(function(e) {
       setError('Chưa lưu được ghi nhớ SKU (' + (e instanceof Error ? e.message : String(e)) + '). Lần sau app có thể hỏi lại dòng này.');
@@ -298,7 +302,7 @@ export default function PhieuXuatKhoPage() {
       return dbUpdatePxk(function(c) {
         var names = Object.assign({}, c.names);
         if (cur && names[key] === cur.sku) delete names[key];
-        return { names: names, ambiguous: c.ambiguous || {}, batches: c.batches };
+        return Object.assign({}, c, { names: names });
       }).then(setData);
     }).catch(function(e) {
       setError('Chưa bỏ được ghi nhớ SKU (' + (e instanceof Error ? e.message : String(e)) + ').');
@@ -353,7 +357,7 @@ export default function PhieuXuatKhoPage() {
       var batches: PxkBatch[] = ready.map(function(g) {
         // Ghi nhớ đơn nào nằm ở file PDF nào, trang nào (g.resolved cùng thứ tự với g.used)
         var fileNames: string[] = [];
-        var stored: PxkStoredOrder[] = g.resolved.map(function(r, i) {
+        var stored: PxkStoredOrder[] = g.packed.map(function(r, i) {
           var src = g.used[i];
           var fi = fileNames.indexOf(src.file);
           if (fi < 0) { fileNames.push(src.file); fi = fileNames.length - 1; }
@@ -375,7 +379,7 @@ export default function PhieuXuatKhoPage() {
         var next = await dbUpdatePxk(function(cur) {
           var amb = Object.assign({}, cur.ambiguous || {});
           Object.keys(learned).forEach(function(k) { delete amb[k]; });
-          return { names: Object.assign({}, cur.names, learned), ambiguous: amb, batches: cur.batches.concat(batches) };
+          return Object.assign({}, cur, { names: Object.assign({}, cur.names, learned), ambiguous: amb, batches: cur.batches.concat(batches) });
         });
         setData(next);
       } catch (e) {
@@ -391,6 +395,17 @@ export default function PhieuXuatKhoPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  // Bật/tắt gói sẵn cho một sản phẩm (lưu lên cloud, dùng chung cho cả kho)
+  function togglePack(product: string, on: boolean) {
+    var cur = packProductList(data.packProducts).filter(function(p) { return p.on && p.product !== product; }).map(function(p) { return p.product; });
+    var next = on ? cur.concat([product]) : cur;
+    saveChain.current = saveChain.current.then(function() {
+      return dbUpdatePxk(function(c) { return Object.assign({}, c, { packProducts: next }); }).then(setData);
+    }).catch(function(e) {
+      setError('Chưa lưu được cài đặt gói sẵn (' + (e instanceof Error ? e.message : String(e)) + ').');
+    });
   }
 
   function reprint(b: PxkBatch) {
@@ -457,6 +472,25 @@ export default function PhieuXuatKhoPage() {
           {learnMsg && <div className="mt-3 text-sm text-emerald-300">{learnMsg}</div>}
         </details>
       )}
+
+      <details className="bg-slate-900 border border-slate-700 rounded-xl p-4 mb-4">
+        <summary className="cursor-pointer text-sm font-semibold text-gray-200">Hàng đóng gói sẵn <span className="font-normal text-xs text-gray-500">· đang bật {packList.filter(function(p) { return p.on; }).length} sản phẩm · bấm để xem / đổi</span></summary>
+        <p className="text-xs text-gray-400 mt-3 mb-3">
+          Sản phẩm nào kho đã đóng sẵn các gói combo thì bật ở đây. Khi khách mua nhiều cái (vd 2 cái phân loại &quot;1 cái&quot;), phiếu sẽ ghi <b>gói sẵn</b> (vd GH063-1 × 1) để kho nhặt luôn một gói và dán đơn; gói to nhất xếp trước, phần dư để lẻ.
+          <b> Hết gói sẵn của sản phẩm nào thì tắt sản phẩm đó</b> để phiếu quay về nhặt lẻ. Chỉ đổi cách ghi trên phiếu, tổng số cái và tồn kho không đổi.
+        </p>
+        <div className="grid sm:grid-cols-2 gap-x-6 gap-y-1">
+          {packList.map(function(p) {
+            return (
+              <label key={p.product} className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer py-0.5">
+                <input type="checkbox" checked={p.on} onChange={function(e) { togglePack(p.product, e.target.checked); }} />
+                <span className="flex-1">{p.product}</span>
+                <span className="text-xs text-gray-500">gói {p.sizes.join(', ')}</span>
+              </label>
+            );
+          })}
+        </div>
+      </details>
 
       {dataErr && <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-300">Không đọc được lịch sử phiếu: {dataErr}. Chưa nên lập phiếu mới (có thể trùng đơn cũ).</div>}
 
@@ -649,7 +683,7 @@ export default function PhieuXuatKhoPage() {
                           <tr key={l.sku} className="border-b border-slate-800">
                             <td className="px-4 py-2 text-gray-500">{i + 1}</td>
                             <td className="px-4 py-2 font-mono text-gray-200">{l.sku}</td>
-                            <td className={'px-4 py-2 ' + (l.mapped ? 'text-gray-300' : 'text-amber-300')}>{l.name || '—'}{!l.mapped && ' (chưa có trong bảng quy đổi)'}</td>
+                            <td className={'px-4 py-2 ' + (l.mapped ? 'text-gray-300' : 'text-amber-300')}>{l.name || '—'}{!l.mapped && ' (chưa có trong bảng quy đổi)'}{l.pack && <span className="ml-2 px-1.5 py-0.5 rounded text-xs bg-emerald-500/15 text-emerald-300">gói sẵn</span>}</td>
                             <td className="px-4 py-2 text-right text-gray-400">{l.orders}</td>
                             <td className="px-4 py-2 text-right font-bold text-gray-100">{l.qty}</td>
                           </tr>

@@ -309,7 +309,7 @@ async function readPxkStrict(): Promise<PxkData> {
   }
   if (!data) return { names: {}, ambiguous: {}, batches: [] };
   const j = JSON.parse(await data.text()) as Partial<PxkData>;
-  return { names: j.names || {}, ambiguous: j.ambiguous || {}, batches: j.batches || [] };
+  return { names: j.names || {}, ambiguous: j.ambiguous || {}, packProducts: j.packProducts, batches: j.batches || [] };
 }
 
 export async function dbGetPxk(): Promise<PxkData> {

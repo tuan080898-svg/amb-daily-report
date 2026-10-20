@@ -10,6 +10,7 @@ export interface PxkItem {
   sku: string; // rỗng nếu nhãn không có SKU (Shopee) và chưa gắn được
   name: string; // tên sản phẩm + phân loại ghi trên nhãn (nếu đọc được)
   qty: number;
+  packFrom?: string; // dòng đã đổi sang gói sẵn: ghi lại dòng gốc, vd "GH063 × 2"
 }
 
 export interface PxkOrder {
@@ -46,6 +47,7 @@ export interface PxkBatch {
 export interface PxkData {
   names: Record<string, string>; // khoá tên Shopee đã chuẩn hoá -> SKU
   ambiguous?: Record<string, string[]>; // cùng một tên nhưng file đơn ghi nhiều SKU khác nhau
+  packProducts?: string[]; // sản phẩm kho đóng gói sẵn theo combo (chưa cài đặt thì dùng danh sách mặc định)
   batches: PxkBatch[];
 }
 
@@ -268,14 +270,116 @@ export function mergeLearnedPairs(cur: PxkData, pairs: PxkLearnedPairs): { data:
       amb[key] = Array.from(cand).sort();
     }
   });
-  return { data: { names: names, ambiguous: amb, batches: cur.batches }, added: added, ambiguous: Object.keys(amb).length };
+  return { data: Object.assign({}, cur, { names: names, ambiguous: amb }), added: added, ambiguous: Object.keys(amb).length };
 }
 
 // ==================== Tổng hợp ====================
 
+// ==================== Hàng đóng gói sẵn ====================
+// Kho đóng sẵn các gói combo của một số sản phẩm (vd keo vá tường: gói 2, 3, 4, 5 cái). Khách mua 2 cái phân loại "1 cái"
+// thì phiếu ghi gói sẵn 2 cái để kho nhặt luôn một gói và dán đơn. Chỉ đổi cách ghi trên phiếu, tổng số cái không đổi.
+
+// Danh sách mặc định (Sếp chốt 20/10/2026): diệt gián, keo vá tường, khử mùi tủ lạnh, gel vệ sinh đường ống, bột thông cống
+var PXK_PACK_DEFAULT = /^(thuốc diệt gián|keo vá tường|gel vệ sinh đường ống|bột thông cống)$|khử m[ùủ]i tủ lạnh/i;
+
+export interface PxkPackProduct { product: string; sizes: number[]; on: boolean }
+
+// sản phẩm -> cỡ gói (số cái) -> các mã SKU; chỉ tính SKU của đúng một loại sản phẩm
+function packIndex(): Record<string, Record<number, string[]>> {
+  var out: Record<string, Record<number, string[]>> = {};
+  var map = getSkuMap();
+  Object.keys(map).forEach(function(code) {
+    var items = map[code];
+    if (!items || items.length === 0 || code !== code.trim() || /\s/.test(code)) return;
+    var p = items[0].product;
+    if (!items.every(function(i) { return i.product === p; })) return;
+    var size = items.reduce(function(s, i) { return s + i.quantity; }, 0);
+    if (!(size >= 1) || size % 1 !== 0) return;
+    var bySize = out[p] || (out[p] = {});
+    (bySize[size] || (bySize[size] = [])).push(code);
+  });
+  Object.keys(out).forEach(function(p) {
+    Object.keys(out[p]).forEach(function(sz) {
+      // mã GH... đứng trước mã vạch, rồi theo thứ tự số
+      out[p][Number(sz)].sort(function(a, b) {
+        var ga = /^GH/i.test(a) ? 0 : 1; var gb = /^GH/i.test(b) ? 0 : 1;
+        return ga - gb || a.localeCompare(b, undefined, { numeric: true });
+      });
+    });
+  });
+  return out;
+}
+
+// Các sản phẩm có gói sẵn (có SKU cỡ gói từ 2 cái trở lên) và đang bật hay tắt
+export function packProductList(cfg?: string[]): PxkPackProduct[] {
+  var idx = packIndex();
+  var on = packEnabledSet(cfg);
+  return Object.keys(idx).filter(function(p) { return Object.keys(idx[p]).some(function(s) { return Number(s) > 1; }) && idx[p][1]; })
+    .map(function(p) { return { product: p, sizes: Object.keys(idx[p]).map(Number).sort(function(a, b) { return a - b; }), on: on.has(p) }; })
+    .sort(function(a, b) { return a.product.localeCompare(b.product, 'vi'); });
+}
+
+export function packEnabledSet(cfg?: string[]): Set<string> {
+  if (cfg) return new Set(cfg);
+  var idx = packIndex();
+  return new Set(Object.keys(idx).filter(function(p) { return PXK_PACK_DEFAULT.test(p); }));
+}
+
+// Đổi các dòng của từng đơn sang gói sẵn (gói to nhất trước, phần dư để lẻ). Chỉ gộp dòng cùng một sản phẩm trong cùng đơn.
+export function repackOrders<T extends { orderId: string; items: PxkItem[] }>(orders: T[], cfg?: string[]): T[] {
+  var enabled = packEnabledSet(cfg);
+  if (enabled.size === 0) return orders;
+  var idx = packIndex();
+  return orders.map(function(o) {
+    var groups: Record<string, { rows: number[]; units: number; inOrder: Record<number, string>; orig: Record<string, number>; first: number }> = {};
+    o.items.forEach(function(it, i) {
+      var sku = it.sku.trim();
+      if (!sku || !(it.qty > 0) || it.qty % 1 !== 0) return;
+      var list = getSkuProducts(sku);
+      if (list.length === 0) return;
+      var p = list[0].product;
+      if (!list.every(function(x) { return x.product === p; }) || !enabled.has(p) || !idx[p]) return;
+      var size = list.reduce(function(s, x) { return s + x.quantity; }, 0);
+      var g = groups[p] || (groups[p] = { rows: [], units: 0, inOrder: {}, orig: {}, first: i });
+      g.rows.push(i);
+      g.units += size * it.qty;
+      if (!g.inOrder[size]) g.inOrder[size] = sku;
+      g.orig[sku] = (g.orig[sku] || 0) + it.qty;
+    });
+    var products = Object.keys(groups);
+    if (products.length === 0) return o;
+    var drop = new Set<number>();
+    var added: Array<{ at: number; items: PxkItem[] }> = [];
+    products.forEach(function(p) {
+      var g = groups[p];
+      var sizes = Object.keys(idx[p]).map(Number).sort(function(a, b) { return b - a; });
+      var rem = g.units;
+      var plan: Array<{ sku: string; n: number; size: number }> = [];
+      sizes.forEach(function(sz) {
+        var n = Math.floor(rem / sz);
+        if (n > 0) { plan.push({ sku: g.inOrder[sz] || idx[p][sz][0], n: n, size: sz }); rem -= n * sz; }
+      });
+      if (rem !== 0) return; // không chia hết bằng các cỡ gói hiện có: giữ nguyên
+      var same = plan.length === Object.keys(g.orig).length && plan.every(function(x) { return g.orig[x.sku] === x.n; });
+      if (same) return;
+      var from = Object.keys(g.orig).map(function(s) { return s + ' × ' + g.orig[s]; }).join(' + ');
+      g.rows.forEach(function(r) { drop.add(r); });
+      added.push({ at: g.first, items: plan.map(function(x) { return x.size > 1 ? { sku: x.sku, name: '', qty: x.n, packFrom: from } : { sku: x.sku, name: '', qty: x.n }; }) });
+    });
+    if (drop.size === 0) return o;
+    var items: PxkItem[] = [];
+    o.items.forEach(function(it, i) {
+      added.filter(function(a) { return a.at === i; }).forEach(function(a) { items = items.concat(a.items); });
+      if (!drop.has(i)) items.push(it);
+    });
+    return Object.assign({}, o, { items: items });
+  });
+}
+
 export interface PxkSkuLine {
   sku: string;
   name: string;
+  pack?: boolean; // có dòng đổi sang gói sẵn
   qty: number;
   orders: number;
   mapped: boolean; // SKU có trong bảng quy đổi
@@ -400,6 +504,7 @@ export function summarizePxk(orders: Array<{ orderId: string; items: PxkItem[] }
       var items = getSkuProducts(sku);
       var line = bySku[sku] || (bySku[sku] = {
         sku: sku,
+        pack: false,
         name: items.length > 0 ? describeSku(items) : (it.name || ''),
         qty: 0,
         orders: 0,
@@ -408,6 +513,7 @@ export function summarizePxk(orders: Array<{ orderId: string; items: PxkItem[] }
         orderIds: [],
       });
       line.qty += it.qty;
+      if (it.packFrom) line.pack = true;
       if (!seenSku.has(sku)) { seenSku.add(sku); line.orders += 1; line.orderIds.push(o.orderId); }
       if (items.length === 0) { unmapped.add(sku); return; }
       if (items.length > 1 || items[0].quantity > 1) hasCombo = true;
@@ -476,12 +582,12 @@ function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
   var warnLines = slipWarnings(batch, sum);
   if (warnLines.length > 0) warn = '<div class="alert">⚠ ' + warnLines.map(esc).join('<br>⚠ ') + '</div>';
   var skuRows = shopee ? sum.skuLines.map(function(l, i) {
-    return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(l.sku) + '</td><td>' + esc(shorten(l.name || '—')) + '</td><td>' + esc(l.variation) + '</td><td class="c big">' + l.qty + '</td>' + snCell(l.orderIds) + '</tr>';
+    return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(l.sku) + '</td><td>' + esc(shorten(l.name || '—')) + (l.pack ? ' <b>— GÓI SẴN</b>' : '') + '</td><td>' + esc(l.variation) + '</td><td class="c big">' + l.qty + '</td>' + snCell(l.orderIds) + '</tr>';
   }).concat(sum.unresolved.map(function(u, i) {
     var sp = splitShopeeName(u.name);
     return '<tr class="warn"><td class="c">' + (sum.skuLines.length + i + 1) + '</td><td class="nosku">chưa có SKU</td><td>' + esc(shorten(sp.name)) + '</td><td>' + esc(sp.variation) + '</td><td class="c big">' + u.qty + '</td>' + snCell(u.orderIds) + '</tr>';
   })).join('') : sum.skuLines.map(function(l, i) {
-    return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(l.sku) + '</td><td>' + esc(l.name || '—') + '</td><td class="c">' + l.orders + '</td><td class="c big">' + l.qty + '</td></tr>';
+    return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(l.sku) + '</td><td>' + esc(l.name || '—') + (l.pack ? ' <b>— GÓI SẴN</b>' : '') + '</td><td class="c">' + l.orders + '</td><td class="c big">' + l.qty + '</td></tr>';
   }).concat(sum.unresolved.map(function(u, i) {
     return '<tr class="warn"><td class="c">' + (sum.skuLines.length + i + 1) + '</td><td class="mono">(chưa có SKU)</td><td>' + esc(u.name) + '</td><td class="c">' + u.orders + '</td><td class="c big">' + u.qty + '</td></tr>';
   })).join('');
@@ -502,7 +608,7 @@ function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
   var orderPage = '';
   if (opts.showOrders) {
     var orderRows = batch.orders.map(function(o, i) {
-      var detail = o.items.map(function(it) { return esc((it.sku || it.name || '?')) + ' × ' + it.qty; }).join(', ');
+      var detail = o.items.map(function(it) { return esc((it.sku || it.name || '?')) + ' × ' + it.qty + (it.packFrom ? ' (gói sẵn, từ ' + esc(it.packFrom) + ')' : ''); }).join(', ');
       return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(o.orderId) + '</td><td>' + detail + '</td><td class="c">' + o.items.reduce(function(s, x) { return s + x.qty; }, 0) + '</td><td class="chk"></td></tr>';
     }).join('');
     orderPage = '<div class="pb"></div><h2>' + (prodTable ? '3' : '2') + '. Danh sách từng đơn (để kiểm tra)</h2><table><thead><tr><th style="width:32px">#</th><th style="width:150px">Mã đơn hàng</th><th>Sản phẩm × SL</th><th style="width:44px">SL</th><th style="width:44px">Đủ</th></tr></thead><tbody>' + orderRows + '</tbody></table>';

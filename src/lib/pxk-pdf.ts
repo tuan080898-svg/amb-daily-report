@@ -119,12 +119,12 @@ export async function downloadPxkPdf(batches: PxkBatch[], opts: { showOrders: bo
     var head1: string[]; var body1: RowInput[] = []; var warnFrom = sum.skuLines.length;
     if (shopee) {
       head1 = ['#', 'SKU', 'Tên sản phẩm', 'Phân loại hàng', 'SL', 'Order SN'];
-      sum.skuLines.forEach(function(l, i) { body1.push([i + 1, l.sku, shorten(l.name || '—'), l.variation, l.qty, l.orderIds.join('\n')]); });
+      sum.skuLines.forEach(function(l, i) { body1.push([i + 1, l.sku, shorten(l.name || '—') + (l.pack ? ' — GÓI SẴN' : ''), l.variation, l.qty, l.orderIds.join('\n')]); });
       sum.unresolved.forEach(function(u, i) { var sp = splitShopeeName(u.name); body1.push([sum.skuLines.length + i + 1, 'chưa có SKU', shorten(sp.name), sp.variation, u.qty, u.orderIds.join('\n')]); });
       body1.push([{ content: 'Tổng cộng', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, { content: String(sum.totalQty), styles: { halign: 'center', fontStyle: 'bold', fontSize: 10 } }, '']);
     } else {
       head1 = ['#', 'SKU', 'Tên sản phẩm', 'Số đơn', 'Số lượng'];
-      sum.skuLines.forEach(function(l, i) { body1.push([i + 1, l.sku, l.name || '—', l.orders, l.qty]); });
+      sum.skuLines.forEach(function(l, i) { body1.push([i + 1, l.sku, (l.name || '—') + (l.pack ? ' — GÓI SẴN' : ''), l.orders, l.qty]); });
       sum.unresolved.forEach(function(u, i) { body1.push([sum.skuLines.length + i + 1, '(chưa có SKU)', u.name, u.orders, u.qty]); });
       body1.push([{ content: 'Tổng cộng', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, { content: String(sum.totalQty), styles: { halign: 'center', fontStyle: 'bold', fontSize: 10 } }]);
     }
@@ -164,7 +164,7 @@ export async function downloadPxkPdf(batches: PxkBatch[], opts: { showOrders: bo
       table({
         startY: 20, head: [['#', 'Mã đơn hàng', 'Sản phẩm × SL', 'SL', 'Đủ']],
         body: batch.orders.map(function(o, i) {
-          return [i + 1, o.orderId, o.items.map(function(it) { return (it.sku || it.name || '?') + ' × ' + it.qty; }).join(', '), o.items.reduce(function(s, x) { return s + x.qty; }, 0), ''];
+          return [i + 1, o.orderId, o.items.map(function(it) { return (it.sku || it.name || '?') + ' × ' + it.qty + (it.packFrom ? ' (gói sẵn, từ ' + it.packFrom + ')' : ''); }).join(', '), o.items.reduce(function(s, x) { return s + x.qty; }, 0), ''];
         }),
         columnStyles: { 0: { cellWidth: 9, halign: 'center' }, 1: { cellWidth: 40, fontSize: 7.5 }, 2: { cellWidth: 'auto' }, 3: { cellWidth: 12, halign: 'center' }, 4: { cellWidth: 12 } },
       });
