@@ -70,6 +70,11 @@ export default function PhieuXuatKhoPage() {
   const [shopSel, setShopSel] = useState(''); // phiếu sắp lập là của shop nhân sự nào ('' = shop công ty)
   const [dayShop, setDayShop] = useState(''); // phạm vi phiếu tổng hợp cuối ngày: '' = tất cả
   const [histShop, setHistShop] = useState(''); // lọc lịch sử phiếu theo shop
+  // Phiếu nhập tay cho shop nhân sự (nhân sự gửi danh sách hàng, không có file PDF nhãn)
+  const [manualShop, setManualShop] = useState('');
+  const [manualPlat, setManualPlat] = useState<PxkPlatform>('shopee');
+  const [manualRows, setManualRows] = useState<Array<{ id: number; orderId: string; sku: string; qty: number }>>([]);
+  const manualSeq = useRef(1);
   const [orderQuery, setOrderQuery] = useState(''); // tìm đơn trong các phiếu đã lập
   const [data, setData] = useState<PxkData>({ names: {}, batches: [] });
   const [dataErr, setDataErr] = useState('');
@@ -438,12 +443,12 @@ export default function PhieuXuatKhoPage() {
   }
 
   // Thêm shop nhân sự vào danh sách (lưu lên cloud, dùng chung cho cả kho) và chọn luôn cho phiếu sắp lập
-  function addShop() {
+  function addShop(pick?: (name: string) => void) {
     var raw = window.prompt('Tên shop của nhân sự (ví dụ: Shop Hoa - Shopee):');
     if (!raw) return;
     var name = raw.replace(/\s+/g, ' ').trim().slice(0, 60);
     if (!name) return;
-    setShopSel(name);
+    (pick || setShopSel)(name);
     saveChain.current = saveChain.current.then(function() {
       return dbUpdatePxk(function(c) {
         var list = (c.shops || []).slice();
@@ -453,6 +458,76 @@ export default function PhieuXuatKhoPage() {
     }).catch(function(e) {
       setError('Chưa lưu được tên shop (' + (e instanceof Error ? e.message : String(e)) + ').');
     });
+  }
+
+  function addManualRow(sku: string) {
+    setManualRows(function(prev) {
+      var i = prev.findIndex(function(r) { return r.sku === sku && !r.orderId; });
+      if (i >= 0) return prev.map(function(r, k) { return k === i ? Object.assign({}, r, { qty: r.qty + 1 }) : r; });
+      return prev.concat([{ id: manualSeq.current++, orderId: '', sku: sku, qty: 1 }]);
+    });
+  }
+
+  function patchManualRow(id: number, p: { orderId?: string; qty?: number }) {
+    setManualRows(function(prev) { return prev.map(function(r) { return r.id === id ? Object.assign({}, r, p) : r; }); });
+  }
+
+  // Lập phiếu từ danh sách nhân sự gửi (không có file nhãn): cùng mã đơn gộp một đơn, dòng không có mã đơn tự đặt mã NS-...
+  async function createManualSlip() {
+    setError(''); setNotice('');
+    if (!manualShop) { setError('Chọn shop nhân sự trước khi lập phiếu nhập tay.'); return; }
+    var rows = manualRows.filter(function(r) { return r.sku && r.qty > 0; });
+    if (rows.length === 0) { setError('Chưa có dòng hàng nào: gõ mã SKU rồi chọn để thêm hàng.'); return; }
+    var batchId = makeBatchId();
+    var orders: PxkStoredOrder[] = [];
+    var byId: Record<string, PxkStoredOrder> = {};
+    var auto = 0;
+    rows.forEach(function(r) {
+      var oid = r.orderId.trim();
+      if (oid) {
+        if (!byId[oid]) { byId[oid] = { orderId: oid, items: [] }; orders.push(byId[oid]); }
+        byId[oid].items.push({ sku: r.sku, name: '', qty: r.qty });
+      } else {
+        auto += 1;
+        orders.push({ orderId: 'NS-' + batchId.slice(2) + '-' + auto, items: [{ sku: r.sku, name: '', qty: r.qty }] });
+      }
+    });
+    var packed = repackOrders(orders, data.packProducts);
+    var qty = packed.reduce(function(s, o) { return s + o.items.reduce(function(a, x) { return a + x.qty; }, 0); }, 0);
+    var unknown = Array.from(new Set(rows.filter(function(r) { return getSkuProducts(r.sku).length === 0; }).map(function(r) { return r.sku; })));
+    var already = orders.filter(function(o) { return !!prevOrders[manualPlat][o.orderId]; }).map(function(o) { return o.orderId + ' (phiếu ' + prevOrders[manualPlat][o.orderId].id + ')'; });
+    var lines = ['LẬP VÀ IN PHIẾU NHẬP TAY (ngày ' + fmtDate(printDate) + ')', '', '🛍 Shop nhân sự: ' + manualShop + ' · ' + PXK_PLATFORM_LABELS[manualPlat], packed.length + ' đơn, ' + qty + ' sản phẩm'];
+    if (printDate !== todayStr()) lines.push('', '⚠ Ngày in phiếu đang là ' + fmtDate(printDate) + ', KHÁC hôm nay (' + fmtDate(todayStr()) + ').');
+    if (unknown.length > 0) lines.push('', '⚠ SKU chưa có trong bảng quy đổi (vẫn in, không quy ra sản phẩm gốc): ' + unknown.join(', '));
+    if (already.length > 0) lines.push('', '⚠ Mã đơn đã có trong phiếu trước: ' + already.slice(0, 8).join(', ') + (already.length > 8 ? '...' : '') + '. Kiểm tra để không xuất hai lần.');
+    lines.push('', 'Tiếp tục?');
+    if (!window.confirm(lines.join('\n'))) return;
+
+    var w = window.open('', '_blank');
+    setBusy(true);
+    try {
+      var batch: PxkBatch = {
+        id: batchId, platform: manualPlat, printDate: printDate, createdAt: new Date().toISOString(), createdBy: currentUser ? currentUser.name : '',
+        shop: manualShop, notes: ['Phiếu nhập tay cho shop nhân sự (không có file PDF nhãn): số liệu theo danh sách nhân sự gửi, kho đối chiếu khi đóng hàng.'], orders: packed,
+      };
+      var msg = 'Đã lập phiếu nhập tay ' + batchId + ' cho shop ' + manualShop + '.';
+      try {
+        await saveChain.current;
+        var next = await dbUpdatePxk(function(cur) { return Object.assign({}, cur, { batches: cur.batches.concat([batch]) }); });
+        setData(next);
+      } catch (e) {
+        msg += ' ⚠ Chưa lưu được lịch sử phiếu (' + (e instanceof Error ? e.message : String(e)) + '). Phiếu vẫn được in, nhưng sẽ không có trong Lịch sử.';
+      }
+      setNotice(msg);
+      setLastBatches([batch]);
+      openPrint(buildPxkHtmlMulti([batch], { showOrders: true }), w);
+      setManualRows([]);
+    } catch (e) {
+      if (w) w.close();
+      setError('Lỗi: ' + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setBusy(false);
+    }
   }
 
   // Bật/tắt gói sẵn cho một sản phẩm (lưu lên cloud, dùng chung cho cả kho)
@@ -552,6 +627,68 @@ export default function PhieuXuatKhoPage() {
 
       {dataErr && <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-300">Không đọc được lịch sử phiếu: {dataErr}. Chưa nên lập phiếu mới (có thể trùng đơn cũ).</div>}
 
+      <details className="bg-slate-900 border border-slate-700 rounded-xl p-4 mb-4">
+        <summary className="cursor-pointer text-sm font-semibold text-gray-200">Tạo phiếu nhập tay cho shop nhân sự <span className="font-normal text-xs text-gray-500">· khi nhân sự gửi danh sách hàng, không có file PDF nhãn</span></summary>
+        <div className="mt-4 space-y-4">
+          <div className="flex flex-wrap gap-4 items-end">
+            <div>
+              <div className="text-xs text-gray-400 mb-1.5">Shop nhân sự</div>
+              <div className="flex gap-2">
+                <select value={manualShop} onChange={function(e) { setManualShop(e.target.value); }} className={inputCls + (manualShop ? ' border-amber-500 text-amber-200' : '')}>
+                  <option value="">Chọn shop nhân sự...</option>
+                  {shopList.map(function(s) { return <option key={s} value={s}>{s}</option>; })}
+                </select>
+                <button onClick={function() { addShop(setManualShop); }} className="px-3 py-2 text-sm text-gray-300 border border-slate-600 rounded-lg hover:bg-slate-800 whitespace-nowrap">＋ Thêm shop nhân sự</button>
+              </div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400 mb-1.5">Sàn của đơn</div>
+              <select value={manualPlat} onChange={function(e) { setManualPlat(e.target.value as PxkPlatform); }} className={inputCls}>
+                <option value="shopee">Shopee</option><option value="tiktok">TikTok Shop</option>
+              </select>
+            </div>
+            <div>
+              <div className="text-xs text-gray-400 mb-1.5">Ngày in phiếu</div>
+              <input type="date" value={printDate} onChange={function(e) { dateTouched.current = true; setPrintDate(e.target.value); }} className={inputCls} />
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-gray-400 mb-1.5">Thêm hàng: gõ mã SKU rồi chọn (chọn lại cùng mã thì cộng thêm 1)</div>
+            <SkuPicker codes={skuCodes} clear onCommit={addManualRow} />
+          </div>
+          {manualRows.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr className="text-xs text-gray-400 border-b border-slate-700">
+                  <th className="px-2 py-2 text-left">Mã đơn (có thể để trống)</th><th className="px-2 py-2 text-left">SKU</th><th className="px-2 py-2 text-left">Sản phẩm</th><th className="px-2 py-2 text-right">Số lượng</th><th className="px-2 py-2"></th>
+                </tr></thead>
+                <tbody>
+                  {manualRows.map(function(r) {
+                    var prods = getSkuProducts(r.sku);
+                    return (
+                      <tr key={r.id} className="border-b border-slate-800 align-middle">
+                        <td className="px-2 py-1.5"><input value={r.orderId} onChange={function(e) { patchManualRow(r.id, { orderId: e.target.value }); }} placeholder="vd 2610217ABC (cùng mã = cùng đơn)" className={inputCls + ' w-56 py-1'} /></td>
+                        <td className="px-2 py-1.5 font-mono text-gray-100">{r.sku}</td>
+                        <td className={'px-2 py-1.5 ' + (prods.length > 0 ? 'text-gray-300' : 'text-amber-300')}>{prods.length > 0 ? prods.map(function(p) { return (p.quantity > 1 ? p.quantity + '× ' : '') + p.product; }).join(' + ') : 'Chưa có trong bảng quy đổi SKU'}</td>
+                        <td className="px-2 py-1.5 text-right"><input type="number" min={1} value={r.qty} onChange={function(e) { patchManualRow(r.id, { qty: Math.max(1, Math.floor(Number(e.target.value) || 1)) }); }} className={inputCls + ' w-20 py-1 text-right'} /></td>
+                        <td className="px-2 py-1.5 text-right"><button onClick={function() { setManualRows(function(prev) { return prev.filter(function(x) { return x.id !== r.id; }); }); }} className="text-xs text-red-400 hover:text-red-300">Xóa</button></td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <button onClick={function() { createManualSlip(); }} disabled={busy || manualRows.length === 0 || !manualShop || !!dataErr}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg">
+              {busy ? 'Đang xử lý...' : '🖨 Lập và in phiếu cho shop nhân sự'}
+            </button>
+            <span className="text-xs text-gray-500">{manualRows.length > 0 ? manualRows.length + ' dòng · ' + manualRows.reduce(function(s, r) { return s + r.qty; }, 0) + ' sản phẩm' : 'Chưa có hàng nào'}{!manualShop && manualRows.length > 0 ? ' · chọn shop nhân sự để lập phiếu' : ''}</span>
+          </div>
+        </div>
+      </details>
+
       <div className="bg-slate-900 border border-slate-700 rounded-xl p-4 mb-4">
         <input ref={fileRef} type="file" accept="application/pdf,.pdf" multiple className="hidden" onChange={function(e) { addFiles(e.target.files); }} />
         <div
@@ -575,7 +712,7 @@ export default function PhieuXuatKhoPage() {
                 <option value="">Shop công ty</option>
                 {shopList.map(function(s) { return <option key={s} value={s}>Shop nhân sự: {s}</option>; })}
               </select>
-              <button onClick={addShop} className="px-3 py-2 text-sm text-gray-300 border border-slate-600 rounded-lg hover:bg-slate-800 whitespace-nowrap">＋ Thêm shop nhân sự</button>
+              <button onClick={function() { addShop(); }} className="px-3 py-2 text-sm text-gray-300 border border-slate-600 rounded-lg hover:bg-slate-800 whitespace-nowrap">＋ Thêm shop nhân sự</button>
             </div>
           </div>
           {files.length > 0 && <button onClick={reset} className="px-3 py-2 text-sm text-gray-400 hover:text-gray-200">Làm lại (xóa hết file)</button>}
@@ -962,7 +1099,7 @@ function describeCode(code: string): string {
 }
 
 // Ô chọn SKU: gõ để lọc, bấm vào gợi ý (hoặc Enter) mới gắn — tránh gắn nhầm khi mới gõ được vài ký tự.
-function SkuPicker(props: { codes: string[]; onCommit: (sku: string) => void }) {
+function SkuPicker(props: { codes: string[]; onCommit: (sku: string) => void; clear?: boolean }) {
   const [text, setText] = useState('');
   const [open, setOpen] = useState(false);
   const q = text.trim().toUpperCase();
@@ -976,8 +1113,8 @@ function SkuPicker(props: { codes: string[]; onCommit: (sku: string) => void }) 
 
   function submit() {
     if (!q) return;
-    if (exact) { props.onCommit(exact); return; }
-    if (window.confirm('Mã "' + text.trim() + '" chưa có trong bảng quy đổi SKU. Vẫn gắn mã này?\n(Phiếu vẫn in, nhưng không quy ra được sản phẩm gốc cho tới khi thêm mã ở Quản lý SKU.)')) props.onCommit(text.trim());
+    if (exact) { props.onCommit(exact); if (props.clear) setText(''); return; }
+    if (window.confirm('Mã "' + text.trim() + '" chưa có trong bảng quy đổi SKU. Vẫn gắn mã này?\n(Phiếu vẫn in, nhưng không quy ra được sản phẩm gốc cho tới khi thêm mã ở Quản lý SKU.)')) { props.onCommit(text.trim()); if (props.clear) setText(''); }
   }
 
   return (
@@ -997,7 +1134,7 @@ function SkuPicker(props: { codes: string[]; onCommit: (sku: string) => void }) 
           {matches.map(function(c) {
             return (
               <button key={c} type="button"
-                onMouseDown={function(e) { e.preventDefault(); props.onCommit(c); }}
+                onMouseDown={function(e) { e.preventDefault(); props.onCommit(c); if (props.clear) setText(''); }}
                 className="block w-full text-left px-3 py-1.5 text-sm hover:bg-slate-700">
                 <span className="font-mono text-gray-100">{c}</span>
                 <span className="text-gray-400 ml-2 text-xs">{describeCode(c)}</span>
