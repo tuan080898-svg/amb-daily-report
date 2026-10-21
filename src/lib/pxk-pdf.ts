@@ -164,7 +164,7 @@ export async function downloadPxkPdf(batches: PxkBatch[], opts: { showOrders: bo
       table({
         startY: 20, head: [['#', 'Mã đơn hàng', 'Sản phẩm × SL', 'SL', 'Đủ']],
         body: batch.orders.map(function(o, i) {
-          return [i + 1, o.orderId, o.items.map(function(it) { return (it.sku || it.name || '?') + ' × ' + it.qty + (it.packFrom ? ' (gói sẵn, từ ' + it.packFrom + ')' : ''); }).join(', '), o.items.reduce(function(s, x) { return s + x.qty; }, 0), ''];
+          return [i + 1, o.orderId, o.items.map(function(it) { return (it.sku || it.name || '?') + ' × ' + it.qty + (it.packFrom ? ' (gói sẵn, từ ' + it.packFrom + ')' : '') + (it.noteFrom ? ' (đọc từ ghi chú)' : ''); }).join(', ') + (o.note ? '\nGhi chú: ' + o.note : ''), o.items.reduce(function(s, x) { return s + x.qty; }, 0), ''];
         }),
         columnStyles: { 0: { cellWidth: 9, halign: 'center' }, 1: { cellWidth: 40, fontSize: 7.5 }, 2: { cellWidth: 'auto' }, 3: { cellWidth: 12, halign: 'center' }, 4: { cellWidth: 12 } },
       });

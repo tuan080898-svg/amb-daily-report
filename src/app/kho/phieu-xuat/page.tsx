@@ -7,7 +7,7 @@ import { dbGetPxk, dbUpdatePxk } from '@/lib/db';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
 import {
-  parsePxkFileAuto, summarizePxk, repackOrders, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
+  parsePxkFileAuto, summarizePxk, repackOrders, buildGiftCatalog, expandGiftNote, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
   type PxkPlatform, type PxkOrder, type PxkBatch, type PxkStoredOrder, type PxkData, type PxkItem,
 } from '@/lib/pxk';
 import { downloadPxkPdf, downloadPxkDayPdf } from '@/lib/pxk-pdf';
@@ -47,8 +47,8 @@ interface GroupView {
   platform: PxkPlatform;
   used: PxkOrder[];
   oldCount: number;
-  resolved: Array<{ orderId: string; items: PxkItem[] }>; // đã gắn SKU
-  packed: Array<{ orderId: string; items: PxkItem[] }>; // đã đổi sang gói sẵn (cùng thứ tự với resolved)
+  resolved: Array<{ orderId: string; items: PxkItem[]; note?: string }>; // đã gắn SKU
+  packed: Array<{ orderId: string; items: PxkItem[]; note?: string }>; // đã đổi sang gói sẵn (cùng thứ tự với resolved)
   summary: ReturnType<typeof summarizePxk>;
   bad: PxkOrder[];
 }
@@ -112,15 +112,25 @@ export default function PhieuXuatKhoPage() {
     return out;
   }, [data]);
 
-  function resolveOrders(os: PxkOrder[]): Array<{ orderId: string; items: PxkItem[] }> {
+  function resolveOrders(os: PxkOrder[]): Array<{ orderId: string; items: PxkItem[]; note?: string }> {
+    var catalog: ReturnType<typeof buildGiftCatalog> | null = null;
     return os.map(function(o) {
+      var lookup = function(name: string) { var k = pxkNameKey(name); return (assign[k] && assign[k].sku) || data.names[k] || ''; };
       var items: PxkItem[] = o.items.map(function(it) {
         if (it.sku) return it;
-        var key = pxkNameKey(it.name);
-        var sku = (assign[key] && assign[key].sku) || data.names[key] || '';
+        var sku = lookup(it.name);
         return sku ? { sku: sku, name: it.name, qty: it.qty } : it;
       });
-      return { orderId: o.orderId, items: items };
+      // Đơn ngoài sàn ghi "Quà tặng": đọc sản phẩm thật từ ghi chú của đơn
+      if (o.note) {
+        if (!catalog) catalog = buildGiftCatalog(Object.assign({}, data.names, Object.keys(assign).reduce(function(m, k) { m[k] = assign[k].sku; return m; }, {} as Record<string, string>)));
+        items = expandGiftNote(items, o.note, catalog).map(function(it) {
+          if (it.sku || !it.name) return it;
+          var sku = lookup(it.name); // dòng ghi chú chưa nhận ra mà nhân sự đã gắn SKU ở lần trước
+          return sku ? { sku: sku, name: it.name, qty: it.qty } : it;
+        });
+      }
+      return { orderId: o.orderId, items: items, note: o.note || undefined };
     });
   }
 
@@ -381,7 +391,7 @@ export default function PhieuXuatKhoPage() {
           var src = g.used[i];
           var fi = fileNames.indexOf(src.file);
           if (fi < 0) { fileNames.push(src.file); fi = fileNames.length - 1; }
-          return { orderId: r.orderId, items: r.items, fi: fi, pg: src.pages };
+          return { orderId: r.orderId, items: r.items, note: r.note, fi: fi, pg: src.pages };
         });
         return {
           id: makeBatchId(), platform: g.platform, printDate: printDate, createdAt: createdAt, createdBy: by,

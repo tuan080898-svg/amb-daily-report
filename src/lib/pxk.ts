@@ -12,12 +12,14 @@ export interface PxkItem {
   name: string; // tên sản phẩm + phân loại ghi trên nhãn (nếu đọc được)
   qty: number;
   packFrom?: string; // dòng đã đổi sang gói sẵn: ghi lại dòng gốc, vd "GH063 × 2"
+  noteFrom?: string; // dòng "Quà tặng" được đọc ra sản phẩm từ ghi chú của đơn: ghi lại đoạn ghi chú
 }
 
 export interface PxkOrder {
   orderId: string;
   items: PxkItem[];
   totalQty: number; // tổng SL ghi trên nhãn
+  note?: string; // nhãn đơn ngoài sàn (Sapo): ghi chú của đơn in sau chữ "ĐƠN NGOÀI SÀN."
   ok: boolean; // tổng các dòng khớp tổng SL trên nhãn
   pages: number[];
   file: string;
@@ -27,6 +29,7 @@ export interface PxkOrder {
 export interface PxkStoredOrder {
   orderId: string;
   items: PxkItem[];
+  note?: string; // ghi chú của đơn (đơn ngoài sàn Sapo)
   fi?: number;
   pg?: number[];
 }
@@ -190,6 +193,36 @@ export function parseSapoQty(s: string): number {
   return /^\d+\.\d{3}$/.test(t) ? Number(t) : Number(t.replace(/\./g, ''));
 }
 
+// Ghi chú của đơn in ngay sau chữ "ĐƠN NGOÀI SÀN." ở cột bên phải, có thể xuống 2-3 dòng, nằm trên dòng "Nội dung hàng".
+function sapoNote(items: RawItem[]): string {
+  var rows: Array<{ y: number; a: RawItem[] }> = [];
+  items.forEach(function(i) {
+    var r = rows.find(function(r) { return Math.abs(r.y - i.y) < 2.5; });
+    if (!r) { r = { y: i.y, a: [] }; rows.push(r); }
+    r.a.push(i);
+  });
+  var rowText = function(r: { a: RawItem[] }) { return r.a.slice().sort(function(p, q) { return p.x - q.x; }); };
+  var head = rows.find(function(r) { return /Nội dung hàng/.test(rowText(r).map(function(o) { return o.s; }).join('').normalize('NFC')); });
+  var hit: { y: number; x: number } | null = null;
+  rows.forEach(function(r) {
+    if (hit) return;
+    var sorted = rowText(r);
+    var text = '';
+    var starts: number[] = [];
+    sorted.forEach(function(o) { starts.push(text.length); text += o.s.normalize('NFC'); });
+    var at = text.indexOf('ĐƠN NGOÀI SÀN');
+    if (at < 0) return;
+    var k = 0;
+    for (var j = 0; j < starts.length; j++) { if (starts[j] <= at) k = j; }
+    hit = { y: r.y, x: sorted[k].x };
+  });
+  if (!hit || !head) return '';
+  var h = hit as { y: number; x: number };
+  var band = items.filter(function(i) { return i.x >= h.x - 2 && i.y <= h.y + 3 && i.y > head!.y + 2; });
+  var text = toLines(band).join(' ').normalize('NFC').replace(/\s+/g, ' ').trim();
+  return text.replace(/^.*?ĐƠN NGOÀI SÀN\.?\s*/, '').trim().slice(0, 300);
+}
+
 function parseSapoPages(pages: RawItem[][], fileName: string): PxkOrder[] {
   var orders: PxkOrder[] = [];
   pages.forEach(function(items, idx) {
@@ -214,7 +247,7 @@ function parseSapoPages(pages: RawItem[][], fileName: string): PxkOrder[] {
     var m: RegExpExecArray | null;
     while ((m = re.exec(txt))) its.push({ sku: '', name: m[1].trim(), qty: parseSapoQty(m[2]) });
     var sum = its.reduce(function(s, x) { return s + x.qty; }, 0);
-    orders.push({ orderId: orderId, items: its, totalQty: tot, ok: its.length > 0 && sum === tot && its.every(function(i) { return i.qty > 0; }), pages: [idx + 1], file: fileName });
+    orders.push({ orderId: orderId, items: its, totalQty: tot, note: sapoNote(items), ok: its.length > 0 && sum === tot && its.every(function(i) { return i.qty > 0; }), pages: [idx + 1], file: fileName });
   });
   return orders;
 }
@@ -317,6 +350,61 @@ export function mergeLearnedPairs(cur: PxkData, pairs: PxkLearnedPairs): { data:
 }
 
 // ==================== Tổng hợp ====================
+
+// ==================== Đơn "Quà tặng": đọc sản phẩm từ ghi chú ====================
+// CSKH gửi tặng/bù thường lên đơn một dòng chung "Quà tặng" và ghi sản phẩm thật vào ghi chú (vd "1 Keo vá tường đủ phụ kiện").
+// Nhãn in ghi chú đó sau chữ ĐƠN NGOÀI SÀN. App đọc ghi chú: tách theo "+", ",", ";", "và"; mỗi đoạn có số lượng đứng đầu (không có thì là 1),
+// rồi tìm tên sản phẩm dài nhất đã biết nằm trong đoạn đó. Đoạn nào không nhận ra thì để dòng chưa có SKU cho nhân sự gắn (không đoán).
+
+export interface PxkGiftCatalogItem { key: string; sku: string }
+
+export function isGiftName(name: string): boolean {
+  return /^(quà|hàng)\s*tặng\b/i.test(name.normalize('NFC').trim());
+}
+
+// Danh sách tên đã biết (từ điển tên -> SKU và tên sản phẩm gốc), tên dài xếp trước. Bỏ tên quá ngắn (dễ khớp nhầm).
+export function buildGiftCatalog(names: Record<string, string>): PxkGiftCatalogItem[] {
+  var map = getSkuMap();
+  var list: PxkGiftCatalogItem[] = [];
+  Object.keys(names).forEach(function(k) {
+    var sku = names[k];
+    if (k.length >= 6 && map[sku]) list.push({ key: k, sku: sku });
+  });
+  var base = baseSkusByProduct();
+  Object.keys(base).forEach(function(p) {
+    var k = pxkNameKey(p);
+    var codes = base[p].slice().sort(function(a, b) { return (/^GH/i.test(a) ? 0 : 1) - (/^GH/i.test(b) ? 0 : 1); });
+    if (k.length >= 6 && codes[0]) list.push({ key: k, sku: codes[0] });
+  });
+  return list.sort(function(a, b) { return b.key.length - a.key.length; });
+}
+
+export function expandGiftNote(items: PxkItem[], note: string, catalog: PxkGiftCatalogItem[]): PxkItem[] {
+  var text = (note || '').replace(/\s+/g, ' ').trim();
+  if (!text) return items;
+  var parts = text.split(/\s*(?:\+|;|,|&|\s+và\s+|\n)\s*/i).filter(function(p) { return p.length > 0; });
+  if (parts.length === 0) return items;
+  var out: PxkItem[] = [];
+  items.forEach(function(it) {
+    if (!(isGiftName(it.name) && !it.sku) && it.sku !== 'QUATANG') { out.push(it); return; }
+    parts.forEach(function(part) {
+      var m = part.match(/^(\d+)\s*(.*)$/);
+      var n = m ? Number(m[1]) : 1;
+      var rest = m ? m[2] : part;
+      var key = pxkNameKey(rest.replace(/^(hộp|cái|bộ|chai|tuýp|gói|lọ|túi|miếng|chiếc)\s+/i, ''));
+      var hit = catalog.find(function(c) { return key.indexOf(c.key) >= 0; });
+      if (!hit && key.length >= 8) {
+        // ghi chú viết ngắn hơn tên đầy đủ: nhận khi tên ghi chú là phần đầu của tên đã biết và các tên đó chỉ ứng với một SKU
+        var pre = catalog.filter(function(c) { return c.key.indexOf(key) === 0; });
+        if (pre.length > 0 && pre.every(function(c) { return c.sku === pre[0].sku; })) hit = pre[0];
+      }
+      if (n <= 0) n = 1;
+      if (hit) out.push({ sku: hit.sku, name: '', qty: n * it.qty, noteFrom: part });
+      else out.push({ sku: '', name: 'Quà tặng — ghi chú: ' + part, qty: n * it.qty });
+    });
+  });
+  return out;
+}
 
 // ==================== Hàng đóng gói sẵn ====================
 // Kho đóng sẵn các gói combo của một số sản phẩm (vd keo vá tường: gói 2, 3, 4, 5 cái). Khách mua 2 cái phân loại "1 cái"
@@ -651,7 +739,8 @@ function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
   var orderPage = '';
   if (opts.showOrders) {
     var orderRows = batch.orders.map(function(o, i) {
-      var detail = o.items.map(function(it) { return esc((it.sku || it.name || '?')) + ' × ' + it.qty + (it.packFrom ? ' (gói sẵn, từ ' + esc(it.packFrom) + ')' : ''); }).join(', ');
+      var detail = o.items.map(function(it) { return esc((it.sku || it.name || '?')) + ' × ' + it.qty + (it.packFrom ? ' (gói sẵn, từ ' + esc(it.packFrom) + ')' : '') + (it.noteFrom ? ' (đọc từ ghi chú)' : ''); }).join(', ');
+      if (o.note) detail += '<br><span style="font-size:10px;color:#555">Ghi chú: ' + esc(o.note) + '</span>';
       return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(o.orderId) + '</td><td>' + detail + '</td><td class="c">' + o.items.reduce(function(s, x) { return s + x.qty; }, 0) + '</td><td class="chk"></td></tr>';
     }).join('');
     orderPage = '<div class="pb"></div><h2>' + (prodTable ? '3' : '2') + '. Danh sách từng đơn (để kiểm tra)</h2><table><thead><tr><th style="width:32px">#</th><th style="width:150px">Mã đơn hàng</th><th>Sản phẩm × SL</th><th style="width:44px">SL</th><th style="width:44px">Đủ</th></tr></thead><tbody>' + orderRows + '</tbody></table>';
