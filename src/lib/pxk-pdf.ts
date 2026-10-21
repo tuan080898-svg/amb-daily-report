@@ -91,7 +91,7 @@ export async function downloadPxkPdf(batches: PxkBatch[], opts: { showOrders: bo
     doc.setFont('DejaVu', 'bold'); doc.setFontSize(14);
     doc.text('PHIẾU XUẤT KHO — ' + PXK_PLATFORM_LABELS[batch.platform].toUpperCase(), LEFT, 16);
     doc.setFont('DejaVu', 'normal'); doc.setFontSize(8.5); doc.setTextColor(68, 68, 68);
-    doc.text(whLabel + (batch.shop ? 'Shop nhân sự: ' + batch.shop + ' · ' : '') + 'Mã phiếu: ' + batch.id, LEFT, 21.5);
+    doc.text(whLabel + (batch.shop ? 'SHOP NHÂN SỰ (bán riêng, không thuộc công ty) · ' : '') + 'Mã phiếu: ' + batch.id, LEFT, 21.5);
     doc.setTextColor(17, 17, 17);
     doc.text('Ngày in phiếu: ' + fmtDateTime(batch), RIGHT, 14, { align: 'right' });
     doc.text('Số đơn: ' + sum.orderCount + ' · Tổng SL: ' + sum.totalQty, RIGHT, 19, { align: 'right' });
@@ -210,7 +210,7 @@ export async function downloadPxkDayPdf(sum: PxkDaySummary): Promise<void> {
   heading('1. Các phiếu trong ngày', y);
   table({
     startY: y + 2, head: [['#', 'Mã phiếu', 'Sàn', 'Giờ lập', 'Người lập', 'Số đơn', 'SL']],
-    body: sum.batches.map(function(b, i) { return [i + 1, b.id, PXK_PLATFORM_LABELS[b.platform] + (b.shop ? '\n' + b.shop : ''), fmtTime(b.createdAt), b.createdBy, b.orders.length, pxkBatchQty(b)]; }),
+    body: sum.batches.map(function(b, i) { return [i + 1, b.id, PXK_PLATFORM_LABELS[b.platform] + (b.shop ? '\nShop nhân sự' : ''), fmtTime(b.createdAt), b.createdBy, b.orders.length, pxkBatchQty(b)]; }),
     columnStyles: { 0: { cellWidth: 9, halign: 'center' }, 1: { cellWidth: 44, fontSize: 8 }, 2: { cellWidth: 24 }, 3: { cellWidth: 20, halign: 'center' }, 4: { cellWidth: 'auto' }, 5: { cellWidth: 18, halign: 'center' }, 6: { cellWidth: 18, halign: 'center' } },
   });
 
