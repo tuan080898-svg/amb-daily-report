@@ -65,6 +65,8 @@ export default function PhieuXuatKhoPage() {
   const [lastBatches, setLastBatches] = useState<PxkBatch[]>([]); // phiếu vừa lập, để tải về
   const [downloading, setDownloading] = useState(false);
   const [dayDate, setDayDate] = useState(todayStr()); // ngày cần xuất phiếu tổng hợp
+  const dateTouched = useRef(false); // nhân sự đã tự chọn ngày in phiếu thì không tự đổi nữa
+  const dayTouched = useRef(false);
   const [orderQuery, setOrderQuery] = useState(''); // tìm đơn trong các phiếu đã lập
   const [data, setData] = useState<PxkData>({ names: {}, batches: [] });
   const [dataErr, setDataErr] = useState('');
@@ -79,6 +81,19 @@ export default function PhieuXuatKhoPage() {
   const learnRef = useRef<HTMLInputElement>(null);
   const [learning, setLearning] = useState(false);
   const [learnMsg, setLearnMsg] = useState('');
+
+  useEffect(function() {
+    function syncToday() {
+      if (document.visibilityState !== 'visible') return;
+      var t = todayStr();
+      if (!dateTouched.current) setPrintDate(function(d) { return d === t ? d : t; });
+      if (!dayTouched.current) setDayDate(function(d) { return d === t ? d : t; });
+    }
+    document.addEventListener('visibilitychange', syncToday);
+    window.addEventListener('focus', syncToday);
+    syncToday();
+    return function() { document.removeEventListener('visibilitychange', syncToday); window.removeEventListener('focus', syncToday); };
+  }, []);
 
   useEffect(function() {
     dbGetPxk().then(setData).catch(function(e) { setDataErr(e instanceof Error ? e.message : String(e)); });
@@ -342,6 +357,7 @@ export default function PhieuXuatKhoPage() {
     var ready = groups.filter(function(g) { return g.resolved.length > 0; });
     if (ready.length === 0) { setError('Chưa có đơn mới nào để lập phiếu.'); return; }
     var lines = ['LẬP VÀ IN ' + ready.length + ' PHIẾU (ngày ' + fmtDate(printDate) + ')', ''];
+    if (printDate !== todayStr()) lines.push('⚠ Ngày in phiếu đang là ' + fmtDate(printDate) + ', KHÁC hôm nay (' + fmtDate(todayStr()) + '). Nếu lập phiếu cho hôm nay, bấm Hủy rồi đổi lại ngày in phiếu.', '');
     ready.forEach(function(g) {
       var noSku = g.summary.unresolved.reduce(function(s, u) { return s + u.qty; }, 0);
       lines.push('• ' + PXK_PLATFORM_LABELS[g.platform] + ': ' + g.resolved.length + ' đơn, ' + g.summary.totalQty + ' sản phẩm' +
@@ -512,7 +528,7 @@ export default function PhieuXuatKhoPage() {
         <div className="flex flex-wrap gap-4 items-end mt-4">
           <div>
             <div className="text-xs text-gray-400 mb-1.5">Ngày in phiếu</div>
-            <input type="date" value={printDate} onChange={function(e) { setPrintDate(e.target.value); }} className={inputCls} />
+            <input type="date" value={printDate} onChange={function(e) { dateTouched.current = true; setPrintDate(e.target.value); }} className={inputCls} />
           </div>
           {files.length > 0 && <button onClick={reset} className="px-3 py-2 text-sm text-gray-400 hover:text-gray-200">Làm lại (xóa hết file)</button>}
         </div>
@@ -737,7 +753,7 @@ export default function PhieuXuatKhoPage() {
         <div className="px-4 py-3 border-b border-slate-700 text-sm font-semibold text-gray-200">Phiếu tổng hợp cuối ngày</div>
         <div className="px-4 py-3 flex flex-wrap items-center gap-3">
           <label className="text-sm text-gray-400">Ngày
-            <input type="date" value={dayDate} onChange={function(e) { setDayDate(e.target.value); }} className={inputCls + ' ml-2'} />
+            <input type="date" value={dayDate} onChange={function(e) { dayTouched.current = true; setDayDate(e.target.value); }} className={inputCls + ' ml-2'} />
           </label>
           {daySum.batches.length === 0 ? (
             <span className="text-sm text-gray-500">Chưa có phiếu nào được lập trong ngày {fmtDate(dayDate)}.</span>
