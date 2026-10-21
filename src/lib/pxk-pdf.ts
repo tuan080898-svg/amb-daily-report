@@ -91,7 +91,7 @@ export async function downloadPxkPdf(batches: PxkBatch[], opts: { showOrders: bo
     doc.setFont('DejaVu', 'bold'); doc.setFontSize(14);
     doc.text('PHIẾU XUẤT KHO — ' + PXK_PLATFORM_LABELS[batch.platform].toUpperCase(), LEFT, 16);
     doc.setFont('DejaVu', 'normal'); doc.setFontSize(8.5); doc.setTextColor(68, 68, 68);
-    doc.text(whLabel + 'Mã phiếu: ' + batch.id, LEFT, 21.5);
+    doc.text(whLabel + (batch.shop ? 'Shop nhân sự: ' + batch.shop + ' · ' : '') + 'Mã phiếu: ' + batch.id, LEFT, 21.5);
     doc.setTextColor(17, 17, 17);
     doc.text('Ngày in phiếu: ' + fmtDateTime(batch), RIGHT, 14, { align: 'right' });
     doc.text('Số đơn: ' + sum.orderCount + ' · Tổng SL: ' + sum.totalQty, RIGHT, 19, { align: 'right' });
@@ -184,8 +184,9 @@ export async function downloadPxkDayPdf(sum: PxkDaySummary): Promise<void> {
   doc.setTextColor(17, 17, 17);
   doc.setFont('DejaVu', 'bold'); doc.setFontSize(14);
   doc.text('PHIẾU TỔNG HỢP XUẤT KHO — NGÀY ' + fmtDate(sum.date), LEFT, 16);
+  if (sum.scope) { doc.setFontSize(10); doc.text(sum.scope.toUpperCase(), LEFT, 21); doc.setFontSize(14); }
   doc.setFont('DejaVu', 'normal'); doc.setFontSize(8.5); doc.setTextColor(68, 68, 68);
-  doc.text('Tổng hợp từ ' + sum.batches.length + ' phiếu xuất kho trong ngày', LEFT, 21.5);
+  doc.text('Tổng hợp từ ' + sum.batches.length + ' phiếu xuất kho trong ngày', LEFT, sum.scope ? 25 : 21.5);
   doc.setTextColor(17, 17, 17);
   doc.text('Lập lúc: ' + stamp, RIGHT, 14, { align: 'right' });
   doc.text('Số đơn: ' + (sum.shopeeOrders + sum.tiktokOrders + sum.sapoOrders) + ' (Shopee ' + sum.shopeeOrders + ' · TikTok ' + sum.tiktokOrders + ' · ngoài sàn ' + sum.sapoOrders + ')', RIGHT, 19, { align: 'right' });
@@ -209,7 +210,7 @@ export async function downloadPxkDayPdf(sum: PxkDaySummary): Promise<void> {
   heading('1. Các phiếu trong ngày', y);
   table({
     startY: y + 2, head: [['#', 'Mã phiếu', 'Sàn', 'Giờ lập', 'Người lập', 'Số đơn', 'SL']],
-    body: sum.batches.map(function(b, i) { return [i + 1, b.id, PXK_PLATFORM_LABELS[b.platform], fmtTime(b.createdAt), b.createdBy, b.orders.length, pxkBatchQty(b)]; }),
+    body: sum.batches.map(function(b, i) { return [i + 1, b.id, PXK_PLATFORM_LABELS[b.platform] + (b.shop ? '\n' + b.shop : ''), fmtTime(b.createdAt), b.createdBy, b.orders.length, pxkBatchQty(b)]; }),
     columnStyles: { 0: { cellWidth: 9, halign: 'center' }, 1: { cellWidth: 44, fontSize: 8 }, 2: { cellWidth: 24 }, 3: { cellWidth: 20, halign: 'center' }, 4: { cellWidth: 'auto' }, 5: { cellWidth: 18, halign: 'center' }, 6: { cellWidth: 18, halign: 'center' } },
   });
 
@@ -231,5 +232,5 @@ export async function downloadPxkDayPdf(sum: PxkDaySummary): Promise<void> {
   });
 
   pdf.signatures(lastY() + 14);
-  pdf.finish('Phieu-tong-hop-' + sum.date + '.pdf');
+  pdf.finish('Phieu-tong-hop-' + sum.date + (sum.scope ? '-' + sum.scope.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '') : '') + '.pdf');
 }

@@ -7,6 +7,17 @@ export type PxkPlatform = 'shopee' | 'tiktok' | 'sapo';
 export var PXK_PLATFORM_LABELS: Record<PxkPlatform, string> = { shopee: 'Shopee', tiktok: 'TikTok Shop', sapo: 'Đơn ngoài sàn (Sapo)' };
 export var PXK_PLATFORMS: PxkPlatform[] = ['shopee', 'tiktok', 'sapo'];
 
+// Phạm vi lọc phiếu theo shop: '' = tất cả, PXK_SCOPE_COMPANY = chỉ shop công ty, còn lại = tên shop nhân sự
+export var PXK_SCOPE_COMPANY = '__company';
+export function pxkScopeMatch(b: { shop?: string }, scope: string): boolean {
+  if (!scope) return true;
+  if (scope === PXK_SCOPE_COMPANY) return !b.shop;
+  return b.shop === scope;
+}
+export function pxkScopeLabel(scope: string): string {
+  return !scope ? '' : scope === PXK_SCOPE_COMPANY ? 'Shop công ty' : 'Shop nhân sự: ' + scope;
+}
+
 export interface PxkItem {
   sku: string; // rỗng nếu nhãn không có SKU (Shopee) và chưa gắn được
   name: string; // tên sản phẩm + phân loại ghi trên nhãn (nếu đọc được)
@@ -46,12 +57,14 @@ export interface PxkBatch {
   notes?: string[]; // ghi chú in lên phiếu (vd: có đơn đã lập phiếu trước đó)
   orders: Array<PxkStoredOrder>;
   files?: string[]; // tên các file PDF đã tải lên để lập phiếu này (phiếu cũ không có)
+  shop?: string; // phiếu của shop nhân sự (bán hàng của công ty); không có = shop công ty
 }
 
 export interface PxkData {
   names: Record<string, string>; // khoá tên Shopee đã chuẩn hoá -> SKU
   ambiguous?: Record<string, string[]>; // cùng một tên nhưng file đơn ghi nhiều SKU khác nhau
   packProducts?: string[]; // sản phẩm kho đóng gói sẵn theo combo (chưa cài đặt thì dùng danh sách mặc định)
+  shops?: string[]; // danh sách shop nhân sự
   batches: PxkBatch[];
 }
 
@@ -704,7 +717,7 @@ function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
   var sum = summarizePxk(batch.orders);
   var whLabel = batch.warehouse === 'HN' ? 'Kho Hà Nội · ' : batch.warehouse === 'HCM' ? 'Kho HCM · ' : '';
   var title = 'PHIẾU XUẤT KHO — ' + PXK_PLATFORM_LABELS[batch.platform].toUpperCase();
-  var head = '<div class="head"><div><h1>' + esc(title) + '</h1><div class="sub">' + esc(whLabel) + 'Mã phiếu: ' + esc(batch.id) + '</div></div>' +
+  var head = '<div class="head"><div><h1>' + esc(title) + '</h1><div class="sub">' + esc(whLabel) + (batch.shop ? 'SHOP NHÂN SỰ: <b>' + esc(batch.shop) + '</b> · ' : '') + 'Mã phiếu: ' + esc(batch.id) + '</div></div>' +
     '<div class="meta">Ngày in phiếu: <b>' + esc(fmtDateTime(batch)) + '</b><br>Số đơn: <b>' + sum.orderCount + '</b> · Tổng SL: <b>' + sum.totalQty + '</b></div></div>';
 
   var shopee = batch.platform === 'shopee';
@@ -770,6 +783,7 @@ export interface PxkDayRow { name: string; skus: string; shopee: number; tiktok:
 
 export interface PxkDaySummary {
   date: string;
+  scope: string; // nhãn phạm vi (rỗng = tất cả các shop)
   batches: PxkBatch[]; // các phiếu trong ngày, theo giờ lập tăng dần
   rows: PxkDayRow[];
   shopeeOrders: number;
@@ -784,8 +798,8 @@ export function pxkBatchQty(b: PxkBatch): number {
   return b.orders.reduce(function(s, o) { return s + o.items.reduce(function(a, x) { return a + x.qty; }, 0); }, 0);
 }
 
-export function summarizeDay(date: string, all: PxkBatch[]): PxkDaySummary {
-  var batches = all.filter(function(b) { return b.printDate === date; }).sort(function(a, b) { return a.createdAt.localeCompare(b.createdAt); });
+export function summarizeDay(date: string, all: PxkBatch[], scope?: string): PxkDaySummary {
+  var batches = all.filter(function(b) { return b.printDate === date && pxkScopeMatch(b, scope || ''); }).sort(function(a, b) { return a.createdAt.localeCompare(b.createdAt); });
   var seen: Record<PxkPlatform, Set<string>> = { shopee: new Set<string>(), tiktok: new Set<string>(), sapo: new Set<string>() };
   var orders: Record<PxkPlatform, Array<{ orderId: string; items: PxkItem[] }>> = { shopee: [], tiktok: [], sapo: [] };
   var dup = 0;
@@ -822,7 +836,7 @@ export function summarizeDay(date: string, all: PxkBatch[]): PxkDaySummary {
   var badBatches = batches.filter(function(b) { return b.issues && b.issues.length > 0; });
   if (badBatches.length > 0) warnings.push('Phiếu ' + badBatches.map(function(b) { return b.id; }).join(', ') + ' có nhãn đọc chưa chắc chắn, số liệu có thể lệch.');
   return {
-    date: date, batches: batches, rows: list,
+    date: date, scope: pxkScopeLabel(scope || ''), batches: batches, rows: list,
     shopeeOrders: orders.shopee.length, tiktokOrders: orders.tiktok.length, sapoOrders: orders.sapo.length, dupOrders: dup,
     totalQty: list.reduce(function(s, r) { return s + r.total; }, 0), warnings: warnings,
   };
@@ -830,11 +844,11 @@ export function summarizeDay(date: string, all: PxkBatch[]): PxkDaySummary {
 
 export function buildPxkDayHtml(sum: PxkDaySummary, now: Date): string {
   var stamp = fmtTime(now.toISOString());
-  var head = '<div class="head"><div><h1>PHIẾU TỔNG HỢP XUẤT KHO — NGÀY ' + esc(fmtDate(sum.date)) + '</h1><div class="sub">Tổng hợp từ ' + sum.batches.length + ' phiếu xuất kho trong ngày</div></div>' +
+  var head = '<div class="head"><div><h1>PHIẾU TỔNG HỢP XUẤT KHO — NGÀY ' + esc(fmtDate(sum.date)) + (sum.scope ? ' — ' + esc(sum.scope.toUpperCase()) : '') + '</h1><div class="sub">Tổng hợp từ ' + sum.batches.length + ' phiếu xuất kho trong ngày</div></div>' +
     '<div class="meta">Lập lúc: <b>' + esc(stamp) + '</b><br>Số đơn: <b>' + (sum.shopeeOrders + sum.tiktokOrders + sum.sapoOrders) + '</b> (Shopee ' + sum.shopeeOrders + ' · TikTok ' + sum.tiktokOrders + ' · ngoài sàn ' + sum.sapoOrders + ')<br>Tổng SL: <b>' + sum.totalQty + '</b></div></div>';
   var warn = sum.warnings.length > 0 ? '<div class="alert">⚠ ' + sum.warnings.map(esc).join('<br>⚠ ') + '</div>' : '';
   var batchRows = sum.batches.map(function(b, i) {
-    return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(b.id) + '</td><td>' + esc(PXK_PLATFORM_LABELS[b.platform]) + '</td><td class="c">' + esc(fmtTime(b.createdAt)) + '</td><td>' + esc(b.createdBy) + '</td><td class="c">' + b.orders.length + '</td><td class="c">' + pxkBatchQty(b) + '</td></tr>';
+    return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(b.id) + '</td><td>' + esc(PXK_PLATFORM_LABELS[b.platform]) + (b.shop ? '<br><span style="font-size:10px;color:#555">' + esc(b.shop) + '</span>' : '') + '</td><td class="c">' + esc(fmtTime(b.createdAt)) + '</td><td>' + esc(b.createdBy) + '</td><td class="c">' + b.orders.length + '</td><td class="c">' + pxkBatchQty(b) + '</td></tr>';
   }).join('');
   var t1 = '<h2>1. Các phiếu trong ngày</h2><table><thead><tr><th style="width:28px">#</th><th>Mã phiếu</th><th style="width:70px">Sàn</th><th style="width:56px">Giờ lập</th><th>Người lập</th><th style="width:50px">Số đơn</th><th style="width:50px">SL</th></tr></thead><tbody>' + batchRows + '</tbody></table>';
   var prodRows = sum.rows.map(function(r, i) {

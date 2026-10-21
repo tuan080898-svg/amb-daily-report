@@ -7,7 +7,7 @@ import { dbGetPxk, dbUpdatePxk } from '@/lib/db';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
 import {
-  parsePxkFileAuto, summarizePxk, repackOrders, buildGiftCatalog, expandGiftNote, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
+  parsePxkFileAuto, summarizePxk, repackOrders, pxkScopeMatch, PXK_SCOPE_COMPANY, buildGiftCatalog, expandGiftNote, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
   type PxkPlatform, type PxkOrder, type PxkBatch, type PxkStoredOrder, type PxkData, type PxkItem,
 } from '@/lib/pxk';
 import { downloadPxkPdf, downloadPxkDayPdf } from '@/lib/pxk-pdf';
@@ -67,6 +67,9 @@ export default function PhieuXuatKhoPage() {
   const [dayDate, setDayDate] = useState(todayStr()); // ngày cần xuất phiếu tổng hợp
   const dateTouched = useRef(false); // nhân sự đã tự chọn ngày in phiếu thì không tự đổi nữa
   const dayTouched = useRef(false);
+  const [shopSel, setShopSel] = useState(''); // phiếu sắp lập là của shop nhân sự nào ('' = shop công ty)
+  const [dayShop, setDayShop] = useState(''); // phạm vi phiếu tổng hợp cuối ngày: '' = tất cả
+  const [histShop, setHistShop] = useState(''); // lọc lịch sử phiếu theo shop
   const [orderQuery, setOrderQuery] = useState(''); // tìm đơn trong các phiếu đã lập
   const [data, setData] = useState<PxkData>({ names: {}, batches: [] });
   const [dataErr, setDataErr] = useState('');
@@ -201,9 +204,15 @@ export default function PhieuXuatKhoPage() {
     return Object.values(by).sort(function(a, b) { return b.n - a.n; });
   }, [analysis, prevOrders]);
 
+  const shopList = useMemo(function() {
+    var s = new Set<string>(data.shops || []);
+    data.batches.forEach(function(b) { if (b.shop) s.add(b.shop); });
+    return Array.from(s).sort(function(a, b) { return a.localeCompare(b, 'vi'); });
+  }, [data.shops, data.batches]);
+
   const packList = useMemo(function() { return packProductList(data.packProducts); }, [data.packProducts, skuVer]);
 
-  const daySum = useMemo(function() { return summarizeDay(dayDate, data.batches); }, [dayDate, data.batches]);
+  const daySum = useMemo(function() { return summarizeDay(dayDate, data.batches, dayShop); }, [dayDate, data.batches, dayShop]);
 
   // Tìm đơn: 1 mã -> khớp một phần; nhiều mã (dán danh sách) -> khớp đúng từng mã
   const orderSearch = useMemo(function() {
@@ -368,6 +377,7 @@ export default function PhieuXuatKhoPage() {
     if (ready.length === 0) { setError('Chưa có đơn mới nào để lập phiếu.'); return; }
     var lines = ['LẬP VÀ IN ' + ready.length + ' PHIẾU (ngày ' + fmtDate(printDate) + ')', ''];
     if (printDate !== todayStr()) lines.push('⚠ Ngày in phiếu đang là ' + fmtDate(printDate) + ', KHÁC hôm nay (' + fmtDate(todayStr()) + '). Nếu lập phiếu cho hôm nay, bấm Hủy rồi đổi lại ngày in phiếu.', '');
+    lines.push(shopSel ? '🛍 PHIẾU CỦA SHOP NHÂN SỰ: ' + shopSel : 'Phiếu của shop công ty (không chọn shop nhân sự)', '');
     ready.forEach(function(g) {
       var noSku = g.summary.unresolved.reduce(function(s, u) { return s + u.qty; }, 0);
       lines.push('• ' + PXK_PLATFORM_LABELS[g.platform] + ': ' + g.resolved.length + ' đơn, ' + g.summary.totalQty + ' sản phẩm' +
@@ -394,7 +404,7 @@ export default function PhieuXuatKhoPage() {
           return { orderId: r.orderId, items: r.items, note: r.note, fi: fi, pg: src.pages };
         });
         return {
-          id: makeBatchId(), platform: g.platform, printDate: printDate, createdAt: createdAt, createdBy: by,
+          id: makeBatchId(), platform: g.platform, printDate: printDate, createdAt: createdAt, createdBy: by, shop: shopSel || undefined,
           issues: g.bad.map(function(o) { return o.orderId || ('trang ' + o.pages.join('-')); }),
           notes: noteForOld(g).concat(noteForQty(g)),
           orders: stored,
@@ -418,13 +428,31 @@ export default function PhieuXuatKhoPage() {
       setNotice(msg);
       setLastBatches(batches);
       openPrint(buildPxkHtmlMulti(batches, { showOrders: showOrders }), w);
-      setFiles([]); setAssign({}); setExcludeOld(false);
+      setFiles([]); setAssign({}); setExcludeOld(false); setShopSel('');
     } catch (e) {
       if (w) w.close();
       setError('Lỗi: ' + (e instanceof Error ? e.message : String(e)));
     } finally {
       setBusy(false);
     }
+  }
+
+  // Thêm shop nhân sự vào danh sách (lưu lên cloud, dùng chung cho cả kho) và chọn luôn cho phiếu sắp lập
+  function addShop() {
+    var raw = window.prompt('Tên shop của nhân sự (ví dụ: Shop Hoa - Shopee):');
+    if (!raw) return;
+    var name = raw.replace(/\s+/g, ' ').trim().slice(0, 60);
+    if (!name) return;
+    setShopSel(name);
+    saveChain.current = saveChain.current.then(function() {
+      return dbUpdatePxk(function(c) {
+        var list = (c.shops || []).slice();
+        if (list.indexOf(name) < 0) list.push(name);
+        return Object.assign({}, c, { shops: list });
+      }).then(setData);
+    }).catch(function(e) {
+      setError('Chưa lưu được tên shop (' + (e instanceof Error ? e.message : String(e)) + ').');
+    });
   }
 
   // Bật/tắt gói sẵn cho một sản phẩm (lưu lên cloud, dùng chung cho cả kho)
@@ -539,6 +567,16 @@ export default function PhieuXuatKhoPage() {
           <div>
             <div className="text-xs text-gray-400 mb-1.5">Ngày in phiếu</div>
             <input type="date" value={printDate} onChange={function(e) { dateTouched.current = true; setPrintDate(e.target.value); }} className={inputCls} />
+          </div>
+          <div>
+            <div className="text-xs text-gray-400 mb-1.5">Phiếu lập cho</div>
+            <div className="flex gap-2">
+              <select value={shopSel} onChange={function(e) { setShopSel(e.target.value); }} className={inputCls + (shopSel ? ' border-amber-500 text-amber-200' : '')}>
+                <option value="">Shop công ty</option>
+                {shopList.map(function(s) { return <option key={s} value={s}>Shop nhân sự: {s}</option>; })}
+              </select>
+              <button onClick={addShop} className="px-3 py-2 text-sm text-gray-300 border border-slate-600 rounded-lg hover:bg-slate-800 whitespace-nowrap">＋ Thêm shop nhân sự</button>
+            </div>
           </div>
           {files.length > 0 && <button onClick={reset} className="px-3 py-2 text-sm text-gray-400 hover:text-gray-200">Làm lại (xóa hết file)</button>}
         </div>
@@ -765,8 +803,15 @@ export default function PhieuXuatKhoPage() {
           <label className="text-sm text-gray-400">Ngày
             <input type="date" value={dayDate} onChange={function(e) { dayTouched.current = true; setDayDate(e.target.value); }} className={inputCls + ' ml-2'} />
           </label>
+          <label className="text-sm text-gray-400">Phạm vi
+            <select value={dayShop} onChange={function(e) { setDayShop(e.target.value); }} className={inputCls + ' ml-2'}>
+              <option value="">Tất cả các shop</option>
+              <option value={PXK_SCOPE_COMPANY}>Chỉ shop công ty</option>
+              {shopList.map(function(s) { return <option key={s} value={s}>Shop nhân sự: {s}</option>; })}
+            </select>
+          </label>
           {daySum.batches.length === 0 ? (
-            <span className="text-sm text-gray-500">Chưa có phiếu nào được lập trong ngày {fmtDate(dayDate)}.</span>
+            <span className="text-sm text-gray-500">Chưa có phiếu nào được lập trong ngày {fmtDate(dayDate)}{daySum.scope ? ' (' + daySum.scope + ')' : ''}.</span>
           ) : (
             <>
               <span className="text-sm text-gray-300">
@@ -782,12 +827,12 @@ export default function PhieuXuatKhoPage() {
             <summary className="px-4 py-2 text-sm text-gray-400 cursor-pointer">Xem trước: các phiếu và tổng sản phẩm trong ngày</summary>
             <div className="px-4 pb-3 space-y-3">
               {daySum.warnings.length > 0 && <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">{daySum.warnings.map(function(w) { return <div key={w}>⚠ {w}</div>; })}</div>}
-              <div className="text-xs text-gray-400">{daySum.batches.map(function(b) { return b.id + ' (' + PXK_PLATFORM_LABELS[b.platform] + ', ' + fmtTime(b.createdAt) + ', ' + b.orders.length + ' đơn, ' + pxkBatchQty(b) + ' SP)'; }).join(' · ')}</div>
+              <div className="text-xs text-gray-400">{daySum.batches.map(function(b) { return b.id + ' (' + PXK_PLATFORM_LABELS[b.platform] + (b.shop ? ' · ' + b.shop : '') + ', ' + fmtTime(b.createdAt) + ', ' + b.orders.length + ' đơn, ' + pxkBatchQty(b) + ' SP)'; }).join(' · ')}</div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead><tr className="text-xs text-gray-400 border-b border-slate-700">
                     <th className="px-3 py-1.5 text-left">Tên sản phẩm</th><th className="px-3 py-1.5 text-left">SKU</th>
-                    <th className="px-3 py-1.5 text-right">Shopee</th><th className="px-3 py-1.5 text-right">TikTok</th><th className="px-3 py-1.5 text-right">Tổng</th>
+                    <th className="px-3 py-1.5 text-right">Shopee</th><th className="px-3 py-1.5 text-right">TikTok</th><th className="px-3 py-1.5 text-right">Ngoài sàn</th><th className="px-3 py-1.5 text-right">Tổng</th>
                   </tr></thead>
                   <tbody>
                     {daySum.rows.map(function(r) {
@@ -797,6 +842,7 @@ export default function PhieuXuatKhoPage() {
                           <td className="px-3 py-1.5 font-mono text-xs text-gray-400">{r.skus}</td>
                           <td className="px-3 py-1.5 text-right text-gray-400">{r.shopee || ''}</td>
                           <td className="px-3 py-1.5 text-right text-gray-400">{r.tiktok || ''}</td>
+                          <td className="px-3 py-1.5 text-right text-gray-400">{r.sapo || ''}</td>
                           <td className="px-3 py-1.5 text-right font-bold text-gray-100">{r.total}</td>
                         </tr>
                       );
@@ -810,7 +856,14 @@ export default function PhieuXuatKhoPage() {
       </div>
 
       <div className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-700 text-sm font-semibold text-gray-200">Lịch sử phiếu đã lập</div>
+        <div className="px-4 py-3 border-b border-slate-700 flex flex-wrap items-center gap-3">
+          <span className="text-sm font-semibold text-gray-200">Lịch sử phiếu đã lập</span>
+          <select value={histShop} onChange={function(e) { setHistShop(e.target.value); }} className={inputCls + ' py-1'}>
+            <option value="">Tất cả các shop</option>
+            <option value={PXK_SCOPE_COMPANY}>Chỉ shop công ty</option>
+            {shopList.map(function(s) { return <option key={s} value={s}>Shop nhân sự: {s}</option>; })}
+          </select>
+        </div>
         <div className="px-4 py-3 border-b border-slate-700">
           <div className="flex flex-wrap items-center gap-3">
             <input value={orderQuery} onChange={function(e) { setOrderQuery(e.target.value); }} placeholder="Tìm đơn theo mã đơn (dán nhiều mã cách nhau bằng dấu cách / xuống dòng)" className={inputCls + ' flex-1 min-w-[260px]'} />
@@ -837,7 +890,7 @@ export default function PhieuXuatKhoPage() {
                           <tr key={h.batch.id + h.order.orderId + i} className="border-b border-slate-800 align-top">
                             <td className="px-3 py-1.5 font-mono text-gray-100">{h.order.orderId}</td>
                             <td className="px-3 py-1.5 font-mono text-gray-300">{h.batch.id}</td>
-                            <td className="px-3 py-1.5 text-gray-300">{PXK_PLATFORM_LABELS[h.batch.platform]}</td>
+                            <td className="px-3 py-1.5 text-gray-300">{PXK_PLATFORM_LABELS[h.batch.platform]}{h.batch.shop ? ' · ' + h.batch.shop : ''}</td>
                             <td className="px-3 py-1.5 text-gray-300 whitespace-nowrap">{fmtDateTime(h.batch)}</td>
                             <td className="px-3 py-1.5 text-gray-400">{h.batch.createdBy}</td>
                             <td className="px-3 py-1.5 text-gray-300">{fname ? fname + (h.order.pg && h.order.pg.length > 0 ? ' (trang ' + h.order.pg.join('-') + ')' : '') : <span className="text-gray-500">không có thông tin file (phiếu lập trước khi app lưu tên file)</span>}</td>
@@ -864,12 +917,12 @@ export default function PhieuXuatKhoPage() {
                 <th className="px-4 py-2 text-left">Người lập</th><th className="px-4 py-2"></th>
               </tr></thead>
               <tbody>
-                {data.batches.slice().sort(function(a, b) { return b.createdAt.localeCompare(a.createdAt); }).slice(0, 30).map(function(b) {
+                {data.batches.filter(function(b) { return pxkScopeMatch(b, histShop); }).sort(function(a, b) { return b.createdAt.localeCompare(a.createdAt); }).slice(0, 30).map(function(b) {
                   var qty = b.orders.reduce(function(s, o) { return s + o.items.reduce(function(a, x) { return a + x.qty; }, 0); }, 0);
                   return (
                     <tr key={b.id} className="border-b border-slate-800">
                       <td className="px-4 py-2 font-mono text-gray-300">{b.id}{b.files && b.files.length > 0 && <div className="font-sans text-xs text-gray-500 mt-0.5 max-w-xs break-words" title={b.files.join(String.fromCharCode(10))}>File: {b.files.join(', ')}</div>}</td>
-                      <td className="px-4 py-2 text-gray-300">{PXK_PLATFORM_LABELS[b.platform]}</td>
+                      <td className="px-4 py-2 text-gray-300">{PXK_PLATFORM_LABELS[b.platform]}{b.shop && <div className="text-xs text-amber-300 mt-0.5">Shop NS: {b.shop}</div>}</td>
                       <td className="px-4 py-2 text-gray-300 whitespace-nowrap">{fmtDateTime(b)}</td>
                       <td className="px-4 py-2 text-right text-gray-300">{b.orders.length}</td>
                       <td className="px-4 py-2 text-right text-gray-300">{qty}</td>
