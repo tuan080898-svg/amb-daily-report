@@ -22,6 +22,10 @@ function fmtDate(d: string): string {
   return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : d;
 }
 
+function platformBadge(p: PxkPlatform): string {
+  return p === 'shopee' ? 'bg-orange-500/15 text-orange-400' : p === 'sapo' ? 'bg-sky-500/15 text-sky-300' : 'bg-pink-500/15 text-pink-400';
+}
+
 function makeBatchId(): string {
   var d = new Date();
   var ymd = String(d.getFullYear()).slice(2) + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0');
@@ -86,7 +90,7 @@ export default function PhieuXuatKhoPage() {
 
   // Đơn đã có trong các phiếu trước (cùng sàn): mã đơn -> phiếu gần nhất chứa đơn đó
   const prevOrders = useMemo(function() {
-    var out: Record<PxkPlatform, Record<string, { id: string; by: string; at: string }>> = { shopee: {}, tiktok: {} };
+    var out: Record<PxkPlatform, Record<string, { id: string; by: string; at: string }>> = { shopee: {}, tiktok: {}, sapo: {} };
     data.batches.slice().sort(function(a, b) { return a.createdAt.localeCompare(b.createdAt); }).forEach(function(b) {
       b.orders.forEach(function(o) { out[b.platform][o.orderId] = { id: b.id, by: b.createdBy, at: b.createdAt }; });
     });
@@ -107,7 +111,7 @@ export default function PhieuXuatKhoPage() {
 
   // Gộp các file theo (sàn, kho); mã đơn lặp giữa các file chỉ tính một lần
   const analysis = useMemo(function() {
-    var seen: Record<PxkPlatform, Set<string>> = { shopee: new Set<string>(), tiktok: new Set<string>() };
+    var seen: Record<PxkPlatform, Set<string>> = { shopee: new Set<string>(), tiktok: new Set<string>(), sapo: new Set<string>() };
     var map: Record<string, { platform: PxkPlatform; fresh: PxkOrder[]; old: PxkOrder[] }> = {};
     var dupInUpload = 0;
     var noId: PxkOrder[] = [];
@@ -146,7 +150,7 @@ export default function PhieuXuatKhoPage() {
   // Dòng Shopee chưa có SKU: gộp từ mọi nhóm Shopee để gắn một lần
   const shopeeUnresolved = useMemo(function() {
     var all: Array<{ orderId: string; items: PxkItem[] }> = [];
-    groups.forEach(function(g) { if (g.platform === 'shopee') all = all.concat(g.resolved); });
+    groups.forEach(function(g) { if (g.platform === 'shopee' || g.platform === 'sapo') all = all.concat(g.resolved); });
     return summarizePxk(all).unresolved;
   }, [groups]);
 
@@ -203,7 +207,7 @@ export default function PhieuXuatKhoPage() {
   async function addFiles(list: FileList | File[] | null) {
     if (!list || list.length === 0) return;
     var incoming = Array.from(list).filter(function(f) { return /\.pdf$/i.test(f.name) || f.type === 'application/pdf'; });
-    if (incoming.length === 0) { setError('Chỉ nhận file PDF in đơn của Shopee / TikTok.'); return; }
+    if (incoming.length === 0) { setError('Chỉ nhận file PDF in đơn của Shopee / TikTok / đơn ngoài sàn (Sapo).'); return; }
     setError(''); setNotice('');
     var skipped: string[] = [];
     for (var i = 0; i < incoming.length; i++) {
@@ -217,7 +221,7 @@ export default function PhieuXuatKhoPage() {
         entry = {
           id: f.name + '|' + f.size + '|' + Date.now() + i, file: f, name: f.name, platform: r.platform,
           orders: r.orders,
-          error: r.platform ? (r.orders.length === 0 ? 'Không đọc được nhãn nào trong file này.' : '') : 'Không nhận diện được sàn (không phải nhãn Shopee / TikTok?). Chọn sàn thủ công bên dưới.',
+          error: r.platform ? (r.orders.length === 0 ? 'Không đọc được nhãn nào trong file này.' : '') : 'Không nhận diện được sàn (không phải nhãn Shopee / TikTok / Sapo?). Chọn sàn thủ công bên dưới.',
         };
       } catch (e) {
         entry = {
@@ -453,7 +457,7 @@ export default function PhieuXuatKhoPage() {
     <div className="max-w-5xl mx-auto">
       <div className="mb-5">
         <h1 className="text-2xl font-bold text-gray-100">Phiếu xuất kho</h1>
-        <p className="text-sm text-gray-500 mt-1">Chọn một lúc nhiều file PDF in đơn (Shopee và TikTok cùng lúc được) → app tự nhận diện sàn, tổng hợp theo SKU để kho nhặt hàng, mỗi sàn một phiếu và in một lượt.</p>
+        <p className="text-sm text-gray-500 mt-1">Chọn một lúc nhiều file PDF in đơn (Shopee, TikTok và nhãn đơn ngoài sàn in từ Sapo như KOC, CSKH, sỉ cùng lúc được) → app tự nhận diện sàn, tổng hợp theo SKU để kho nhặt hàng, mỗi sàn một phiếu và in một lượt.</p>
       </div>
 
       {(hasShopee || files.length === 0) && (
@@ -530,9 +534,9 @@ export default function PhieuXuatKhoPage() {
                       </td>
                       <td className="px-2 py-2">
                         {f.platform
-                          ? <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + (f.platform === 'shopee' ? 'bg-orange-500/15 text-orange-400' : 'bg-pink-500/15 text-pink-400')}>{PXK_PLATFORM_LABELS[f.platform]}</span>
+                          ? <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + platformBadge(f.platform)}>{PXK_PLATFORM_LABELS[f.platform]}</span>
                           : <select value="" onChange={function(e) { if (e.target.value) forcePlatform(f.id, e.target.value as PxkPlatform); }} className={inputCls + ' py-1'}>
-                              <option value="">Chọn sàn...</option><option value="shopee">Shopee</option><option value="tiktok">TikTok Shop</option>
+                              <option value="">Chọn sàn...</option><option value="shopee">Shopee</option><option value="tiktok">TikTok Shop</option><option value="sapo">Đơn ngoài sàn (Sapo)</option>
                             </select>}
                       </td>
                       <td className="px-2 py-2 text-right text-gray-300">{f.orders.length}</td>
@@ -592,7 +596,7 @@ export default function PhieuXuatKhoPage() {
           {shopeeUnresolved.length > 0 && (
             <div className="mb-4 bg-slate-900 border border-amber-500/40 rounded-xl overflow-visible">
               <div className="px-4 py-3 border-b border-slate-700 text-sm text-amber-200">
-                Nhãn Shopee không có mã SKU — gắn SKU cho {shopeeUnresolved.length} sản phẩm dưới đây. Gõ mã rồi chọn trong danh sách (hoặc bấm Enter); dòng được gắn sẽ tự xuống bảng tổng hợp và app nhớ cho lần sau. Dòng chưa gắn vẫn lên phiếu theo tên sản phẩm.
+                Nhãn Shopee / đơn ngoài sàn (Sapo) không có mã SKU — gắn SKU cho {shopeeUnresolved.length} sản phẩm dưới đây. Gõ mã rồi chọn trong danh sách (hoặc bấm Enter); dòng được gắn sẽ tự xuống bảng tổng hợp và app nhớ cho lần sau. Dòng chưa gắn vẫn lên phiếu theo tên sản phẩm.
               </div>
               <div className="divide-y divide-slate-800">
                 {shopeeUnresolved.map(function(u) {
@@ -665,7 +669,7 @@ export default function PhieuXuatKhoPage() {
             return (
               <details key={g.key} open={groups.length === 1} className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden mb-4">
                 <summary className="px-4 py-3 cursor-pointer flex flex-wrap items-center gap-3 text-sm">
-                  <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + (g.platform === 'shopee' ? 'bg-orange-500/15 text-orange-400' : 'bg-pink-500/15 text-pink-400')}>{PXK_PLATFORM_LABELS[g.platform]}</span>
+                  <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + platformBadge(g.platform)}>{PXK_PLATFORM_LABELS[g.platform]}</span>
                   <span className="font-semibold text-gray-100">1 phiếu: {g.resolved.length} đơn · {s.totalQty} sản phẩm · {s.skuLines.length + s.unresolved.length} mã SKU</span>
                   {g.oldCount > 0 && <span className="text-xs text-amber-300">({g.oldCount} đơn đã lập phiếu trước{excludeOld ? ', ĐÃ BỎ' : ', vẫn in'})</span>}
                   {g.bad.length > 0 && <span className="text-xs text-amber-300">⚠ {g.bad.length} nhãn chưa chắc</span>}
@@ -740,7 +744,7 @@ export default function PhieuXuatKhoPage() {
           ) : (
             <>
               <span className="text-sm text-gray-300">
-                <b>{daySum.batches.length}</b> phiếu · <b>{daySum.shopeeOrders + daySum.tiktokOrders}</b> đơn (Shopee {daySum.shopeeOrders} · TikTok {daySum.tiktokOrders}) · <b>{daySum.totalQty}</b> sản phẩm · {daySum.rows.length} loại
+                <b>{daySum.batches.length}</b> phiếu · <b>{daySum.shopeeOrders + daySum.tiktokOrders + daySum.sapoOrders}</b> đơn (Shopee {daySum.shopeeOrders} · TikTok {daySum.tiktokOrders} · ngoài sàn {daySum.sapoOrders}) · <b>{daySum.totalQty}</b> sản phẩm · {daySum.rows.length} loại
               </span>
               <button onClick={printDay} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold rounded-lg">In phiếu tổng hợp</button>
               <button onClick={function() { downloadDay(); }} disabled={downloading} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold rounded-lg">{downloading ? 'Đang tạo PDF...' : 'Tải về (PDF)'}</button>

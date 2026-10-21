@@ -188,7 +188,7 @@ export async function downloadPxkDayPdf(sum: PxkDaySummary): Promise<void> {
   doc.text('Tổng hợp từ ' + sum.batches.length + ' phiếu xuất kho trong ngày', LEFT, 21.5);
   doc.setTextColor(17, 17, 17);
   doc.text('Lập lúc: ' + stamp, RIGHT, 14, { align: 'right' });
-  doc.text('Số đơn: ' + (sum.shopeeOrders + sum.tiktokOrders) + ' (Shopee ' + sum.shopeeOrders + ' · TikTok ' + sum.tiktokOrders + ')', RIGHT, 19, { align: 'right' });
+  doc.text('Số đơn: ' + (sum.shopeeOrders + sum.tiktokOrders + sum.sapoOrders) + ' (Shopee ' + sum.shopeeOrders + ' · TikTok ' + sum.tiktokOrders + ' · ngoài sàn ' + sum.sapoOrders + ')', RIGHT, 19, { align: 'right' });
   doc.text('Tổng SL: ' + sum.totalQty, RIGHT, 24, { align: 'right' });
   doc.setDrawColor(17, 17, 17); doc.setLineWidth(0.6); doc.line(LEFT, 26, RIGHT, 26);
 
@@ -217,13 +217,14 @@ export async function downloadPxkDayPdf(sum: PxkDaySummary): Promise<void> {
   heading('2. Tổng hợp sản phẩm cần xuất trong ngày', y2);
   var sumShopee = sum.rows.reduce(function(s, r) { return s + r.shopee; }, 0);
   var sumTiktok = sum.rows.reduce(function(s, r) { return s + r.tiktok; }, 0);
+  var sumSapo = sum.rows.reduce(function(s, r) { return s + r.sapo; }, 0);
   var body: RowInput[] = sum.rows.map(function(r, i) {
-    return [i + 1, r.note ? r.name + '\n(' + r.note + ')' : r.name, r.skus || '—', r.shopee || '', r.tiktok || '', r.total, ''];
+    return [i + 1, r.note ? r.name + '\n(' + r.note + ')' : r.name, r.skus || '—', r.shopee || '', r.tiktok || '', r.sapo || '', r.total, ''];
   });
-  body.push([{ content: 'Tổng cộng', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold' } }, { content: String(sumShopee), styles: { halign: 'center', fontStyle: 'bold' } }, { content: String(sumTiktok), styles: { halign: 'center', fontStyle: 'bold' } }, { content: String(sum.totalQty), styles: { halign: 'center', fontStyle: 'bold', fontSize: 10 } }, '']);
+  body.push([{ content: 'Tổng cộng', colSpan: 3, styles: { halign: 'right', fontStyle: 'bold' } }, { content: String(sumShopee), styles: { halign: 'center', fontStyle: 'bold' } }, { content: String(sumTiktok), styles: { halign: 'center', fontStyle: 'bold' } }, { content: String(sumSapo), styles: { halign: 'center', fontStyle: 'bold' } }, { content: String(sum.totalQty), styles: { halign: 'center', fontStyle: 'bold', fontSize: 10 } }, '']);
   table({
-    startY: y2 + 2, head: [['#', 'Tên sản phẩm', 'SKU', 'Shopee', 'TikTok', 'Tổng SL', 'Đã xuất']], body: body,
-    columnStyles: { 0: { cellWidth: 9, halign: 'center' }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 34, fontSize: 7.5 }, 3: { cellWidth: 17, halign: 'center' }, 4: { cellWidth: 17, halign: 'center' }, 5: { cellWidth: 20, halign: 'center', fontStyle: 'bold', fontSize: 10 }, 6: { cellWidth: 18 } },
+    startY: y2 + 2, head: [['#', 'Tên sản phẩm', 'SKU', 'Shopee', 'TikTok', 'Ngoài sàn', 'Tổng SL', 'Đã xuất']], body: body,
+    columnStyles: { 0: { cellWidth: 9, halign: 'center' }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 34, fontSize: 7.5 }, 3: { cellWidth: 17, halign: 'center' }, 4: { cellWidth: 17, halign: 'center' }, 5: { cellWidth: 19, halign: 'center' }, 6: { cellWidth: 20, halign: 'center', fontStyle: 'bold', fontSize: 10 }, 7: { cellWidth: 16 } },
     didParseCell: function(data) {
       if (data.section === 'body' && data.row.index < sum.rows.length && sum.rows[data.row.index].note) data.cell.styles.fillColor = [255, 243, 205];
     },
