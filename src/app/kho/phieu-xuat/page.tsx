@@ -367,10 +367,12 @@ export default function PhieuXuatKhoPage() {
 
   async function createSlips() {
     setError(''); setNotice('');
+    // Ngày in phiếu: nếu nhân sự không tự chọn ngày thì luôn là HÔM NAY lúc lập phiếu (trang mở từ hôm qua không làm kẹt ngày cũ)
+    var pDate = dateTouched.current ? printDate : todayStr();
     var ready = groups.filter(function(g) { return g.resolved.length > 0; });
     if (ready.length === 0) { setError('Chưa có đơn mới nào để lập phiếu.'); return; }
-    var lines = ['LẬP VÀ IN ' + ready.length + ' PHIẾU (ngày ' + fmtDate(printDate) + ')', ''];
-    if (printDate !== todayStr()) lines.push('⚠ Ngày in phiếu đang là ' + fmtDate(printDate) + ', KHÁC hôm nay (' + fmtDate(todayStr()) + '). Nếu lập phiếu cho hôm nay, bấm Hủy rồi đổi lại ngày in phiếu.', '');
+    var lines = ['LẬP VÀ IN ' + ready.length + ' PHIẾU (ngày ' + fmtDate(pDate) + ')', ''];
+    if (pDate !== todayStr()) lines.push('⚠ Ngày in phiếu đang là ' + fmtDate(pDate) + ', KHÁC hôm nay (' + fmtDate(todayStr()) + '). Nếu lập phiếu cho hôm nay, bấm Hủy rồi đổi lại ngày in phiếu.', '');
     lines.push(shopSel ? '🛍 PHIẾU CỦA SHOP NHÂN SỰ (nhân sự tự bán, không thuộc công ty)' : 'Phiếu của shop công ty', '');
     ready.forEach(function(g) {
       var noSku = g.summary.unresolved.reduce(function(s, u) { return s + u.qty; }, 0);
@@ -398,7 +400,7 @@ export default function PhieuXuatKhoPage() {
           return { orderId: r.orderId, items: r.items, note: r.note, fi: fi, pg: src.pages };
         });
         return {
-          id: makeBatchId(), platform: g.platform, printDate: printDate, createdAt: createdAt, createdBy: by, shop: shopSel || undefined,
+          id: makeBatchId(), platform: g.platform, printDate: pDate, createdAt: createdAt, createdBy: by, shop: shopSel || undefined,
           issues: g.bad.map(function(o) { return o.orderId || ('trang ' + o.pages.join('-')); }),
           notes: noteForOld(g).concat(noteForQty(g)),
           orders: stored,

@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useAppState } from '@/lib/store';
 import Sidebar, { MobileBottomNav } from './Sidebar';
 import AiChat from './AiChat';
+import UpdateNotice from './UpdateNotice';
 import { canAccessPath, homeFor } from '@/lib/roles';
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
@@ -37,6 +38,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
         </div>
       </main>
       <MobileBottomNav />
+      <UpdateNotice />
       {currentUser.role !== 'warehouse' && <AiChat />}
     </div>
   );
