@@ -303,11 +303,53 @@ export async function dbGetPxk(): Promise<PxkData> {
   return readPxkStrict();
 }
 
+// ----- Lưu trữ phiếu theo tháng: phiếu vượt quá PXK_MAX_BATCHES gần nhất được chuyển vào file pxk-archive-YYYY-MM.json (theo ngày in), không bị xóa -----
+function pxkArchiveFile(month: string): string { return 'pxk-archive-' + month + '.json'; }
+function pxkMonthOf(b: PxkBatch): string { return (b.printDate || b.createdAt || '').slice(0, 7); }
+
+export async function dbGetPxkArchive(month: string): Promise<PxkBatch[]> {
+  const { data, error } = await downloadFresh(SKU_BUCKET, pxkArchiveFile(month));
+  if (error) {
+    const e = error as { message?: string; statusCode?: string | number };
+    const msg = (e.message || '').toLowerCase();
+    if (msg.includes('not found') || String(e.statusCode) === '404') return [];
+    throw new Error('Đọc lưu trữ phiếu tháng ' + month + ' thất bại: ' + (e.message || 'lỗi không rõ'));
+  }
+  if (!data) return [];
+  const j = JSON.parse(await data.text()) as { batches?: PxkBatch[] };
+  return j.batches || [];
+}
+
+async function pxkArchiveBatches(list: PxkBatch[]): Promise<void> {
+  const byMonth: Record<string, PxkBatch[]> = {};
+  list.forEach(function(b) { (byMonth[pxkMonthOf(b)] = byMonth[pxkMonthOf(b)] || []).push(b); });
+  for (const month of Object.keys(byMonth)) {
+    const existing = await dbGetPxkArchive(month);
+    const ids = new Set(existing.map(function(b) { return b.id; }));
+    const merged = existing.concat(byMonth[month].filter(function(b) { return !ids.has(b.id); }));
+    const blob = new Blob([JSON.stringify({ month: month, batches: merged })], { type: 'application/json' });
+    const { error } = await db().storage.from(SKU_BUCKET).upload(pxkArchiveFile(month), blob, { upsert: true, cacheControl: '0' });
+    if (error) throw new Error('Lưu trữ phiếu tháng ' + month + ' thất bại: ' + error.message);
+  }
+}
+
 // Đọc bản mới nhất -> áp thay đổi -> ghi lại (không ghi đè phiếu/tên SKU của máy khác vừa lưu).
 export async function dbUpdatePxk(apply: (cur: PxkData) => PxkData): Promise<PxkData> {
   const cur = await readPxkStrict();
   const next = apply(cur);
-  next.batches = next.batches.sort((a: PxkBatch, b: PxkBatch) => b.createdAt.localeCompare(a.createdAt)).slice(0, PXK_MAX_BATCHES);
+  const sorted = next.batches.sort((a: PxkBatch, b: PxkBatch) => b.createdAt.localeCompare(a.createdAt));
+  const overflow = sorted.slice(PXK_MAX_BATCHES);
+  if (overflow.length > 0) {
+    try {
+      await pxkArchiveBatches(overflow); // chuyển phiếu cũ vào lưu trữ TRƯỚC khi bỏ khỏi danh sách chính
+      next.batches = sorted.slice(0, PXK_MAX_BATCHES);
+    } catch (e) {
+      console.warn('[PXK] Chưa lưu trữ được phiếu cũ, giữ lại trong danh sách chính:', e);
+      next.batches = sorted; // không để mất phiếu
+    }
+  } else {
+    next.batches = sorted;
+  }
   const blob = new Blob([JSON.stringify(next)], { type: 'application/json' });
   const { error } = await db().storage.from(SKU_BUCKET).upload(PXK_FILE, blob, { upsert: true, cacheControl: '0' });
   if (error) throw new Error('Lưu phiếu xuất kho thất bại: ' + error.message);

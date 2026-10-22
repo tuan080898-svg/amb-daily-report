@@ -177,16 +177,16 @@ export async function downloadPxkPdf(batches: PxkBatch[], opts: { showOrders: bo
 // Phiếu tổng hợp cuối ngày: gộp mọi phiếu trong ngày thành một phiếu tên sản phẩm + tổng số lượng
 export async function downloadPxkDayPdf(sum: PxkDaySummary): Promise<void> {
   if (sum.batches.length === 0) return;
-  var pdf = await openPdf('Phiếu tổng hợp xuất kho ' + fmtDate(sum.date));
+  var pdf = await openPdf('Phiếu tổng hợp xuất kho ' + sum.label);
   var doc = pdf.doc, table = pdf.table, lastY = pdf.lastY, heading = pdf.heading;
   var stamp = fmtTime(new Date().toISOString());
 
   doc.setTextColor(17, 17, 17);
   doc.setFont('DejaVu', 'bold'); doc.setFontSize(14);
-  doc.text('PHIẾU TỔNG HỢP XUẤT KHO — NGÀY ' + fmtDate(sum.date), LEFT, 16);
+  doc.text('PHIẾU TỔNG HỢP XUẤT KHO — ' + sum.label, LEFT, 16);
   if (sum.scope) { doc.setFontSize(10); doc.text(sum.scope.toUpperCase(), LEFT, 21); doc.setFontSize(14); }
   doc.setFont('DejaVu', 'normal'); doc.setFontSize(8.5); doc.setTextColor(68, 68, 68);
-  doc.text('Tổng hợp từ ' + sum.batches.length + ' phiếu xuất kho trong ngày', LEFT, sum.scope ? 25 : 21.5);
+  doc.text('Tổng hợp từ ' + sum.batches.length + ' phiếu xuất kho ' + (sum.isRange ? 'trong kỳ' : 'trong ngày'), LEFT, sum.scope ? 25 : 21.5);
   doc.setTextColor(17, 17, 17);
   doc.text('Lập lúc: ' + stamp, RIGHT, 14, { align: 'right' });
   doc.text('Số đơn: ' + (sum.shopeeOrders + sum.tiktokOrders + sum.sapoOrders) + ' (Shopee ' + sum.shopeeOrders + ' · TikTok ' + sum.tiktokOrders + ' · ngoài sàn ' + sum.sapoOrders + ')', RIGHT, 19, { align: 'right' });
@@ -207,15 +207,25 @@ export async function downloadPxkDayPdf(sum: PxkDaySummary): Promise<void> {
     y += boxH + 3;
   }
 
-  heading('1. Các phiếu trong ngày', y);
-  table({
-    startY: y + 2, head: [['#', 'Mã phiếu', 'Sàn', 'Giờ lập', 'Người lập', 'Số đơn', 'SL']],
-    body: sum.batches.map(function(b, i) { return [i + 1, b.id, PXK_PLATFORM_LABELS[b.platform] + (b.shop ? '\nShop nhân sự' : ''), fmtTime(b.createdAt), b.createdBy, b.orders.length, pxkBatchQty(b)]; }),
-    columnStyles: { 0: { cellWidth: 9, halign: 'center' }, 1: { cellWidth: 44, fontSize: 8 }, 2: { cellWidth: 24 }, 3: { cellWidth: 20, halign: 'center' }, 4: { cellWidth: 'auto' }, 5: { cellWidth: 18, halign: 'center' }, 6: { cellWidth: 18, halign: 'center' } },
-  });
+  if (sum.isRange) {
+    heading('1. Theo từng ngày', y);
+    var dayBody: RowInput[] = sum.byDay.map(function(d, i) { return [i + 1, fmtDate(d.date), d.batches, d.orders, d.qty]; });
+    dayBody.push([{ content: 'Tổng cộng', colSpan: 2, styles: { halign: 'right', fontStyle: 'bold' } }, { content: String(sum.batches.length), styles: { halign: 'center', fontStyle: 'bold' } }, { content: String(sum.shopeeOrders + sum.tiktokOrders + sum.sapoOrders), styles: { halign: 'center', fontStyle: 'bold' } }, { content: String(sum.byDay.reduce(function(s, d) { return s + d.qty; }, 0)), styles: { halign: 'center', fontStyle: 'bold' } }]);
+    table({
+      startY: y + 2, head: [['#', 'Ngày', 'Số phiếu', 'Số đơn', 'SL']], body: dayBody,
+      columnStyles: { 0: { cellWidth: 9, halign: 'center' }, 1: { cellWidth: 'auto', halign: 'center' }, 2: { cellWidth: 24, halign: 'center' }, 3: { cellWidth: 24, halign: 'center' }, 4: { cellWidth: 24, halign: 'center' } },
+    });
+  } else {
+    heading('1. Các phiếu trong ngày', y);
+    table({
+      startY: y + 2, head: [['#', 'Mã phiếu', 'Sàn', 'Giờ lập', 'Người lập', 'Số đơn', 'SL']],
+      body: sum.batches.map(function(b, i) { return [i + 1, b.id, PXK_PLATFORM_LABELS[b.platform] + (b.shop ? '\nShop nhân sự' : ''), fmtTime(b.createdAt), b.createdBy, b.orders.length, pxkBatchQty(b)]; }),
+      columnStyles: { 0: { cellWidth: 9, halign: 'center' }, 1: { cellWidth: 44, fontSize: 8 }, 2: { cellWidth: 24 }, 3: { cellWidth: 20, halign: 'center' }, 4: { cellWidth: 'auto' }, 5: { cellWidth: 18, halign: 'center' }, 6: { cellWidth: 18, halign: 'center' } },
+    });
+  }
 
   var y2 = lastY() + 8; if (y2 > MAXY - 25) { doc.addPage(); y2 = 18; }
-  heading('2. Tổng hợp sản phẩm cần xuất trong ngày', y2);
+  heading('2. Tổng hợp sản phẩm cần xuất ' + (sum.isRange ? 'trong kỳ' : 'trong ngày'), y2);
   var sumShopee = sum.rows.reduce(function(s, r) { return s + r.shopee; }, 0);
   var sumTiktok = sum.rows.reduce(function(s, r) { return s + r.tiktok; }, 0);
   var sumSapo = sum.rows.reduce(function(s, r) { return s + r.sapo; }, 0);
@@ -232,5 +242,5 @@ export async function downloadPxkDayPdf(sum: PxkDaySummary): Promise<void> {
   });
 
   pdf.signatures(lastY() + 14);
-  pdf.finish('Phieu-tong-hop-' + sum.date + (sum.scope ? '-' + sum.scope.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '') : '') + '.pdf');
+  pdf.finish('Phieu-tong-hop-' + sum.fileKey + (sum.scope ? '-' + sum.scope.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-|-$/g, '') : '') + '.pdf');
 }

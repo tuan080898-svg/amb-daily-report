@@ -794,8 +794,15 @@ var PXK_CSS = '@page{size:A4;margin:12mm 10mm 14mm;@bottom-right{content:"Trang 
 
 export interface PxkDayRow { name: string; skus: string; shopee: number; tiktok: number; sapo: number; total: number; note: string }
 
+export interface PxkDayTotal { date: string; batches: number; orders: number; qty: number }
+
 export interface PxkDaySummary {
   date: string;
+  dateTo: string; // bằng date khi là một ngày
+  label: string; // "NGÀY 21/10/2026" hoặc "THÁNG 10/2026" hoặc "TỪ ... ĐẾN ..."
+  fileKey: string; // dùng đặt tên file PDF
+  isRange: boolean;
+  byDay: PxkDayTotal[]; // theo từng ngày (đơn tính một lần, ở ngày có phiếu đầu tiên chứa đơn đó)
   scope: string; // nhãn phạm vi (rỗng = tất cả các shop)
   batches: PxkBatch[]; // các phiếu trong ngày, theo giờ lập tăng dần
   rows: PxkDayRow[];
@@ -811,16 +818,24 @@ export function pxkBatchQty(b: PxkBatch): number {
   return b.orders.reduce(function(s, o) { return s + o.items.reduce(function(a, x) { return a + x.qty; }, 0); }, 0);
 }
 
-export function summarizeDay(date: string, all: PxkBatch[], scope?: string): PxkDaySummary {
-  var batches = all.filter(function(b) { return b.printDate === date && pxkScopeMatch(b, scope || ''); }).sort(function(a, b) { return a.createdAt.localeCompare(b.createdAt); });
+// Tổng hợp mọi phiếu có ngày in trong [from, to] (YYYY-MM-DD): một ngày, một tháng hay khoảng bất kỳ.
+// Đơn xuất hiện ở nhiều phiếu (in lại) chỉ tính một lần.
+export function summarizeRange(from: string, to: string, all: PxkBatch[], scope?: string, label?: string): PxkDaySummary {
+  var batches = all.filter(function(b) { return b.printDate >= from && b.printDate <= to && pxkScopeMatch(b, scope || ''); })
+    .sort(function(a, b) { return a.printDate.localeCompare(b.printDate) || a.createdAt.localeCompare(b.createdAt); });
   var seen: Record<PxkPlatform, Set<string>> = { shopee: new Set<string>(), tiktok: new Set<string>(), sapo: new Set<string>() };
   var orders: Record<PxkPlatform, Array<{ orderId: string; items: PxkItem[] }>> = { shopee: [], tiktok: [], sapo: [] };
+  var dayMap: Record<string, PxkDayTotal> = {};
   var dup = 0;
   batches.forEach(function(b) {
+    var d = dayMap[b.printDate] || (dayMap[b.printDate] = { date: b.printDate, batches: 0, orders: 0, qty: 0 });
+    d.batches += 1;
     b.orders.forEach(function(o) {
       if (seen[b.platform].has(o.orderId)) { dup += 1; return; }
       seen[b.platform].add(o.orderId);
       orders[b.platform].push(o);
+      d.orders += 1;
+      d.qty += o.items.reduce(function(a, x) { return a + x.qty; }, 0);
     });
   });
   var rows: Record<string, PxkDayRow> = {};
@@ -842,35 +857,52 @@ export function summarizeDay(date: string, all: PxkBatch[], scope?: string): Pxk
     var ra = a.note ? 1 : 0; var rb = b.note ? 1 : 0;
     return ra - rb || a.name.localeCompare(b.name, 'vi');
   });
+  var range = from !== to;
+  var span = range ? 'trong kỳ' : 'trong ngày';
   var warnings: string[] = [];
-  if (dup > 0) warnings.push(dup + ' đơn xuất hiện ở nhiều phiếu trong ngày (in lại) — chỉ tính một lần.');
+  if (dup > 0) warnings.push(dup + ' đơn xuất hiện ở nhiều phiếu ' + span + ' (in lại) — chỉ tính một lần.');
   if (unmapped > 0) warnings.push(unmapped + ' mã SKU chưa có trong bảng quy đổi (dòng nền vàng) nên chưa quy ra được sản phẩm gốc.');
   if (noSku > 0) warnings.push(noSku + ' sản phẩm chưa có SKU (dòng nền vàng), tính theo tên trên nhãn.');
   var badBatches = batches.filter(function(b) { return b.issues && b.issues.length > 0; });
-  if (badBatches.length > 0) warnings.push('Phiếu ' + badBatches.map(function(b) { return b.id; }).join(', ') + ' có nhãn đọc chưa chắc chắn, số liệu có thể lệch.');
+  if (badBatches.length > 0) warnings.push((badBatches.length > 6 ? badBatches.length + ' phiếu' : 'Phiếu ' + badBatches.map(function(b) { return b.id; }).join(', ')) + ' có nhãn đọc chưa chắc chắn, số liệu có thể lệch.');
+  var monthFull = range && from.slice(0, 7) === to.slice(0, 7) && from.slice(8) === '01';
   return {
-    date: date, scope: pxkScopeLabel(scope || ''), batches: batches, rows: list,
+    date: from, dateTo: to, isRange: range,
+    label: label || (range ? 'TỪ ' + fmtDate(from) + ' ĐẾN ' + fmtDate(to) : 'NGÀY ' + fmtDate(from)),
+    fileKey: range ? (monthFull ? 'thang-' + from.slice(0, 7) : from + '_' + to) : from,
+    byDay: Object.keys(dayMap).sort().map(function(k) { return dayMap[k]; }),
+    scope: pxkScopeLabel(scope || ''), batches: batches, rows: list,
     shopeeOrders: orders.shopee.length, tiktokOrders: orders.tiktok.length, sapoOrders: orders.sapo.length, dupOrders: dup,
     totalQty: list.reduce(function(s, r) { return s + r.total; }, 0), warnings: warnings,
   };
 }
 
+export function summarizeDay(date: string, all: PxkBatch[], scope?: string): PxkDaySummary {
+  return summarizeRange(date, date, all, scope);
+}
+
 export function buildPxkDayHtml(sum: PxkDaySummary, now: Date): string {
   var stamp = fmtTime(now.toISOString());
-  var head = '<div class="head"><div><h1>PHIẾU TỔNG HỢP XUẤT KHO — NGÀY ' + esc(fmtDate(sum.date)) + (sum.scope ? ' — ' + esc(sum.scope.toUpperCase()) : '') + '</h1><div class="sub">Tổng hợp từ ' + sum.batches.length + ' phiếu xuất kho trong ngày</div></div>' +
+  var head = '<div class="head"><div><h1>PHIẾU TỔNG HỢP XUẤT KHO — ' + esc(sum.label) + (sum.scope ? ' — ' + esc(sum.scope.toUpperCase()) : '') + '</h1><div class="sub">Tổng hợp từ ' + sum.batches.length + ' phiếu xuất kho ' + (sum.isRange ? 'trong kỳ' : 'trong ngày') + '</div></div>' +
     '<div class="meta">Lập lúc: <b>' + esc(stamp) + '</b><br>Số đơn: <b>' + (sum.shopeeOrders + sum.tiktokOrders + sum.sapoOrders) + '</b> (Shopee ' + sum.shopeeOrders + ' · TikTok ' + sum.tiktokOrders + ' · ngoài sàn ' + sum.sapoOrders + ')<br>Tổng SL: <b>' + sum.totalQty + '</b></div></div>';
   var warn = sum.warnings.length > 0 ? '<div class="alert">⚠ ' + sum.warnings.map(esc).join('<br>⚠ ') + '</div>' : '';
   var batchRows = sum.batches.map(function(b, i) {
     return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(b.id) + '</td><td>' + esc(PXK_PLATFORM_LABELS[b.platform]) + (b.shop ? '<br><span style="font-size:10px;color:#555">Shop nhân sự</span>' : '') + '</td><td class="c">' + esc(fmtTime(b.createdAt)) + '</td><td>' + esc(b.createdBy) + '</td><td class="c">' + b.orders.length + '</td><td class="c">' + pxkBatchQty(b) + '</td></tr>';
   }).join('');
-  var t1 = '<h2>1. Các phiếu trong ngày</h2><table><thead><tr><th style="width:28px">#</th><th>Mã phiếu</th><th style="width:70px">Sàn</th><th style="width:56px">Giờ lập</th><th>Người lập</th><th style="width:50px">Số đơn</th><th style="width:50px">SL</th></tr></thead><tbody>' + batchRows + '</tbody></table>';
+  var dayRows = sum.byDay.map(function(d, i) {
+    return '<tr><td class="c">' + (i + 1) + '</td><td class="c">' + esc(fmtDate(d.date)) + '</td><td class="c">' + d.batches + '</td><td class="c">' + d.orders + '</td><td class="c">' + d.qty + '</td></tr>';
+  }).join('');
+  var t1 = sum.isRange
+    ? '<h2>1. Theo từng ngày</h2><table><thead><tr><th style="width:28px">#</th><th>Ngày</th><th style="width:70px">Số phiếu</th><th style="width:70px">Số đơn</th><th style="width:70px">SL</th></tr></thead><tbody>' + dayRows +
+      '<tr class="total"><td colspan="2" class="r">Tổng cộng</td><td class="c"><b>' + sum.batches.length + '</b></td><td class="c"><b>' + (sum.shopeeOrders + sum.tiktokOrders + sum.sapoOrders) + '</b></td><td class="c"><b>' + sum.byDay.reduce(function(s, d) { return s + d.qty; }, 0) + '</b></td></tr></tbody></table>'
+    : '<h2>1. Các phiếu trong ngày</h2><table><thead><tr><th style="width:28px">#</th><th>Mã phiếu</th><th style="width:70px">Sàn</th><th style="width:56px">Giờ lập</th><th>Người lập</th><th style="width:50px">Số đơn</th><th style="width:50px">SL</th></tr></thead><tbody>' + batchRows + '</tbody></table>';
   var prodRows = sum.rows.map(function(r, i) {
     return '<tr' + (r.note ? ' class="warn"' : '') + '><td class="c">' + (i + 1) + '</td><td>' + esc(r.name) + (r.note ? '<br><span style="font-size:10px;color:#a60">' + esc(r.note) + '</span>' : '') + '</td><td class="mono">' + esc(r.skus || '—') + '</td><td class="c">' + (r.shopee || '') + '</td><td class="c">' + (r.tiktok || '') + '</td><td class="c">' + (r.sapo || '') + '</td><td class="c big">' + r.total + '</td><td class="chk"></td></tr>';
   }).join('');
-  var t2 = '<h2>2. Tổng hợp sản phẩm cần xuất trong ngày</h2><table><thead><tr><th style="width:28px">#</th><th>Tên sản phẩm</th><th style="width:100px">SKU</th><th style="width:50px">Shopee</th><th style="width:50px">TikTok</th><th style="width:56px">Ngoài sàn</th><th style="width:60px">Tổng SL</th><th style="width:50px">Đã xuất</th></tr></thead><tbody>' + prodRows +
+  var t2 = '<h2>2. Tổng hợp sản phẩm cần xuất ' + (sum.isRange ? 'trong kỳ' : 'trong ngày') + '</h2><table><thead><tr><th style="width:28px">#</th><th>Tên sản phẩm</th><th style="width:100px">SKU</th><th style="width:50px">Shopee</th><th style="width:50px">TikTok</th><th style="width:56px">Ngoài sàn</th><th style="width:60px">Tổng SL</th><th style="width:50px">Đã xuất</th></tr></thead><tbody>' + prodRows +
     '<tr class="total"><td colspan="3" class="r">Tổng cộng</td><td class="c"><b>' + sum.rows.reduce(function(s, r) { return s + r.shopee; }, 0) + '</b></td><td class="c"><b>' + sum.rows.reduce(function(s, r) { return s + r.tiktok; }, 0) + '</b></td><td class="c"><b>' + sum.rows.reduce(function(s, r) { return s + r.sapo; }, 0) + '</b></td><td class="c big">' + sum.totalQty + '</td><td></td></tr></tbody></table>';
   var sign = '<div class="sign"><div>Người lập phiếu<br><span>(ký, ghi rõ họ tên)</span></div><div>Người nhặt hàng<br><span>(ký, ghi rõ họ tên)</span></div><div>Người kiểm hàng<br><span>(ký, ghi rõ họ tên)</span></div></div>';
-  return '<!doctype html><html><head><meta charset="utf-8"><title>Phieu tong hop ' + esc(sum.date) + '</title><style>' + PXK_CSS + '</style></head><body><section class="slip">' + head + warn + t1 + t2 + sign + '</section></body></html>';
+  return '<!doctype html><html><head><meta charset="utf-8"><title>Phieu tong hop ' + esc(sum.fileKey) + '</title><style>' + PXK_CSS + '</style></head><body><section class="slip">' + head + warn + t1 + t2 + sign + '</section></body></html>';
 }
 
 // Ghép nhiều phiếu (mỗi sàn/kho một phiếu) vào một lần in; mỗi phiếu bắt đầu ở trang mới.

@@ -3,11 +3,11 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useAppState } from '@/lib/store';
 import { getAllSkuCodes, getSkuProducts, subscribeSkuMap } from '@/lib/sku';
-import { dbGetPxk, dbUpdatePxk } from '@/lib/db';
+import { dbGetPxk, dbUpdatePxk, dbGetPxkArchive } from '@/lib/db';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
 import {
-  parsePxkFileAuto, summarizePxk, repackOrders, pxkScopeMatch, PXK_SCOPE_COMPANY, PXK_SCOPE_STAFF, PXK_STAFF_SHOP, buildGiftCatalog, expandGiftNote, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
+  parsePxkFileAuto, summarizePxk, summarizeRange, repackOrders, pxkScopeMatch, PXK_SCOPE_COMPANY, PXK_SCOPE_STAFF, PXK_STAFF_SHOP, buildGiftCatalog, expandGiftNote, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
   type PxkPlatform, type PxkOrder, type PxkBatch, type PxkStoredOrder, type PxkData, type PxkItem,
 } from '@/lib/pxk';
 import { downloadPxkPdf, downloadPxkDayPdf } from '@/lib/pxk-pdf';
@@ -70,6 +70,9 @@ export default function PhieuXuatKhoPage() {
   const [shopSel, setShopSel] = useState(''); // loại phiếu sắp lập: '' = shop công ty, PXK_STAFF_SHOP = shop nhân sự (tự bán, không thuộc công ty)
   const [dayShop, setDayShop] = useState(PXK_SCOPE_COMPANY); // phạm vi phiếu tổng hợp cuối ngày (mặc định: chỉ shop công ty)
   const [histShop, setHistShop] = useState(''); // lọc lịch sử phiếu theo shop
+  const [sumMode, setSumMode] = useState<'day' | 'month'>('day'); // phiếu tổng hợp theo ngày hay theo tháng
+  const [sumMonth, setSumMonth] = useState(todayStr().slice(0, 7));
+  const [archive, setArchive] = useState<{ month: string; batches: PxkBatch[]; error: string }>({ month: '', batches: [], error: '' }); // phiếu đã chuyển vào lưu trữ của tháng đang xem
   const [orderQuery, setOrderQuery] = useState(''); // tìm đơn trong các phiếu đã lập
   const [data, setData] = useState<PxkData>({ names: {}, batches: [] });
   const [dataErr, setDataErr] = useState('');
@@ -97,6 +100,18 @@ export default function PhieuXuatKhoPage() {
     syncToday();
     return function() { document.removeEventListener('visibilitychange', syncToday); window.removeEventListener('focus', syncToday); };
   }, []);
+
+  // Xem tổng hợp theo tháng: đọc thêm phiếu đã chuyển vào lưu trữ của tháng đó
+  useEffect(function() {
+    if (sumMode !== 'month') return;
+    var alive = true;
+    dbGetPxkArchive(sumMonth).then(function(list) {
+      if (alive) setArchive({ month: sumMonth, batches: list, error: '' });
+    }).catch(function(e) {
+      if (alive) setArchive({ month: sumMonth, batches: [], error: e instanceof Error ? e.message : String(e) });
+    });
+    return function() { alive = false; };
+  }, [sumMode, sumMonth]);
 
   useEffect(function() {
     dbGetPxk().then(setData).catch(function(e) { setDataErr(e instanceof Error ? e.message : String(e)); });
@@ -206,7 +221,16 @@ export default function PhieuXuatKhoPage() {
 
   const packList = useMemo(function() { return packProductList(data.packProducts); }, [data.packProducts, skuVer]);
 
-  const daySum = useMemo(function() { return summarizeDay(dayDate, data.batches, dayShop); }, [dayDate, data.batches, dayShop]);
+  const daySum = useMemo(function() {
+    if (sumMode === 'month' && /^\d{4}-\d{2}$/.test(sumMonth)) {
+      var lastDay = new Date(Number(sumMonth.slice(0, 4)), Number(sumMonth.slice(5, 7)), 0).getDate();
+      var ids = new Set(data.batches.map(function(b) { return b.id; }));
+      var extra = archive.month === sumMonth ? archive.batches.filter(function(b) { return !ids.has(b.id); }) : [];
+      return summarizeRange(sumMonth + '-01', sumMonth + '-' + String(lastDay).padStart(2, '0'), data.batches.concat(extra), dayShop, 'THÁNG ' + sumMonth.slice(5, 7) + '/' + sumMonth.slice(0, 4));
+    }
+    return summarizeDay(dayDate, data.batches, dayShop);
+  }, [sumMode, sumMonth, archive, dayDate, data.batches, dayShop]);
+  const archiveLoading = sumMode === 'month' && archive.month !== sumMonth;
 
   // Tìm đơn: 1 mã -> khớp một phần; nhiều mã (dán danh sách) -> khớp đúng từng mã
   const orderSearch = useMemo(function() {
@@ -773,11 +797,22 @@ export default function PhieuXuatKhoPage() {
       )}
 
       <div className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden mb-6">
-        <div className="px-4 py-3 border-b border-slate-700 text-sm font-semibold text-gray-200">Phiếu tổng hợp cuối ngày</div>
+        <div className="px-4 py-3 border-b border-slate-700 text-sm font-semibold text-gray-200">Phiếu tổng hợp cuối ngày / cuối tháng</div>
         <div className="px-4 py-3 flex flex-wrap items-center gap-3">
-          <label className="text-sm text-gray-400">Ngày
-            <input type="date" value={dayDate} onChange={function(e) { dayTouched.current = true; setDayDate(e.target.value); }} className={inputCls + ' ml-2'} />
+          <label className="text-sm text-gray-400">Xem theo
+            <select value={sumMode} onChange={function(e) { setSumMode(e.target.value as 'day' | 'month'); }} className={inputCls + ' ml-2'}>
+              <option value="day">Ngày</option><option value="month">Tháng</option>
+            </select>
           </label>
+          {sumMode === 'day' ? (
+            <label className="text-sm text-gray-400">Ngày
+              <input type="date" value={dayDate} onChange={function(e) { dayTouched.current = true; setDayDate(e.target.value); }} className={inputCls + ' ml-2'} />
+            </label>
+          ) : (
+            <label className="text-sm text-gray-400">Tháng
+              <input type="month" value={sumMonth} onChange={function(e) { if (e.target.value) setSumMonth(e.target.value); }} className={inputCls + ' ml-2'} />
+            </label>
+          )}
           <label className="text-sm text-gray-400">Phạm vi
             <select value={dayShop} onChange={function(e) { setDayShop(e.target.value); }} className={inputCls + ' ml-2'}>
               <option value={PXK_SCOPE_COMPANY}>Shop công ty</option>
@@ -786,7 +821,7 @@ export default function PhieuXuatKhoPage() {
             </select>
           </label>
           {daySum.batches.length === 0 ? (
-            <span className="text-sm text-gray-500">Chưa có phiếu nào được lập trong ngày {fmtDate(dayDate)}{daySum.scope ? ' (' + daySum.scope + ')' : ''}.</span>
+            <span className="text-sm text-gray-500">{archiveLoading ? 'Đang đọc phiếu đã lưu trữ của tháng...' : 'Chưa có phiếu nào được lập trong ' + (sumMode === 'month' ? 'tháng ' + sumMonth.slice(5, 7) + '/' + sumMonth.slice(0, 4) : 'ngày ' + fmtDate(dayDate)) + (daySum.scope ? ' (' + daySum.scope + ')' : '') + '.'}</span>
           ) : (
             <>
               <span className="text-sm text-gray-300">
@@ -802,7 +837,11 @@ export default function PhieuXuatKhoPage() {
             <summary className="px-4 py-2 text-sm text-gray-400 cursor-pointer">Xem trước: các phiếu và tổng sản phẩm trong ngày</summary>
             <div className="px-4 pb-3 space-y-3">
               {daySum.warnings.length > 0 && <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">{daySum.warnings.map(function(w) { return <div key={w}>⚠ {w}</div>; })}</div>}
-              <div className="text-xs text-gray-400">{daySum.batches.map(function(b) { return b.id + ' (' + PXK_PLATFORM_LABELS[b.platform] + (b.shop ? ' · Shop nhân sự' : '') + ', ' + fmtTime(b.createdAt) + ', ' + b.orders.length + ' đơn, ' + pxkBatchQty(b) + ' SP)'; }).join(' · ')}</div>
+              {sumMode === 'month' && archive.error && <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-300">{archive.error} — số liệu tháng có thể thiếu các phiếu đã lưu trữ.</div>}
+              {daySum.isRange && daySum.byDay.length > 0 && (
+                <div className="text-xs text-gray-400">Theo ngày: {daySum.byDay.map(function(d) { return fmtDate(d.date).slice(0, 5) + ' (' + d.orders + ' đơn, ' + d.qty + ' SP)'; }).join(' · ')}</div>
+              )}
+              <div className="text-xs text-gray-400">{daySum.batches.slice(0, 40).map(function(b) { return b.id + ' (' + PXK_PLATFORM_LABELS[b.platform] + (b.shop ? ' · Shop nhân sự' : '') + ', ' + fmtTime(b.createdAt) + ', ' + b.orders.length + ' đơn, ' + pxkBatchQty(b) + ' SP)'; }).join(' · ')}{daySum.batches.length > 40 ? ' · ... (' + daySum.batches.length + ' phiếu)' : ''}</div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead><tr className="text-xs text-gray-400 border-b border-slate-700">
