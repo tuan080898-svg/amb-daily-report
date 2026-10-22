@@ -173,6 +173,14 @@ function parseShopeePages(pages: RawItem[][], fileName: string): PxkOrder[] {
     var lines = toLines(items);
     var iStart = lines.findIndex(function(t) { return /^Nội dung hàng/.test(t); });
     var orderId = (lines.find(function(t) { return /^Mã đơn hàng/.test(t); }) || '').replace(/^Mã đơn hàng:?\s*/, '').trim();
+    // Nhãn HỎA TỐC: chữ "Hỏa Tốc" nằm cùng dòng nên dòng không còn bắt đầu bằng "Mã đơn hàng": tìm mã ngay sau chữ "Mã đơn hàng:" ở bất kỳ đâu trong dòng
+    if (!orderId) {
+      lines.some(function(t) {
+        var m = t.match(/Mã đơn hàng:?\s*([A-Z0-9]{8,})/);
+        if (m) { orderId = m[1]; return true; }
+        return false;
+      });
+    }
     // Có nhãn bị mất chữ "Mã đơn hàng:", mã đơn nằm trơ một dòng (vd 261016R6C55S0S): nhận theo dạng mã Shopee (6 chữ số ngày + 6-10 ký tự)
     if (!orderId) {
       var bare = lines.find(function(t) { return /^\d{6}[A-Z0-9]{6,10}$/.test(t.trim()); });
@@ -186,7 +194,8 @@ function parseShopeePages(pages: RawItem[][], fileName: string): PxkOrder[] {
     var chunks: string[] = [];
     for (var k = iStart + 1; k < lines.length; k++) {
       var t = lines[k];
-      if (/^(HN|HCM|SG)-\d|^Ngày đặt hàng|^[A-Z]{2,}-[A-Z0-9]+-?$/.test(t) && chunks.length) break;
+      // Hết phần hàng khi gặp mã phân tuyến / ngày đặt hàng, hoặc (nhãn hỏa tốc) phần chân nhãn: "Kiểm tra tên sản phẩm...", "Tiền thu...", "Chỉ dẫn giao hàng..."
+      if (/^(HN|HCM|SG)-\d|^Ngày đặt hàng|^[A-Z]{2,}-[A-Z0-9]+-?$|^Kiểm tra tên|^Tiền thu|^Khối lượng|^Chữ ký|^Xác nhận hàng|^Chỉ dẫn giao hàng/.test(t) && chunks.length) break;
       if (/^\d+\.\s/.test(t)) chunks.push(t.replace(/^\d+\.\s/, ''));
       else if (chunks.length) chunks[chunks.length - 1] += t;
     }
