@@ -7,7 +7,7 @@ import { dbGetPxk, dbUpdatePxk, dbGetPxkArchive } from '@/lib/db';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
 import {
-  parsePxkFileAuto, summarizePxk, summarizeRange, repackOrders, pxkScopeMatch, PXK_SCOPE_COMPANY, PXK_SCOPE_STAFF, PXK_STAFF_SHOP, buildGiftCatalog, expandGiftNote, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
+  parsePxkFileAuto, summarizePxk, summarizeRange, pxkPartsText, repackOrders, pxkScopeMatch, PXK_SCOPE_COMPANY, PXK_SCOPE_STAFF, PXK_STAFF_SHOP, buildGiftCatalog, expandGiftNote, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
   type PxkPlatform, type PxkOrder, type PxkBatch, type PxkStoredOrder, type PxkData, type PxkItem,
 } from '@/lib/pxk';
 import { downloadPxkPdf, downloadPxkDayPdf } from '@/lib/pxk-pdf';
@@ -750,7 +750,7 @@ export default function PhieuXuatKhoPage() {
                           <tr key={l.sku} className="border-b border-slate-800">
                             <td className="px-4 py-2 text-gray-500">{i + 1}</td>
                             <td className="px-4 py-2 font-mono text-gray-200">{l.sku}</td>
-                            <td className={'px-4 py-2 ' + (l.mapped ? 'text-gray-300' : 'text-amber-300')}>{l.name || '—'}{!l.mapped && ' (chưa có trong bảng quy đổi)'}{l.pack && <span className="ml-2 px-1.5 py-0.5 rounded text-xs bg-emerald-500/15 text-emerald-300">gói sẵn</span>}</td>
+                            <td className={'px-4 py-2 ' + (l.mapped ? 'text-gray-300' : 'text-amber-300')}>{l.name || '—'}{!l.mapped && ' (chưa có trong bảng quy đổi)'}{l.pack && <span className="ml-2 px-1.5 py-0.5 rounded text-xs bg-emerald-500/15 text-emerald-300">gói sẵn</span>}{l.parts && <div className="text-xs text-sky-300 mt-0.5">Bộ — mỗi bộ gồm: {pxkPartsText(l.parts)}</div>}</td>
                             <td className="px-4 py-2 text-right text-gray-400">{l.orders}</td>
                             <td className="px-4 py-2 text-right font-bold text-gray-100">{l.qty}</td>
                           </tr>

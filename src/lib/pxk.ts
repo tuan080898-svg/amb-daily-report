@@ -533,9 +533,15 @@ export function repackOrders<T extends { orderId: string; items: PxkItem[] }>(or
   });
 }
 
+// Một thành phần của bộ (combo gồm NHIỀU loại sản phẩm khác nhau, vd bộ vệ sinh Sofa = lẻ chai + bàn chải + khăn)
+export interface PxkSkuPart { product: string; skus: string; qty: number }
+
+export interface PxkSetLine { sku: string; name: string; count: number; parts: PxkSkuPart[] }
+
 export interface PxkSkuLine {
   sku: string;
   name: string;
+  parts?: PxkSkuPart[]; // có khi SKU là bộ gồm từ 2 loại sản phẩm trở lên
   pack?: boolean; // có dòng đổi sang gói sẵn
   qty: number;
   orders: number;
@@ -577,6 +583,7 @@ export interface PxkSummary {
   unresolved: PxkUnresolvedLine[]; // Shopee: chưa có SKU
   unmappedSkus: string[];
   productLines: PxkProductLine[]; // quy ra sản phẩm gốc (để kho nhặt)
+  sets: PxkSetLine[]; // các bộ cần lắp ghép (SKU gồm nhiều loại sản phẩm) kèm số bộ và linh kiện
   hasCombo: boolean;
   totalQty: number;
   orderCount: number;
@@ -635,6 +642,32 @@ function describeSku(items: Array<{ product: string; quantity: number }>): strin
   return order.map(function(n) { return (qty[n] > 1 ? qty[n] + '× ' : '') + n; }).join(' + ');
 }
 
+// Thành phần của một SKU nếu nó là bộ gồm từ 2 loại sản phẩm khác nhau trở lên; ngược lại null.
+// SKU thành phần = các mã lẻ (1 sản phẩm, SL 1) của sản phẩm đó trong bảng quy đổi.
+function comboParts(items: Array<{ product: string; quantity: number }>, baseSkus: Record<string, string[]>): PxkSkuPart[] | null {
+  var qty: Record<string, number> = {};
+  var order: string[] = [];
+  items.forEach(function(p) {
+    if (!(p.product in qty)) { qty[p.product] = 0; order.push(p.product); }
+    qty[p.product] += p.quantity;
+  });
+  if (order.length < 2) return null;
+  return order.map(function(p) {
+    var codes = (baseSkus[p] || []).slice().sort(function(a, b) { return (/^GH/i.test(a) ? 0 : 1) - (/^GH/i.test(b) ? 0 : 1); });
+    return { product: p, skus: codes.slice(0, 3).join(' / '), qty: qty[p] };
+  });
+}
+
+export function pxkSkuParts(sku: string): PxkSkuPart[] | null {
+  var items = getSkuProducts(sku);
+  return items.length > 1 ? comboParts(items, baseSkusByProduct()) : null;
+}
+
+// "GH043 Lẻ chai vệ sinh Sofa + GH039-1 Bàn chải da + GH046 Khăn lông cừu" (kèm số lượng nếu > 1)
+export function pxkPartsText(parts: PxkSkuPart[], sep?: string): string {
+  return parts.map(function(p) { return (p.qty > 1 ? p.qty + '× ' : '') + (p.skus ? p.skus + ' ' : '') + p.product; }).join(sep || ' + ');
+}
+
 export function summarizePxk(orders: Array<{ orderId: string; items: PxkItem[] }>): PxkSummary {
   var bySku: Record<string, PxkSkuLine> = {};
   var unresolvedMap: Record<string, PxkUnresolvedLine> = {};
@@ -666,6 +699,7 @@ export function summarizePxk(orders: Array<{ orderId: string; items: PxkItem[] }
         qty: 0,
         orders: 0,
         mapped: items.length > 0,
+        parts: items.length > 1 ? (comboParts(items, baseSkus) || undefined) : undefined,
         variation: it.name ? splitShopeeName(it.name).variation : '',
         orderIds: [],
       });
@@ -682,6 +716,8 @@ export function summarizePxk(orders: Array<{ orderId: string; items: PxkItem[] }
     unresolved: Object.values(unresolvedMap).sort(function(a, b) { return b.qty - a.qty; }),
     unmappedSkus: Array.from(unmapped).sort(),
     productLines: Object.entries(prodMap).map(function(e) { return { product: e[0], skus: (baseSkus[e[0]] || []).join(' / '), qty: e[1] }; }).sort(function(a, b) { return a.product.localeCompare(b.product, 'vi'); }),
+    sets: Object.values(bySku).filter(function(l) { return !!l.parts; }).sort(function(a, b) { return a.sku.localeCompare(b.sku, undefined, { numeric: true }); })
+      .map(function(l) { return { sku: l.sku, name: l.name, count: l.qty, parts: l.parts as PxkSkuPart[] }; }),
     hasCombo: hasCombo,
     totalQty: totalQty,
     orderCount: orders.length,
@@ -734,17 +770,18 @@ function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
     '<div class="meta">Ngày in phiếu: <b>' + esc(fmtDateTime(batch)) + '</b><br>Số đơn: <b>' + sum.orderCount + '</b> · Tổng SL: <b>' + sum.totalQty + '</b></div></div>';
 
   var shopee = batch.platform === 'shopee';
+  var partsHtml = function(l: PxkSkuLine) { return l.parts ? '<div class="parts"><b>BỘ — mỗi bộ gồm:</b> ' + esc(pxkPartsText(l.parts)) + '</div>' : ''; };
   var snCell = function(ids: string[]) { return '<td class="sn">' + ids.map(esc).join('<br>') + '</td>'; };
   var warn = '';
   var warnLines = slipWarnings(batch, sum);
   if (warnLines.length > 0) warn = '<div class="alert">⚠ ' + warnLines.map(esc).join('<br>⚠ ') + '</div>';
   var skuRows = shopee ? sum.skuLines.map(function(l, i) {
-    return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(l.sku) + '</td><td>' + esc(shorten(l.name || '—')) + (l.pack ? ' <b>— GÓI SẴN</b>' : '') + '</td><td>' + esc(l.variation) + '</td><td class="c big">' + l.qty + '</td>' + snCell(l.orderIds) + '</tr>';
+    return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(l.sku) + '</td><td>' + esc(shorten(l.name || '—')) + (l.pack ? ' <b>— GÓI SẴN</b>' : '') + partsHtml(l) + '</td><td>' + esc(l.variation) + '</td><td class="c big">' + l.qty + '</td>' + snCell(l.orderIds) + '</tr>';
   }).concat(sum.unresolved.map(function(u, i) {
     var sp = splitShopeeName(u.name);
     return '<tr class="warn"><td class="c">' + (sum.skuLines.length + i + 1) + '</td><td class="nosku">chưa có SKU</td><td>' + esc(shorten(sp.name)) + '</td><td>' + esc(sp.variation) + '</td><td class="c big">' + u.qty + '</td>' + snCell(u.orderIds) + '</tr>';
   })).join('') : sum.skuLines.map(function(l, i) {
-    return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(l.sku) + '</td><td>' + esc(l.name || '—') + (l.pack ? ' <b>— GÓI SẴN</b>' : '') + '</td><td class="c">' + l.orders + '</td><td class="c big">' + l.qty + '</td></tr>';
+    return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(l.sku) + '</td><td>' + esc(l.name || '—') + (l.pack ? ' <b>— GÓI SẴN</b>' : '') + partsHtml(l) + '</td><td class="c">' + l.orders + '</td><td class="c big">' + l.qty + '</td></tr>';
   }).concat(sum.unresolved.map(function(u, i) {
     return '<tr class="warn"><td class="c">' + (sum.skuLines.length + i + 1) + '</td><td class="mono">(chưa có SKU)</td><td>' + esc(u.name) + '</td><td class="c">' + u.orders + '</td><td class="c big">' + u.qty + '</td></tr>';
   })).join('');
@@ -754,9 +791,21 @@ function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
     : '<h2>1. Tổng hợp theo SKU</h2><table><thead><tr><th style="width:32px">#</th><th style="width:120px">SKU</th><th>Tên sản phẩm</th><th style="width:60px">Số đơn</th><th style="width:70px">Số lượng</th></tr></thead><tbody>' + skuRows +
       '<tr class="total"><td colspan="4" class="r">Tổng cộng</td><td class="c big">' + sum.totalQty + '</td></tr></tbody></table>';
 
+  var nextNo = 2;
+  // Bộ cần lắp ghép: mỗi bộ gồm nhiều loại sản phẩm, kho nhặt đủ linh kiện cho từng bộ rồi ghép lại
+  var setTable = '';
+  if (sum.sets.length > 0) {
+    setTable = '<h2>' + (nextNo++) + '. Bộ cần lắp ghép (nhặt ĐỦ từng món cho mỗi bộ)</h2><table><thead><tr><th style="width:28px">#</th><th style="width:150px">Bộ (SKU)</th><th style="width:50px">Số bộ</th><th>Mỗi bộ gồm</th><th>Tổng cần lấy</th><th style="width:44px">Đã lắp</th></tr></thead><tbody>' +
+      sum.sets.map(function(st, i) {
+        return '<tr><td class="c">' + (i + 1) + '</td><td><span class="mono">' + esc(st.sku) + '</span><br>' + esc(st.name) + '</td><td class="c big">' + st.count + '</td><td>' +
+          st.parts.map(function(p) { return esc((p.qty > 1 ? p.qty + '× ' : '1× ') + (p.skus ? p.skus + ' ' : '') + p.product); }).join('<br>') + '</td><td>' +
+          st.parts.map(function(p) { return esc((p.skus || '—') + ' ' + p.product) + ': <b>' + (p.qty * st.count) + '</b>'; }).join('<br>') + '</td><td class="chk"></td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
   var prodTable = '';
   if (sum.hasCombo && sum.productLines.length > 0) {
-    prodTable = '<h2>2. Quy ra sản phẩm gốc cần nhặt</h2><table><thead><tr><th style="width:32px">#</th><th style="width:110px">SKU</th><th>Sản phẩm</th><th style="width:90px">Số lượng</th><th style="width:70px">Đã nhặt</th></tr></thead><tbody>' +
+    prodTable = '<h2>' + (nextNo++) + '. Quy ra sản phẩm gốc cần nhặt (tổng cộng mọi bộ và hàng lẻ)</h2><table><thead><tr><th style="width:32px">#</th><th style="width:110px">SKU</th><th>Sản phẩm</th><th style="width:90px">Số lượng</th><th style="width:70px">Đã nhặt</th></tr></thead><tbody>' +
       sum.productLines.map(function(p, i) { return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(p.skus || '—') + '</td><td>' + esc(p.product) + '</td><td class="c big">' + p.qty + '</td><td></td></tr>'; }).join('') + '</tbody></table>';
   }
 
@@ -765,14 +814,18 @@ function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
   var orderPage = '';
   if (opts.showOrders) {
     var orderRows = batch.orders.map(function(o, i) {
-      var detail = o.items.map(function(it) { return esc((it.sku || it.name || '?')) + ' × ' + it.qty + (it.packFrom ? ' (gói sẵn, từ ' + esc(it.packFrom) + ')' : '') + (it.noteFrom ? ' (đọc từ ghi chú)' : ''); }).join(', ');
+      var detail = o.items.map(function(it) {
+        var pt = it.sku ? pxkSkuParts(it.sku) : null;
+        return esc((it.sku || it.name || '?')) + ' × ' + it.qty + (it.packFrom ? ' (gói sẵn, từ ' + esc(it.packFrom) + ')' : '') + (it.noteFrom ? ' (đọc từ ghi chú)' : '') +
+          (pt ? ' <span style="font-size:10px;color:#333">[mỗi bộ: ' + esc(pt.map(function(p) { return (p.qty > 1 ? p.qty + '×' : '') + (p.skus || p.product); }).join(' + ')) + ']</span>' : '');
+      }).join(', ');
       if (o.note) detail += '<br><span style="font-size:10px;color:#555">Ghi chú: ' + esc(o.note) + '</span>';
       return '<tr><td class="c">' + (i + 1) + '</td><td class="mono">' + esc(o.orderId) + '</td><td>' + detail + '</td><td class="c">' + o.items.reduce(function(s, x) { return s + x.qty; }, 0) + '</td><td class="chk"></td></tr>';
     }).join('');
-    orderPage = '<div class="pb"></div><h2>' + (prodTable ? '3' : '2') + '. Danh sách từng đơn (để kiểm tra)</h2><table><thead><tr><th style="width:32px">#</th><th style="width:150px">Mã đơn hàng</th><th>Sản phẩm × SL</th><th style="width:44px">SL</th><th style="width:44px">Đủ</th></tr></thead><tbody>' + orderRows + '</tbody></table>';
+    orderPage = '<div class="pb"></div><h2>' + nextNo + '. Danh sách từng đơn (để kiểm tra)</h2><table><thead><tr><th style="width:32px">#</th><th style="width:150px">Mã đơn hàng</th><th>Sản phẩm × SL</th><th style="width:44px">SL</th><th style="width:44px">Đủ</th></tr></thead><tbody>' + orderRows + '</tbody></table>';
   }
 
-  return head + warn + skuTable + prodTable + sign + orderPage;
+  return head + warn + skuTable + setTable + prodTable + sign + orderPage;
 }
 
 var PXK_CSS = '@page{size:A4;margin:12mm 10mm 14mm;@bottom-right{content:"Trang " counter(page) "/" counter(pages);font-size:10px;color:#555}}' +
@@ -784,7 +837,7 @@ var PXK_CSS = '@page{size:A4;margin:12mm 10mm 14mm;@bottom-right{content:"Trang 
   'th,td{border:1px solid #888;padding:4px 6px;vertical-align:middle}th{background:#eee;text-align:center;font-size:11px}' +
   '.c{text-align:center}.r{text-align:right;font-weight:bold}.big{font-weight:bold;font-size:14px}.mono{font-family:Consolas,monospace;font-size:11px;word-break:break-all}' +
   '.alert{border:2px solid #c00;background:#fff0f0;color:#900;padding:6px 10px;margin:0 0 10px;font-weight:bold;font-size:12px}' +
-  '.nosku{font-size:10px;color:#a60;text-align:center}.sn{font-family:Consolas,monospace;font-size:9px;line-height:1.35}.warn td{background:#fff3cd}.total td{background:#f5f5f5}.chk{width:44px}' +
+  '.parts{font-size:10px;color:#333;margin-top:2px;line-height:1.35}.nosku{font-size:10px;color:#a60;text-align:center}.sn{font-family:Consolas,monospace;font-size:9px;line-height:1.35}.warn td{background:#fff3cd}.total td{background:#f5f5f5}.chk{width:44px}' +
   '.sign{display:flex;justify-content:space-around;text-align:center;margin-top:28px;page-break-inside:avoid;font-weight:bold}.sign span{font-weight:normal;font-size:10px;color:#666}' +
   '.sign div{height:80px;width:30%}.pb{page-break-before:always}.slip + .slip{page-break-before:always}';
 
