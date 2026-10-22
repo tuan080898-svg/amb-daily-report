@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { useAppState } from '@/lib/store';
+import { isManagerRole } from '@/lib/roles';
 import { toDateString } from '@/lib/utils';
 import { aggregateProducts, getAllSkuCodes, getSkuProducts, subscribeSkuMap } from '@/lib/sku';
 import { Channel } from '@/lib/types';
@@ -177,6 +178,7 @@ export default function SkuReportPage() {
   }
 
   function handleDeleteImport(idx: number) {
+    if (currentUser && isManagerRole(currentUser.role)) return; // quản lý chi nhánh chỉ xem
     const imp = imports[idx];
     if (imp?.id) deleteSkuImport(imp.id);
   }
@@ -450,6 +452,7 @@ export default function SkuReportPage() {
                         <p className="text-xs text-gray-500">{imp.dateFrom} &rarr; {imp.dateTo} | {Object.values(imp.dailySku).reduce(function(sum, arr) { return sum + arr.length; }, 0)} SKU</p>
                       </div>
                     </div>
+                    {!(currentUser && isManagerRole(currentUser.role)) && (
                     <button
                       onClick={function() { handleDeleteImport(i); }}
                       className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
@@ -457,6 +460,7 @@ export default function SkuReportPage() {
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
+                    )}
                   </div>
                 );
               })}

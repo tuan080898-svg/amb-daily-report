@@ -25,7 +25,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Tổng quan',
     icon: '📊',
     items: [
-      { href: '/dashboard', label: 'Dashboard', icon: '📊', roles: ['admin', 'employee'] },
+      { href: '/dashboard', label: 'Dashboard', icon: '📊', roles: ['admin', 'employee', 'manager_hn', 'manager_hcm'] },
     ],
   },
   {
@@ -34,10 +34,10 @@ const NAV_GROUPS: NavGroup[] = [
     icon: '📝',
     items: [
       { href: '/reports', label: 'Nhập báo cáo', icon: '📝', roles: ['admin', 'employee'] },
-      { href: '/reports/history', label: 'Lịch sử', icon: '📋', roles: ['admin', 'employee'] },
-      { href: '/reports/sku', label: 'SP bán chạy', icon: '🏆', roles: ['admin', 'employee'] },
+      { href: '/reports/history', label: 'Lịch sử', icon: '📋', roles: ['admin', 'employee', 'manager_hn', 'manager_hcm'] },
+      { href: '/reports/sku', label: 'SP bán chạy', icon: '🏆', roles: ['admin', 'employee', 'manager_hn', 'manager_hcm'] },
       { href: '/reports/weekly', label: 'Kế hoạch tuần', icon: '📅', roles: ['admin', 'employee'] },
-      { href: '/reports/analytics', label: 'Phân tích', icon: '📈', roles: ['admin', 'employee'] },
+      { href: '/reports/analytics', label: 'Phân tích', icon: '📈', roles: ['admin', 'employee', 'manager_hn', 'manager_hcm'] },
     ],
   },
   {
@@ -89,6 +89,13 @@ const BOTTOM_TABS = [
   { href: '/admin/inventory', label: 'Kho', icon: 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4', adminOnly: true },
 ];
 
+const MANAGER_TABS = [
+  { href: '/dashboard', label: 'Tổng quan', icon: BOTTOM_TABS[0].icon },
+  { href: '/reports/history', label: 'Lịch sử', icon: BOTTOM_TABS[1].icon },
+  { href: '/reports/sku', label: 'SP bán chạy', icon: BOTTOM_TABS[1].icon },
+  { href: '/reports/analytics', label: 'Phân tích', icon: BOTTOM_TABS[1].icon },
+];
+
 const WAREHOUSE_TABS = [
   { href: '/kho/phieu-xuat', label: 'Phiếu xuất kho', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
 ];
@@ -113,7 +120,7 @@ export function MobileBottomNav() {
   const { currentUser } = useAppState();
   if (!currentUser) return null;
 
-  var tabs = currentUser.role === 'warehouse' ? WAREHOUSE_TABS : BOTTOM_TABS.filter(function(t) {
+  var tabs = currentUser.role === 'warehouse' ? WAREHOUSE_TABS : (currentUser.role === 'manager_hn' || currentUser.role === 'manager_hcm') ? MANAGER_TABS : BOTTOM_TABS.filter(function(t) {
     if ((t as { adminOnly?: boolean }).adminOnly && currentUser.role !== 'admin') return false;
     return true;
   });

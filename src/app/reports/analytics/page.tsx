@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { useAppState } from '@/lib/store';
+import { isManagerRole } from '@/lib/roles';
 import { toDateString, formatCurrency } from '@/lib/utils';
 import { Channel } from '@/lib/types';
 import { getSkuProducts } from '@/lib/sku';
@@ -277,6 +278,7 @@ export default function AnalyticsPage() {
   }
 
   function handleDeleteImport(idx: number) {
+    if (currentUser && isManagerRole(currentUser.role)) return; // quản lý chi nhánh chỉ xem
     const imp = imports[idx];
     if (imp?.id) deleteAnalytics(imp.id);
   }
@@ -693,6 +695,7 @@ export default function AnalyticsPage() {
                         </p>
                       </div>
                     </div>
+                    {!(currentUser && isManagerRole(currentUser.role)) && (
                     <button
                       onClick={function() { handleDeleteImport(i); }}
                       className="p-1.5 text-gray-500 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
@@ -700,6 +703,7 @@ export default function AnalyticsPage() {
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
+                    )}
                   </div>
                 );
               })}

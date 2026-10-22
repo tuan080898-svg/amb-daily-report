@@ -78,11 +78,11 @@ export default function AdminUsersPage() {
                   <td className="px-4 py-3 text-gray-400">{user.email}</td>
                   <td className="px-4 py-3">
                     <span className={`inline-flex px-2 py-0.5 rounded text-xs font-medium ${
-                      user.role === 'admin' ? 'bg-purple-500/15 text-purple-400' : user.role === 'warehouse' ? 'bg-emerald-500/15 text-emerald-400' : 'bg-blue-500/15 text-blue-400'
+                      user.role === 'admin' ? 'bg-purple-500/15 text-purple-400' : user.role === 'warehouse' ? 'bg-emerald-500/15 text-emerald-400' : (user.role === 'manager_hn' || user.role === 'manager_hcm') ? 'bg-amber-500/15 text-amber-400' : 'bg-blue-500/15 text-blue-400'
                     }`}>{roleLabel(user.role)}</span>
                   </td>
                   <td className="px-4 py-3 text-gray-400 max-w-[300px]">
-                    {user.role === 'admin' ? 'Tất cả' : user.role === 'warehouse' ? 'Chỉ trang Phiếu xuất kho' : (assignedShopNames.join(', ') || '—')}
+                    {user.role === 'admin' ? 'Tất cả' : user.role === 'warehouse' ? 'Chỉ trang Phiếu xuất kho' : user.role === 'manager_hn' ? 'Mọi shop Hà Nội (chỉ xem)' : user.role === 'manager_hcm' ? 'Mọi shop HCM (chỉ xem)' : (assignedShopNames.join(', ') || '—')}
                   </td>
                   <td className="px-4 py-3 text-right space-x-3">
                     <button onClick={() => { setEditing(user); setIsNew(false); }} className="text-blue-400 hover:underline text-xs">Sửa</button>
@@ -149,6 +149,8 @@ function UserForm({ user, shops, onSave, onCancel, isNew }: {
             >
               <option value="employee">Nhân viên (báo cáo shop)</option>
               <option value="warehouse">Nhân sự kho (chỉ Phiếu xuất kho)</option>
+              <option value="manager_hn">Quản lý chi nhánh Hà Nội (chỉ xem doanh số, không xem giá vốn / lãi lỗ)</option>
+              <option value="manager_hcm">Quản lý chi nhánh HCM (chỉ xem doanh số, không xem giá vốn / lãi lỗ)</option>
               <option value="admin">Admin</option>
             </select>
           </div>

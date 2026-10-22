@@ -25,8 +25,15 @@ import {
 } from '@/lib/db';
 import { hydrateInventory, flushInventoryOutbox } from '@/lib/inventory';
 import { initSkuMapFromSupabase } from '@/lib/sku';
+import { canSeeCost, managerRegion } from '@/lib/roles';
 
 const IS_SUPABASE = IS_SUPABASE_CONFIGURED;
+
+// Giá vốn và lãi lỗ chỉ nạp cho vai trò được xem (admin, nhân viên); không nạp trước khi đăng nhập, không nạp cho quản lý chi nhánh / nhân sự kho
+async function loadCostData() {
+  const [cogs, cfg, imps] = await Promise.all([dbGetCogs(), dbGetPnlConfig(), dbGetPnlImports()]);
+  return { cogs: cogs, cfg: cfg, imps: imps };
+}
 
 export default function AppProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState(createInitialState);
@@ -51,9 +58,9 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss, cogsData, pnlCfg, pnlImps, clTasks, clEntries, invData, wkActions, planNotes] = await Promise.all([
+        const [users, shops, reports, kpis, plans, config, skuImps, analyticsImps, cskhRevs, cskhIss, clTasks, clEntries, invData, wkActions, planNotes] = await Promise.all([
           dbGetUsers(), dbGetShops(), dbGetReports(), dbGetKPIs(), dbGetPlans(), dbGetConfig(), dbGetSkuImports(), dbGetAnalytics(),
-          dbGetCskhReviews(), dbGetCskhIssues(), dbGetCogs(), dbGetPnlConfig(), dbGetPnlImports(),
+          dbGetCskhReviews(), dbGetCskhIssues(),
           dbGetChecklistTasks(), dbGetChecklistEntries(),
           dbGetInventory().catch(function(e) { console.error('[Inventory] Không đọc được kho từ cloud, dùng bản trên máy:', e); return null; }),
           dbGetWeeklyActions(),
@@ -70,6 +77,8 @@ export default function AppProvider({ children }: { children: ReactNode }) {
         if (savedId && users.length > 0) {
           savedUser = users.find(u => u.id === savedId) || null;
         }
+        const cost = savedUser && canSeeCost(savedUser.role) ? await loadCostData() : null;
+        if (cancelled) return;
         let finalSkuImps = skuImps;
         if (skuImps.length === 0) {
           try {
@@ -116,9 +125,9 @@ export default function AppProvider({ children }: { children: ReactNode }) {
           analyticsImports: analyticsImps,
           cskhReviews: cskhRevs,
           cskhIssues: cskhIss,
-          cogsEntries: cogsData,
-          pnlConfig: pnlCfg,
-          pnlImports: pnlImps,
+          cogsEntries: cost ? cost.cogs : [],
+          pnlConfig: cost ? cost.cfg : s.pnlConfig,
+          pnlImports: cost ? cost.imps : [],
           checklistTasks: clTasks,
           checklistEntries: clEntries,
           weeklyActions: wkActions,
@@ -153,7 +162,11 @@ export default function AppProvider({ children }: { children: ReactNode }) {
       if (!res.ok) return false;
       const { user } = await res.json();
       if (user) {
-        setState(s => ({ ...s, currentUser: user }));
+        let cost: Awaited<ReturnType<typeof loadCostData>> | null = null;
+        if (canSeeCost(user.role)) {
+          try { cost = await loadCostData(); } catch (e) { console.error(e); alert('Không tải được dữ liệu giá vốn / lãi lỗ. Hãy tải lại trang.'); }
+        }
+        setState(s => ({ ...s, currentUser: user, cogsEntries: cost ? cost.cogs : [], pnlConfig: cost ? cost.cfg : s.pnlConfig, pnlImports: cost ? cost.imps : [] }));
         try { localStorage.setItem('amb_user_id', user.id); } catch {}
         return true;
       }
@@ -164,7 +177,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
-    setState(s => ({ ...s, currentUser: null }));
+    setState(s => ({ ...s, currentUser: null, cogsEntries: [], pnlImports: [] }));
     try { localStorage.removeItem('amb_user_id'); } catch {}
   }, []);
 
@@ -425,6 +438,8 @@ export default function AppProvider({ children }: { children: ReactNode }) {
     const user = state.users.find(u => u.id === userId);
     if (!user) return [];
     if (user.role === 'admin') return state.shops;
+    const region = managerRegion(user.role);
+    if (region) return state.shops.filter(s => s.region === region); // quản lý chi nhánh: mọi shop của chi nhánh mình, kể cả shop thêm sau này
     return state.shops.filter(s => s.assignedTo.includes(userId));
   }, [state.users, state.shops]);
 

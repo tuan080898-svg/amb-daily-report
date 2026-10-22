@@ -39,7 +39,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
       </main>
       <MobileBottomNav />
       <UpdateNotice />
-      {currentUser.role !== 'warehouse' && <AiChat />}
+      {(currentUser.role === 'admin' || currentUser.role === 'employee') && <AiChat />}
     </div>
   );
 }

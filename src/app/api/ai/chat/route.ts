@@ -41,8 +41,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Khong tim thay nguoi dung' }, { status: 401 });
     }
 
-    if (user.role === 'warehouse') {
-      return NextResponse.json({ error: 'Tai khoan nhan su kho khong dung tro ly AI.' }, { status: 403 });
+    if (user.role !== 'admin' && user.role !== 'employee') {
+      return NextResponse.json({ error: 'Tai khoan nay khong dung tro ly AI.' }, { status: 403 });
     }
 
     var context = await buildChatContext(userId, message);
