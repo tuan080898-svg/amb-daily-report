@@ -1,5 +1,5 @@
 -- =====================================================================
--- KHÓA DỮ LIỆU NHẠY CẢM (mẫu: __DB_KEY__ được thay bằng khóa thật khi tạo file gửi Sếp, KHÔNG lưu khóa thật vào mã nguồn)
+-- KHÓA DỮ LIỆU NHẠY CẢM (đây là bản mẫu: ký hiệu khóa trong hàm amb_key_check được thay bằng khóa thật khi tạo file gửi Sếp; KHÔNG lưu khóa thật vào mã nguồn)
 -- Chạy MỘT LẦN trong Supabase -> SQL Editor, SAU KHI đã đặt biến AMB_SECRET trên Vercel và app đã chạy lại.
 --
 -- Sau khi chạy:
