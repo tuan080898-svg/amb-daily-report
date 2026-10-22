@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, ReactNode } from 'react';
+import { useState, useCallback, useEffect, useRef, ReactNode } from 'react';
 import { AppContext, createInitialState } from '@/lib/store';
 import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry, WeeklyAction, MonthlyPlanNote } from '@/lib/types';
 import { IS_SUPABASE_CONFIGURED } from '@/lib/supabase';
@@ -15,8 +15,8 @@ import {
   dbGetAnalytics, dbAddAnalytics, dbDeleteAnalytics,
   dbGetCskhReviews, dbAddCskhReview, dbUpdateCskhReview,
   dbGetCskhIssues, dbAddCskhIssue, dbUpdateCskhIssue,
-  dbGetCogs, dbSaveCogs, dbGetPnlConfig, dbSavePnlConfig,
-  dbGetPnlImports, dbSavePnlImports, dbAddPnlImport,
+  dbGetCostBasic, dbSaveCogs, dbSavePnlConfig,
+  dbGetPnlImports, dbUpsertPnlImports, dbDeletePnlImports, dbAddPnlImport, SESSION_EXPIRED_EVENT,
   dbGetChecklistTasks, dbSaveChecklistTasks,
   dbGetChecklistEntries, dbSaveChecklistEntries,
   dbGetInventory,
@@ -29,15 +29,31 @@ import { canSeeCost, managerRegion } from '@/lib/roles';
 
 const IS_SUPABASE = IS_SUPABASE_CONFIGURED;
 
-// Giá vốn và lãi lỗ chỉ nạp cho vai trò được xem (admin, nhân viên); không nạp trước khi đăng nhập, không nạp cho quản lý chi nhánh / nhân sự kho
-async function loadCostData() {
-  const [cogs, cfg, imps] = await Promise.all([dbGetCogs(), dbGetPnlConfig(), dbGetPnlImports()]);
-  return { cogs: cogs, cfg: cfg, imps: imps };
+// Giá vốn và lãi lỗ chỉ nạp cho vai trò được xem, sau khi đăng nhập, và đi qua cổng /api/cost (máy chủ kiểm tra phiên + vai trò):
+//  - admin: giá vốn, cấu hình phí, toàn bộ lãi lỗ
+//  - nhân viên: giá vốn + cấu hình phí (cần để tính khi nhập báo cáo), KHÔNG có lãi lỗ
+//  - quản lý chi nhánh, nhân sự kho: không nạp gì
+async function loadCostData(role: string) {
+  const basic = await dbGetCostBasic();
+  const imps = role === 'admin' ? await dbGetPnlImports() : [];
+  return { cogs: basic.cogs, cfg: basic.config, imps: imps };
 }
 
 export default function AppProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState(createInitialState);
   const [loading, setLoading] = useState(true);
+  const pnlImportsRef = useRef(state.pnlImports);
+  useEffect(function() { pnlImportsRef.current = state.pnlImports; });
+
+  // Phiên đăng nhập hết hạn / không hợp lệ (máy chủ trả 401): đăng xuất để đăng nhập lại
+  useEffect(function() {
+    function onExpired() {
+      setState(function(s) { return s.currentUser ? { ...s, currentUser: null, cogsEntries: [], pnlImports: [] } : s; });
+      try { localStorage.removeItem('amb_user_id'); localStorage.removeItem('amb_token'); } catch {}
+    }
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return function() { window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired); };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -77,7 +93,17 @@ export default function AppProvider({ children }: { children: ReactNode }) {
         if (savedId && users.length > 0) {
           savedUser = users.find(u => u.id === savedId) || null;
         }
-        const cost = savedUser && canSeeCost(savedUser.role) ? await loadCostData() : null;
+        let cost: Awaited<ReturnType<typeof loadCostData>> | null = null;
+        if (savedUser && canSeeCost(savedUser.role)) {
+          try {
+            cost = await loadCostData(savedUser.role);
+          } catch (e) {
+            // Phiên cũ không còn hợp lệ (chưa có mã đăng nhập, hết hạn...): bắt đăng nhập lại
+            console.error('[Cost] Không nạp được giá vốn, yêu cầu đăng nhập lại:', e);
+            savedUser = null;
+            try { localStorage.removeItem('amb_user_id'); localStorage.removeItem('amb_token'); } catch {}
+          }
+        }
         if (cancelled) return;
         let finalSkuImps = skuImps;
         if (skuImps.length === 0) {
@@ -160,11 +186,15 @@ export default function AppProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ email, password }),
       });
       if (!res.ok) return false;
-      const { user } = await res.json();
+      const { user, token } = await res.json();
       if (user) {
+        try {
+          if (token) localStorage.setItem('amb_token', token); else localStorage.removeItem('amb_token');
+          localStorage.setItem('amb_user_id', user.id);
+        } catch {}
         let cost: Awaited<ReturnType<typeof loadCostData>> | null = null;
         if (canSeeCost(user.role)) {
-          try { cost = await loadCostData(); } catch (e) { console.error(e); alert('Không tải được dữ liệu giá vốn / lãi lỗ. Hãy tải lại trang.'); }
+          try { cost = await loadCostData(user.role); } catch (e) { console.error(e); alert('Không tải được dữ liệu giá vốn / lãi lỗ: ' + (e instanceof Error ? e.message : 'lỗi') + '. Hãy tải lại trang.'); }
         }
         setState(s => ({ ...s, currentUser: user, cogsEntries: cost ? cost.cogs : [], pnlConfig: cost ? cost.cfg : s.pnlConfig, pnlImports: cost ? cost.imps : [] }));
         try { localStorage.setItem('amb_user_id', user.id); } catch {}
@@ -178,7 +208,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     setState(s => ({ ...s, currentUser: null, cogsEntries: [], pnlImports: [] }));
-    try { localStorage.removeItem('amb_user_id'); } catch {}
+    try { localStorage.removeItem('amb_user_id'); localStorage.removeItem('amb_token'); } catch {}
   }, []);
 
 
@@ -366,9 +396,20 @@ export default function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const savePnlImportsCb = useCallback(function(imports: PnlImport[]) {
-    let prev: PnlImport[] | null = null;
-    setState(function(s) { prev = s.pnlImports; return { ...s, pnlImports: imports }; });
-    if (IS_SUPABASE) dbSavePnlImports(imports).catch(function(err) { console.error(err); alert('Lỗi lưu PnL: ' + err.message); if (prev) setState(function(s) { return { ...s, pnlImports: prev! }; }); });
+    // Chỉ gửi phần thay đổi (đợt mới / sửa, đợt bị xóa): bảng lãi lỗ rất nặng nên không gửi lại toàn bộ
+    const before = pnlImportsRef.current;
+    const beforeById = new Map<string, PnlImport>();
+    before.forEach(function(i) { beforeById.set(i.id, i); });
+    const nowIds = new Set(imports.map(function(i) { return i.id; }));
+    const changed = imports.filter(function(i) { return beforeById.get(i.id) !== i; });
+    const removed = before.filter(function(i) { return !nowIds.has(i.id); }).map(function(i) { return i.id; });
+    setState(function(s) { return { ...s, pnlImports: imports }; });
+    if (IS_SUPABASE) {
+      dbUpsertPnlImports(changed).then(function() { return dbDeletePnlImports(removed); }).catch(function(err) {
+        console.error(err); alert('Lỗi lưu PnL: ' + err.message);
+        setState(function(s) { return { ...s, pnlImports: before }; });
+      });
+    }
   }, []);
 
   const addPnlImportCb = useCallback(function(imp: PnlImport) {
