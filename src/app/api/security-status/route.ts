@@ -17,8 +17,13 @@ export async function GET() {
     out.pnlOpen = !imp.error && Array.isArray(imp.data) && imp.data.length > 0;
     const pw = await pub.from('users').select('password').limit(1);
     out.passwordsOpen = !pw.error && Array.isArray(pw.data) && pw.data.length > 0;
-    const upd = await pub.from('users').update({ name: 'x' }).eq('id', '__khong_ton_tai__').select('id');
-    out.usersWritableByPublic = !upd.error;
+    // ghi thử vào một tài khoản có thật với đúng giá trị hiện có (không đổi gì): còn ghi được thì trả về 1 dòng, bị chặn thì lỗi hoặc 0 dòng
+    const one = await pub.from('users').select('id, name').limit(1);
+    const row = one.data && one.data[0];
+    if (row) {
+      const upd = await pub.from('users').update({ name: row.name }).eq('id', row.id).select('id');
+      out.usersWritableByPublic = !upd.error && Array.isArray(upd.data) && upd.data.length > 0;
+    }
     const base = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
     const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
     // file lãi lỗ / giá vốn cũ trong kho lưu trữ pnl-data: liệt kê bằng khóa công khai, thấy tên file nghĩa là còn mở
