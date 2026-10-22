@@ -3,6 +3,7 @@ import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport,
 import type { InventoryData, InventoryTransaction, InventoryConfig, InventoryPushBatch, Warehouse } from './inventory';
 import { DEFAULT_CONFIG } from './utils';
 import type { PxkData, PxkBatch } from './pxk';
+import bcrypt from 'bcryptjs';
 
 function db() {
   if (!supabase) throw new Error('Supabase not configured');
@@ -46,25 +47,37 @@ export async function dbGetUsers(): Promise<User[]> {
   }));
 }
 
-// Thêm / sửa / xóa tài khoản đi qua máy chủ (/api/users, chỉ admin); mật khẩu được mã hóa ở máy chủ
-async function userApi(body: Record<string, unknown>): Promise<void> {
-  const res = await fetch('/api/users', { method: 'POST', headers: sessionHeaders(), body: JSON.stringify(body), cache: 'no-store' });
-  let data: { error?: string } | null = null;
-  try { data = await res.json(); } catch { /* không phải JSON */ }
-  if (res.status === 401 && typeof window !== 'undefined') window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
-  if (!res.ok) throw new Error((data && data.error) || ('HTTP ' + res.status));
-}
-
 export async function dbAddUser(user: User): Promise<void> {
-  await userApi({ action: 'add', user: user });
+  const rawPassword = user.password || 'Amb@2024';
+  const hashed = await bcrypt.hash(rawPassword, 10);
+  const { error } = await db().from('users').insert({
+    id: user.id,
+    email: user.email.trim().toLowerCase(),
+    name: user.name,
+    role: user.role,
+    assigned_shops: user.assignedShops,
+    password: hashed,
+  });
+  if (error) throw new Error('Thêm user thất bại: ' + error.message);
 }
 
 export async function dbUpdateUser(user: User): Promise<void> {
-  await userApi({ action: 'update', user: user });
+  const updateData: Record<string, unknown> = {
+    email: user.email.trim().toLowerCase(),
+    name: user.name,
+    role: user.role,
+    assigned_shops: user.assignedShops,
+  };
+  if (user.password) {
+    updateData.password = await bcrypt.hash(user.password, 10);
+  }
+  const { error } = await db().from('users').update(updateData).eq('id', user.id);
+  if (error) throw new Error('Cập nhật user thất bại: ' + error.message);
 }
 
 export async function dbDeleteUser(userId: string): Promise<void> {
-  await userApi({ action: 'delete', id: userId });
+  const { error } = await db().from('users').delete().eq('id', userId);
+  if (error) throw new Error('Xóa user thất bại: ' + error.message);
 }
 
 // ==================== Shops ====================
@@ -534,81 +547,157 @@ export async function dbUpdateCskhIssue(issue: CskhIssue): Promise<void> {
   if (error) throw new Error('Cập nhật vấn đề CSKH thất bại: ' + error.message);
 }
 
-// ==================== Giá vốn / lãi lỗ (qua cổng /api/cost, cần phiên đăng nhập) ====================
-// Trình duyệt KHÔNG còn đọc trực tiếp các bảng này: máy chủ kiểm tra đăng nhập + vai trò rồi mới trả dữ liệu.
+// ==================== COGS (PostgreSQL) ====================
 
-export const SESSION_EXPIRED_EVENT = 'amb-session-expired';
-
-function sessionHeaders(): Record<string, string> {
-  const h: Record<string, string> = { 'Content-Type': 'application/json' };
+export async function dbGetCogs(): Promise<CogsEntry[]> {
+  const { data } = await db().from('cogs_entries').select('*');
+  if (data && data.length > 0) {
+    return data.map(function(r: Record<string, unknown>) {
+      return { sku: r.sku as string, name: r.name as string, cost: r.cost as number };
+    });
+  }
   try {
-    const t = localStorage.getItem('amb_token');
-    if (t) h.Authorization = 'Bearer ' + t;
-    const id = localStorage.getItem('amb_user_id');
-    if (id) h['x-amb-user'] = id; // chế độ tương thích trước khi máy chủ bật khóa phiên
-  } catch { /* không đọc được bộ nhớ trình duyệt */ }
-  return h;
-}
-
-async function callApi<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, Object.assign({}, init, { headers: sessionHeaders(), cache: 'no-store' as RequestCache }));
-  let body: { error?: string } | null = null;
-  try { body = await res.json(); } catch { /* không phải JSON */ }
-  if (res.status === 401) {
-    if (typeof window !== 'undefined') window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
-    throw new Error('Phiên đăng nhập đã hết hạn, hãy đăng nhập lại');
-  }
-  if (!res.ok) throw new Error((body && body.error) || ('HTTP ' + res.status));
-  return body as unknown as T;
-}
-
-function postApi(path: string, action: string, payload: unknown): Promise<unknown> {
-  return callApi(path, { method: 'POST', body: JSON.stringify({ action: action, payload: payload }) });
-}
-
-// Giá vốn + cấu hình phí sàn (admin và nhân viên)
-export async function dbGetCostBasic(): Promise<{ cogs: CogsEntry[]; config: PnlConfig }> {
-  return callApi<{ cogs: CogsEntry[]; config: PnlConfig }>('/api/cost?part=basic');
-}
-
-// Toàn bộ lãi lỗ (chỉ admin), tải từng đợt
-export async function dbGetPnlImports(): Promise<PnlImport[]> {
-  const out: PnlImport[] = [];
-  let next: number | null = 0;
-  while (next !== null) {
-    const page: { rows: PnlImport[]; next: number | null } = await callApi<{ rows: PnlImport[]; next: number | null }>('/api/cost?part=imports&offset=' + next);
-    page.rows.forEach(function(r) { out.push(r); });
-    next = page.next;
-  }
-  return out;
+    const res = await downloadFresh('pnl-data', 'cogs.json');
+    if (!res.error && res.data) {
+      const list = JSON.parse(await res.data.text()) as CogsEntry[];
+      if (list.length > 0) { await dbSaveCogs(list); return list; }
+    }
+  } catch {}
+  return [];
 }
 
 export async function dbSaveCogs(list: CogsEntry[]): Promise<void> {
-  await postApi('/api/cost', 'saveCogs', list);
+  if (list.length === 0) return;
+  const rows = list.map(function(e) { return { sku: e.sku, name: e.name, cost: e.cost }; });
+  const BATCH = 500;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const { error } = await db().from('cogs_entries').upsert(rows.slice(i, i + BATCH));
+    if (error) throw new Error('Lưu giá vốn thất bại: ' + error.message);
+  }
+  const newSkus = new Set(list.map(function(e) { return e.sku; }));
+  const { data: existing } = await db().from('cogs_entries').select('sku');
+  const toDelete = (existing || []).filter(function(r: Record<string, unknown>) { return !newSkus.has(r.sku as string); });
+  for (const row of toDelete) {
+    await db().from('cogs_entries').delete().eq('sku', row.sku as string);
+  }
+}
+
+// ==================== PnL Config (PostgreSQL) ====================
+
+export async function dbGetPnlConfig(): Promise<PnlConfig> {
+  const { data } = await db().from('pnl_config').select('*').eq('id', 1).single();
+  if (data) {
+    return {
+      shopeeFeeRate: data.shopee_fee_rate != null ? Number(data.shopee_fee_rate) : 34,
+      tiktokFeeRate: data.tiktok_fee_rate != null ? Number(data.tiktok_fee_rate) : 34,
+      opexRate: data.opex_rate != null ? Number(data.opex_rate) : 16,
+    };
+  }
+  try {
+    const res = await downloadFresh('pnl-data', 'config.json');
+    if (!res.error && res.data) {
+      const parsed = JSON.parse(await res.data.text()) as PnlConfig;
+      if (parsed.opexRate === undefined) parsed.opexRate = 16;
+      if (parsed.shopeeFeeRate == null) parsed.shopeeFeeRate = 34;
+      await dbSavePnlConfig(parsed);
+      return parsed;
+    }
+  } catch {}
+  return { shopeeFeeRate: 34, tiktokFeeRate: 34, opexRate: 16 };
 }
 
 export async function dbSavePnlConfig(config: PnlConfig): Promise<void> {
-  await postApi('/api/cost', 'saveConfig', config);
+  const { error } = await db().from('pnl_config').upsert({
+    id: 1,
+    shopee_fee_rate: config.shopeeFeeRate,
+    tiktok_fee_rate: config.tiktokFeeRate,
+    opex_rate: config.opexRate,
+  });
+  if (error) throw new Error('Lưu cấu hình PnL thất bại: ' + error.message);
 }
 
-// Gửi các đợt nhập lãi lỗ mới / đã sửa, chia nhỏ dưới ~3 MB mỗi lần
-export async function dbUpsertPnlImports(list: PnlImport[]): Promise<void> {
-  let batch: PnlImport[] = [];
-  let size = 0;
-  for (const imp of list) {
-    const s = JSON.stringify(imp).length;
-    if (batch.length > 0 && size + s > 3000000) { await postApi('/api/cost', 'upsertImports', batch); batch = []; size = 0; }
-    batch.push(imp); size += s;
+// ==================== PnL Imports (PostgreSQL) ====================
+
+export async function dbGetPnlImports(): Promise<PnlImport[]> {
+  const { data } = await db().from('pnl_imports').select('*');
+  if (data && data.length > 0) {
+    return data.map(function(r: Record<string, unknown>) {
+      return {
+        id: r.id as string,
+        shopId: r.shop_id as string,
+        shopName: r.shop_name as string,
+        channel: r.channel as string,
+        dateFrom: r.date_from as string,
+        dateTo: r.date_to as string,
+        dailyData: (r.daily_data || []) as PnlImport['dailyData'],
+        importedAt: r.imported_at as string,
+      };
+    });
   }
-  if (batch.length > 0) await postApi('/api/cost', 'upsertImports', batch);
+  try {
+    const res = await downloadFresh('pnl-data', 'imports.json');
+    if (!res.error && res.data) {
+      const list = JSON.parse(await res.data.text()) as PnlImport[];
+      if (list.length > 0) { await dbSavePnlImports(list); return list; }
+    }
+  } catch {}
+  return [];
 }
 
-export async function dbDeletePnlImports(ids: string[]): Promise<void> {
-  if (ids.length > 0) await postApi('/api/cost', 'deleteImports', ids);
+export async function dbSavePnlImports(list: PnlImport[]): Promise<void> {
+  var shopDatePairs = new Set<string>();
+  for (const imp of list) {
+    shopDatePairs.add(imp.shopId + '|' + imp.dateFrom + '|' + imp.dateTo);
+    const { error } = await db().from('pnl_imports').upsert({
+      id: imp.id,
+      shop_id: imp.shopId,
+      shop_name: imp.shopName,
+      channel: imp.channel,
+      date_from: imp.dateFrom,
+      date_to: imp.dateTo,
+      daily_data: imp.dailyData,
+      imported_at: imp.importedAt,
+    });
+    if (error) throw new Error('Lưu PnL imports thất bại: ' + error.message);
+  }
+  var newIds = new Set(list.map(function(imp) { return imp.id; }));
+  for (const imp of list) {
+    const { data: overlapping } = await db().from('pnl_imports').select('id,date_from,date_to')
+      .eq('shop_id', imp.shopId)
+      .lte('date_from', imp.dateTo)
+      .gte('date_to', imp.dateFrom);
+    if (overlapping) {
+      for (const row of overlapping) {
+        if (!newIds.has(row.id as string)) {
+          await db().from('pnl_imports').delete().eq('id', row.id as string);
+        }
+      }
+    }
+  }
 }
 
 export async function dbAddPnlImport(imp: PnlImport): Promise<void> {
-  await postApi('/api/cost', 'addImport', imp);
+  const { error } = await db().from('pnl_imports').upsert({
+    id: imp.id,
+    shop_id: imp.shopId,
+    shop_name: imp.shopName,
+    channel: imp.channel,
+    date_from: imp.dateFrom,
+    date_to: imp.dateTo,
+    daily_data: imp.dailyData,
+    imported_at: imp.importedAt,
+  });
+  if (error) throw new Error('Lưu PnL import thất bại: ' + error.message);
+  const { data: overlapping } = await db().from('pnl_imports').select('id')
+    .eq('shop_id', imp.shopId)
+    .lte('date_from', imp.dateTo)
+    .gte('date_to', imp.dateFrom)
+    .neq('id', imp.id);
+  if (overlapping) {
+    for (const row of overlapping) {
+      await db().from('pnl_imports').delete().eq('id', row.id as string);
+    }
+  }
 }
 
 // ==================== Checklist Tasks (PostgreSQL) ====================

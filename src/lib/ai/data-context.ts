@@ -1,10 +1,8 @@
 import {
   dbGetUsers, dbGetShops, dbGetReports, dbGetKPIs,
-  dbGetInventory, dbGetCskhReviews, dbGetCskhIssues,
-  dbGetSkuImports, dbGetChecklistEntries, dbGetChecklistTasks,
+  dbGetInventory, dbGetCskhReviews, dbGetCskhIssues, dbGetCogs,
+  dbGetSkuImports, dbGetPnlImports, dbGetChecklistEntries, dbGetChecklistTasks,
 } from '@/lib/db';
-import { adminClient } from '@/lib/server-security';
-import { costGetCogs, costGetAllImports } from '@/lib/cost-server';
 import { getCurrentStock, getReorderAlerts, getSalesVelocity, type InventoryData } from '@/lib/inventory';
 import type { User, Shop, DailyReport, MonthlyKPI } from '@/lib/types';
 
@@ -292,8 +290,7 @@ async function buildCskhContext(shopIds: string[], shops: Shop[]): Promise<strin
 }
 
 async function buildPnlContext(reports: DailyReport[], shops: Shop[]): Promise<string> {
-  var adminDb = adminClient();
-  var [cogs, pnlImports] = await Promise.all([costGetCogs(adminDb), costGetAllImports(adminDb)]);
+  var [cogs, pnlImports] = await Promise.all([dbGetCogs(), dbGetPnlImports()]);
   if (cogs.length === 0 && pnlImports.length === 0) return '';
 
   var shopMap: Record<string, string> = {};
