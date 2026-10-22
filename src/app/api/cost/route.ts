@@ -31,8 +31,10 @@ export async function GET(req: NextRequest) {
     }
     if (part === 'imports') {
       if (u.role !== 'admin') return fail(403, 'Không có quyền xem dữ liệu này');
-      const offset = Math.max(0, Math.floor(Number(new URL(req.url).searchParams.get('offset')) || 0));
-      return ok(await costGetImportsPage(c, offset));
+      const q = new URL(req.url).searchParams;
+      const offset = Math.max(0, Math.floor(Number(q.get('offset')) || 0));
+      const limit = Math.min(200, Math.max(1, Math.floor(Number(q.get('limit')) || 40)));
+      return ok(await costGetImportsPage(c, offset, limit));
     }
     return fail(400, 'Yêu cầu không hợp lệ');
   } catch (e) {

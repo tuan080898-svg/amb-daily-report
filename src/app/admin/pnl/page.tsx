@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useAppState } from '@/lib/store';
 import { CogsEntry, PnlImport, PnlDailyData } from '@/lib/types';
 import * as XLSX from 'xlsx';
@@ -61,7 +61,9 @@ function normalizeKeys(rows: Record<string, unknown>[]): Record<string, unknown>
 }
 
 export default function PnlPage() {
-  var { currentUser, shops, cogsEntries, pnlConfig, pnlImports, reports, saveCogs, savePnlConfig, savePnlImports } = useAppState();
+  var { currentUser, shops, cogsEntries, pnlConfig, pnlImports, pnlImportsLoaded, ensurePnlImports, reports, saveCogs, savePnlConfig, savePnlImports } = useAppState();
+  // Bảng lãi lỗ rất nặng nên chỉ tải khi admin mở trang này
+  useEffect(function() { if (currentUser && currentUser.role === 'admin') ensurePnlImports(); }, [currentUser, ensurePnlImports]);
   var cogsFileRef = useRef<HTMLInputElement>(null);
   var orderFileRef = useRef<HTMLInputElement>(null);
   var [uploading, setUploading] = useState(false);
@@ -444,6 +446,9 @@ export default function PnlPage() {
 
   if (!currentUser || currentUser.role !== 'admin') {
     return <div className="p-6 text-center"><p className="text-red-400">Bạn không có quyền truy cập trang này.</p></div>;
+  }
+  if (!pnlImportsLoaded) {
+    return <div className="p-10 text-center"><div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" /><p className="text-gray-400 text-sm">Đang tải dữ liệu lãi lỗ...</p></div>;
   }
 
   var profitMargin = totals.revenue > 0 ? (totals.profit / totals.revenue * 100) : 0;

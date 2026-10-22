@@ -38,34 +38,39 @@ function importToRow(imp: PnlImport) {
 }
 
 // Bảng lãi lỗ rất nặng (hàng chục MB): trả từng đợt dưới ~3 MB để vừa giới hạn của hàm máy chủ
-export async function costGetImportsPage(c: SupabaseClient, offset: number): Promise<{ rows: PnlImport[]; next: number | null }> {
+// Trả các dòng trong cửa sổ [offset, offset + limit). Nếu dung lượng vượt ~3 MB thì dừng sớm và báo "next" = vị trí dòng đầu tiên chưa trả
+// (null = đã trả đủ cửa sổ). total = tổng số dòng, để máy khách chia cửa sổ và tải song song.
+export async function costGetImportsPage(c: SupabaseClient, offset: number, limit: number = 40): Promise<{ rows: PnlImport[]; next: number | null; total: number }> {
+  const cnt = await c.from('pnl_imports').select('id', { count: 'exact', head: true });
+  const total = cnt.count || 0;
+  const end = Math.min(offset + Math.max(1, limit), total);
   const rows: PnlImport[] = [];
   let size = 0;
   let pos = offset;
-  const STEP = 40;
-  for (;;) {
-    const { data, error } = await c.from('pnl_imports').select('*').order('id').range(pos, pos + STEP - 1);
+  while (pos < end) {
+    const { data, error } = await c.from('pnl_imports').select('*').order('id').range(pos, Math.min(pos + 39, end - 1));
     if (error) throw new Error('Đọc lãi lỗ thất bại: ' + error.message);
     const got = data || [];
+    if (got.length === 0) break;
     for (let i = 0; i < got.length; i++) {
       const imp = importFromRow(got[i]);
       const s = JSON.stringify(imp).length;
-      if (rows.length > 0 && size + s > 3000000) return { rows: rows, next: pos + i };
+      if (rows.length > 0 && size + s > 3000000) return { rows: rows, next: pos + i, total: total };
       rows.push(imp); size += s;
     }
     pos += got.length;
-    if (got.length < STEP) return { rows: rows, next: null };
-    if (size > 3000000) return { rows: rows, next: pos };
   }
+  return { rows: rows, next: null, total: total };
 }
 
 export async function costGetAllImports(c: SupabaseClient): Promise<PnlImport[]> {
   const out: PnlImport[] = [];
-  let next: number | null = 0;
-  while (next !== null) {
-    const page: { rows: PnlImport[]; next: number | null } = await costGetImportsPage(c, next);
+  let offset = 0;
+  for (;;) {
+    const page = await costGetImportsPage(c, offset, 40);
     page.rows.forEach(function(r) { out.push(r); });
-    next = page.next;
+    offset = page.next !== null ? page.next : offset + 40;
+    if (offset >= page.total || page.rows.length === 0) break;
   }
   return out;
 }

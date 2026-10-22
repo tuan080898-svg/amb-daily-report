@@ -572,15 +572,40 @@ export async function dbGetCostBasic(): Promise<{ cogs: CogsEntry[]; config: Pnl
 }
 
 // Toàn bộ lãi lỗ (chỉ admin), tải từng đợt
-export async function dbGetPnlImports(): Promise<PnlImport[]> {
+type ImportsPage = { rows: PnlImport[]; next: number | null; total: number };
+
+// Lấy hết các dòng trong cửa sổ [from, to): máy chủ có thể dừng sớm (dung lượng) nên gọi tiếp từ chỗ dừng
+async function fetchImportsWindow(from: number, to: number): Promise<PnlImport[]> {
   const out: PnlImport[] = [];
-  let next: number | null = 0;
-  while (next !== null) {
-    const page: { rows: PnlImport[]; next: number | null } = await callApi<{ rows: PnlImport[]; next: number | null }>('/api/cost?part=imports&offset=' + next);
+  let pos = from;
+  while (pos < to) {
+    const page = await callApi<ImportsPage>('/api/cost?part=imports&offset=' + pos + '&limit=' + (to - pos));
     page.rows.forEach(function(r) { out.push(r); });
-    next = page.next;
+    if (page.next === null || page.rows.length === 0) break;
+    pos = page.next;
   }
   return out;
+}
+
+// Toàn bộ lãi lỗ (chỉ admin): chia cửa sổ 30 dòng và tải song song (tối đa 4 luồng)
+export async function dbGetPnlImports(): Promise<PnlImport[]> {
+  const first = await callApi<ImportsPage>('/api/cost?part=imports&offset=0&limit=30');
+  const total = first.total;
+  const parts: PnlImport[][] = [first.rows];
+  let covered = first.next === null ? Math.min(30, total) : first.next;
+  if (first.next !== null) { parts[0] = first.rows.concat(await fetchImportsWindow(first.next, Math.min(30, total))); covered = Math.min(30, total); }
+  const windows: Array<[number, number]> = [];
+  for (let s = covered; s < total; s += 30) windows.push([s, Math.min(s + 30, total)]);
+  let idx = 0;
+  const results: PnlImport[][] = new Array(windows.length);
+  async function worker() {
+    while (idx < windows.length) {
+      const i = idx++;
+      results[i] = await fetchImportsWindow(windows[i][0], windows[i][1]);
+    }
+  }
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  return parts.concat(results).reduce(function(all, p) { return all.concat(p); }, [] as PnlImport[]);
 }
 
 export async function dbSaveCogs(list: CogsEntry[]): Promise<void> {

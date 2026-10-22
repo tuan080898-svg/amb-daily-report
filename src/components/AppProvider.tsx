@@ -30,13 +30,13 @@ import { canSeeCost, managerRegion } from '@/lib/roles';
 const IS_SUPABASE = IS_SUPABASE_CONFIGURED;
 
 // Giá vốn và lãi lỗ chỉ nạp cho vai trò được xem, sau khi đăng nhập, và đi qua cổng /api/cost (máy chủ kiểm tra phiên + vai trò):
-//  - admin: giá vốn, cấu hình phí, toàn bộ lãi lỗ
-//  - nhân viên: giá vốn + cấu hình phí (cần để tính khi nhập báo cáo), KHÔNG có lãi lỗ
+//  - admin và nhân viên: giá vốn + cấu hình phí (cần để tính khi nhập báo cáo)
+//  - lãi lỗ (rất nặng, ~19 MB): chỉ admin, và chỉ tải khi mở trang Lãi lỗ (ensurePnlImports), không chặn lúc đăng nhập
 //  - quản lý chi nhánh, nhân sự kho: không nạp gì
 async function loadCostData(role: string) {
+  void role;
   const basic = await dbGetCostBasic();
-  const imps = role === 'admin' ? await dbGetPnlImports() : [];
-  return { cogs: basic.cogs, cfg: basic.config, imps: imps };
+  return { cogs: basic.cogs, cfg: basic.config, imps: [] as PnlImport[] };
 }
 
 export default function AppProvider({ children }: { children: ReactNode }) {
@@ -44,11 +44,30 @@ export default function AppProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const pnlImportsRef = useRef(state.pnlImports);
   useEffect(function() { pnlImportsRef.current = state.pnlImports; });
+  const pnlLoadRef = useRef<Promise<void> | null>(null);
+  const pnlLoadedRef = useRef(false);
+
+  // Tải bảng lãi lỗ (chỉ admin) khi cần; gọi nhiều lần chỉ tải một lần
+  const ensurePnlImports = useCallback(function(): Promise<void> {
+    if (pnlLoadedRef.current) return Promise.resolve();
+    if (!pnlLoadRef.current) {
+      pnlLoadRef.current = dbGetPnlImports().then(function(imps) {
+        pnlLoadedRef.current = true;
+        setState(function(s) { return { ...s, pnlImports: imps, pnlImportsLoaded: true }; });
+      }).catch(function(err) {
+        pnlLoadRef.current = null;
+        console.error('[PnL] Không tải được lãi lỗ:', err);
+        alert('Không tải được dữ liệu lãi lỗ: ' + (err instanceof Error ? err.message : 'lỗi'));
+      });
+    }
+    return pnlLoadRef.current;
+  }, []);
 
   // Phiên đăng nhập hết hạn / không hợp lệ (máy chủ trả 401): đăng xuất để đăng nhập lại
   useEffect(function() {
     function onExpired() {
-      setState(function(s) { return s.currentUser ? { ...s, currentUser: null, cogsEntries: [], pnlImports: [] } : s; });
+      pnlLoadedRef.current = false; pnlLoadRef.current = null;
+      setState(function(s) { return s.currentUser ? { ...s, currentUser: null, cogsEntries: [], pnlImports: [], pnlImportsLoaded: false } : s; });
       try { localStorage.removeItem('amb_user_id'); localStorage.removeItem('amb_token'); } catch {}
     }
     window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
@@ -207,7 +226,8 @@ export default function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
-    setState(s => ({ ...s, currentUser: null, cogsEntries: [], pnlImports: [] }));
+    pnlLoadedRef.current = false; pnlLoadRef.current = null;
+    setState(s => ({ ...s, currentUser: null, cogsEntries: [], pnlImports: [], pnlImportsLoaded: false }));
     try { localStorage.removeItem('amb_user_id'); localStorage.removeItem('amb_token'); } catch {}
   }, []);
 
@@ -397,6 +417,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
 
   const savePnlImportsCb = useCallback(function(imports: PnlImport[]) {
     // Chỉ gửi phần thay đổi (đợt mới / sửa, đợt bị xóa): bảng lãi lỗ rất nặng nên không gửi lại toàn bộ
+    if (!pnlLoadedRef.current) { alert('Dữ liệu lãi lỗ chưa tải xong, hãy thử lại sau ít giây.'); return; }
     const before = pnlImportsRef.current;
     const beforeById = new Map<string, PnlImport>();
     before.forEach(function(i) { beforeById.set(i.id, i); });
@@ -498,7 +519,7 @@ export default function AppProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={{
       ...state,
-      login, logout, addReport, updateReport,
+      login, logout, addReport, updateReport, ensurePnlImports,
       addShop, updateShop, deleteShop,
       updateKPI, updatePlan, updateConfig,
       addUser, updateUser, deleteUser, getUserShops,

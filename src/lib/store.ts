@@ -19,6 +19,8 @@ export interface AppState {
   cogsEntries: CogsEntry[];
   pnlConfig: PnlConfig;
   pnlImports: PnlImport[];
+  pnlImportsLoaded: boolean; // bảng lãi lỗ rất nặng nên chỉ tải khi admin mở trang Lãi lỗ
+  ensurePnlImports: () => Promise<void>;
   checklistTasks: ChecklistTask[];
   checklistEntries: ChecklistEntry[];
   weeklyActions: WeeklyAction[];
@@ -58,7 +60,7 @@ export interface AppState {
   saveMonthlyPlanNote: (note: MonthlyPlanNote) => void;
 }
 
-export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addReport' | 'updateReport' | 'addShop' | 'updateShop' | 'deleteShop' | 'updateKPI' | 'updatePlan' | 'updateConfig' | 'addUser' | 'updateUser' | 'deleteUser' | 'getUserShops' | 'addSkuImport' | 'deleteSkuImport' | 'addAnalytics' | 'deleteAnalytics' | 'addCskhReview' | 'updateCskhReview' | 'addCskhIssue' | 'updateCskhIssue' | 'saveCogs' | 'savePnlConfig' | 'savePnlImports' | 'addPnlImport' | 'saveChecklistTasks' | 'saveChecklistEntries' | 'addWeeklyAction' | 'updateWeeklyAction' | 'deleteWeeklyAction' | 'saveMonthlyPlanNote'> {
+export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addReport' | 'updateReport' | 'addShop' | 'updateShop' | 'deleteShop' | 'updateKPI' | 'updatePlan' | 'updateConfig' | 'addUser' | 'updateUser' | 'deleteUser' | 'getUserShops' | 'addSkuImport' | 'deleteSkuImport' | 'addAnalytics' | 'deleteAnalytics' | 'addCskhReview' | 'updateCskhReview' | 'addCskhIssue' | 'updateCskhIssue' | 'saveCogs' | 'savePnlConfig' | 'savePnlImports' | 'addPnlImport' | 'ensurePnlImports' | 'saveChecklistTasks' | 'saveChecklistEntries' | 'addWeeklyAction' | 'updateWeeklyAction' | 'deleteWeeklyAction' | 'saveMonthlyPlanNote'> {
   return {
     currentUser: null,
     users: [...MOCK_USERS],
@@ -73,6 +75,7 @@ export function createInitialState(): Omit<AppState, 'login' | 'logout' | 'addRe
     cogsEntries: [],
     pnlConfig: { shopeeFeeRate: 34, tiktokFeeRate: 34, opexRate: 16 },
     pnlImports: [],
+    pnlImportsLoaded: false,
     checklistTasks: [],
     checklistEntries: [],
     weeklyActions: [],
