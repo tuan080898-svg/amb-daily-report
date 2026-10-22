@@ -1,5 +1,5 @@
 import type { UserOptions, RowInput } from 'jspdf-autotable';
-import { fmtDate, fmtDateTime, fmtTime, pxkBatchQty, pxkSkuParts, pxkPartsText, slipWarnings, splitShopeeName, summarizePxk, PXK_PLATFORM_LABELS, type PxkBatch, type PxkDaySummary } from './pxk';
+import { fmtDate, fmtDateTime, fmtTime, pxkBatchQty, pxkSkuParts, pxkPartsLabel, slipWarnings, splitShopeeName, summarizePxk, PXK_PLATFORM_LABELS, type PxkBatch, type PxkDaySummary } from './pxk';
 
 // Tải phiếu xuất kho về máy dưới dạng file PDF (khổ A4, giống bản in).
 // Thư viện PDF và font tiếng Việt (DejaVu Sans) chỉ được tải khi bấm "Tải về".
@@ -119,12 +119,12 @@ export async function downloadPxkPdf(batches: PxkBatch[], opts: { showOrders: bo
     var head1: string[]; var body1: RowInput[] = []; var warnFrom = sum.skuLines.length;
     if (shopee) {
       head1 = ['#', 'SKU', 'Tên sản phẩm', 'Phân loại hàng', 'SL', 'Order SN'];
-      sum.skuLines.forEach(function(l, i) { body1.push([i + 1, l.sku, shorten(l.name || '—') + (l.pack ? ' — GÓI SẴN' : '') + (l.parts ? '\nBỘ — mỗi bộ gồm: ' + pxkPartsText(l.parts) : ''), l.variation, l.qty, l.orderIds.join('\n')]); });
+      sum.skuLines.forEach(function(l, i) { body1.push([i + 1, l.sku, shorten(l.name || '—') + (l.pack ? ' — GÓI SẴN' : '') + (l.parts ? '\n' + pxkPartsLabel(l) : ''), l.variation, l.qty, l.orderIds.join('\n')]); });
       sum.unresolved.forEach(function(u, i) { var sp = splitShopeeName(u.name); body1.push([sum.skuLines.length + i + 1, 'chưa có SKU', shorten(sp.name), sp.variation, u.qty, u.orderIds.join('\n')]); });
       body1.push([{ content: 'Tổng cộng', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, { content: String(sum.totalQty), styles: { halign: 'center', fontStyle: 'bold', fontSize: 10 } }, '']);
     } else {
       head1 = ['#', 'SKU', 'Tên sản phẩm', 'Số đơn', 'Số lượng'];
-      sum.skuLines.forEach(function(l, i) { body1.push([i + 1, l.sku, (l.name || '—') + (l.pack ? ' — GÓI SẴN' : '') + (l.parts ? '\nBỘ — mỗi bộ gồm: ' + pxkPartsText(l.parts) : ''), l.orders, l.qty]); });
+      sum.skuLines.forEach(function(l, i) { body1.push([i + 1, l.sku, (l.name || '—') + (l.pack ? ' — GÓI SẴN' : '') + (l.parts ? '\n' + pxkPartsLabel(l) : ''), l.orders, l.qty]); });
       sum.unresolved.forEach(function(u, i) { body1.push([sum.skuLines.length + i + 1, '(chưa có SKU)', u.name, u.orders, u.qty]); });
       body1.push([{ content: 'Tổng cộng', colSpan: 4, styles: { halign: 'right', fontStyle: 'bold' } }, { content: String(sum.totalQty), styles: { halign: 'center', fontStyle: 'bold', fontSize: 10 } }]);
     }

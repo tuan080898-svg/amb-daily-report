@@ -533,6 +533,10 @@ export function repackOrders<T extends { orderId: string; items: PxkItem[] }>(or
   });
 }
 
+// Bộ kho đã LẮP SẴN và đóng nguyên bộ (nhặt nguyên bộ, không nhặt từng món rồi ghép): SKU -> tên hiển thị trong bảng "Quy ra sản phẩm gốc".
+// Các bộ khác (nhiều loại sản phẩm nhưng kho phải nhặt từng món rồi ghép) nằm trong bảng "Bộ cần lắp ghép".
+export var PXK_PREBUILT: Record<string, string> = { 'GH043-1': 'Sofa Da', 'GH043-2': 'Sofa nỉ' };
+
 // Một thành phần của bộ (combo gồm NHIỀU loại sản phẩm khác nhau, vd bộ vệ sinh Sofa = lẻ chai + bàn chải + khăn)
 export interface PxkSkuPart { product: string; skus: string; qty: number }
 
@@ -542,6 +546,7 @@ export interface PxkSkuLine {
   sku: string;
   name: string;
   parts?: PxkSkuPart[]; // có khi SKU là bộ gồm từ 2 loại sản phẩm trở lên
+  prebuilt?: boolean; // bộ kho đã lắp sẵn: nhặt nguyên bộ
   pack?: boolean; // có dòng đổi sang gói sẵn
   qty: number;
   orders: number;
@@ -659,8 +664,15 @@ function comboParts(items: Array<{ product: string; quantity: number }>, baseSku
 }
 
 export function pxkSkuParts(sku: string): PxkSkuPart[] | null {
+  if (PXK_PREBUILT[sku.trim()]) return null; // bộ lắp sẵn: không cần nhặt rời từng món
   var items = getSkuProducts(sku);
   return items.length > 1 ? comboParts(items, baseSkusByProduct()) : null;
+}
+
+// Dòng chú thích dưới SKU là bộ: bộ lắp sẵn ghi rõ "nhặt nguyên bộ", bộ khác ghi "mỗi bộ gồm" để kho nhặt đủ từng món
+export function pxkPartsLabel(l: { parts?: PxkSkuPart[]; prebuilt?: boolean }): string {
+  if (!l.parts) return '';
+  return l.prebuilt ? 'BỘ LẮP SẴN — nhặt nguyên bộ (gồm: ' + pxkPartsText(l.parts) + ')' : 'BỘ — mỗi bộ gồm: ' + pxkPartsText(l.parts);
 }
 
 // "GH043 Lẻ chai vệ sinh Sofa + GH039-1 Bàn chải da + GH046 Khăn lông cừu" (kèm số lượng nếu > 1)
@@ -676,6 +688,7 @@ export function summarizePxk(orders: Array<{ orderId: string; items: PxkItem[] }
   var hasCombo = false;
   var totalQty = 0;
   var baseSkus = baseSkusByProduct();
+  var prebuiltCode: Record<string, string> = {};
   orders.forEach(function(o) {
     var seenSku = new Set<string>();
     var seenUn = new Set<string>();
@@ -700,6 +713,7 @@ export function summarizePxk(orders: Array<{ orderId: string; items: PxkItem[] }
         orders: 0,
         mapped: items.length > 0,
         parts: items.length > 1 ? (comboParts(items, baseSkus) || undefined) : undefined,
+        prebuilt: !!PXK_PREBUILT[sku],
         variation: it.name ? splitShopeeName(it.name).variation : '',
         orderIds: [],
       });
@@ -708,6 +722,13 @@ export function summarizePxk(orders: Array<{ orderId: string; items: PxkItem[] }
       if (!seenSku.has(sku)) { seenSku.add(sku); line.orders += 1; line.orderIds.push(o.orderId); }
       if (items.length === 0) { unmapped.add(sku); return; }
       if (items.length > 1 || items[0].quantity > 1) hasCombo = true;
+      if (PXK_PREBUILT[sku]) {
+        // bộ lắp sẵn: tính nguyên bộ (vd "Sofa Da"), không tách thành từng món
+        var pn = PXK_PREBUILT[sku];
+        prodMap[pn] = (prodMap[pn] || 0) + it.qty;
+        prebuiltCode[pn] = sku;
+        return;
+      }
       items.forEach(function(p) { prodMap[p.product] = (prodMap[p.product] || 0) + p.quantity * it.qty; });
     });
   });
@@ -715,8 +736,8 @@ export function summarizePxk(orders: Array<{ orderId: string; items: PxkItem[] }
     skuLines: Object.values(bySku).sort(function(a, b) { return a.sku.localeCompare(b.sku, undefined, { numeric: true }); }),
     unresolved: Object.values(unresolvedMap).sort(function(a, b) { return b.qty - a.qty; }),
     unmappedSkus: Array.from(unmapped).sort(),
-    productLines: Object.entries(prodMap).map(function(e) { return { product: e[0], skus: (baseSkus[e[0]] || []).join(' / '), qty: e[1] }; }).sort(function(a, b) { return a.product.localeCompare(b.product, 'vi'); }),
-    sets: Object.values(bySku).filter(function(l) { return !!l.parts; }).sort(function(a, b) { return a.sku.localeCompare(b.sku, undefined, { numeric: true }); })
+    productLines: Object.entries(prodMap).map(function(e) { return { product: e[0], skus: prebuiltCode[e[0]] || (baseSkus[e[0]] || []).join(' / '), qty: e[1] }; }).sort(function(a, b) { return a.product.localeCompare(b.product, 'vi'); }),
+    sets: Object.values(bySku).filter(function(l) { return !!l.parts && !l.prebuilt; }).sort(function(a, b) { return a.sku.localeCompare(b.sku, undefined, { numeric: true }); })
       .map(function(l) { return { sku: l.sku, name: l.name, count: l.qty, parts: l.parts as PxkSkuPart[] }; }),
     hasCombo: hasCombo,
     totalQty: totalQty,
@@ -770,7 +791,7 @@ function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
     '<div class="meta">Ngày in phiếu: <b>' + esc(fmtDateTime(batch)) + '</b><br>Số đơn: <b>' + sum.orderCount + '</b> · Tổng SL: <b>' + sum.totalQty + '</b></div></div>';
 
   var shopee = batch.platform === 'shopee';
-  var partsHtml = function(l: PxkSkuLine) { return l.parts ? '<div class="parts"><b>BỘ — mỗi bộ gồm:</b> ' + esc(pxkPartsText(l.parts)) + '</div>' : ''; };
+  var partsHtml = function(l: PxkSkuLine) { return l.parts ? '<div class="parts"><b>' + esc(pxkPartsLabel(l)) + '</b></div>' : ''; };
   var snCell = function(ids: string[]) { return '<td class="sn">' + ids.map(esc).join('<br>') + '</td>'; };
   var warn = '';
   var warnLines = slipWarnings(batch, sum);
