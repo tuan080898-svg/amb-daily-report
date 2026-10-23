@@ -9,6 +9,7 @@ import {
 import { btnCls, btnPrimaryCls, cardCls, inputCls } from './shared';
 
 interface Props {
+  isAdmin: boolean; // chỉ admin được xóa ngày đã lưu, khôi phục từ file và đổi cách tính
   cfg: DcConfig;
   catalog: DcCatalog;
   sessions: DcSession[];
@@ -156,7 +157,7 @@ export default function HistoryView(p: Props) {
                         <td className={'p-2 text-right font-mono ' + (x.c.thieu ? 'text-red-300' : '')}>{x.c.thieu}</td>
                         <td className="p-2 text-right font-mono">{x.c.la}</td><td className="p-2 text-right font-mono">{x.c.khop}</td>
                         <td className="p-2 text-xs text-gray-400">{x.s.nguoiLuu || ''}</td>
-                        <td className="p-2 text-right"><button className={btnCls + (conf.armed === 'd' + x.s.ngay ? ' !border-red-500 !text-red-300' : '')} onClick={function(e) { e.stopPropagation(); conf.ask('d' + x.s.ngay, function() { p.onDelete([x.s.ngay]); }); }}>{conf.armed === 'd' + x.s.ngay ? 'Bấm lần nữa để xóa' : 'Xóa'}</button></td>
+                        <td className="p-2 text-right">{p.isAdmin && <button className={btnCls + (conf.armed === 'd' + x.s.ngay ? ' !border-red-500 !text-red-300' : '')} onClick={function(e) { e.stopPropagation(); conf.ask('d' + x.s.ngay, function() { p.onDelete([x.s.ngay]); }); }}>{conf.armed === 'd' + x.s.ngay ? 'Bấm lần nữa để xóa' : 'Xóa'}</button>}</td>
                       </tr>
                     );
                   })}
@@ -165,7 +166,7 @@ export default function HistoryView(p: Props) {
             )}
           </div>
           {!p.allLoaded && <button className={btnCls + ' mt-3'} onClick={p.onLoadAll} disabled={p.loadingAll}>{p.loadingAll ? 'Đang tải…' : 'Tải các tháng trước'}</button>}
-          <div className="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-slate-700">
+          {p.isAdmin && <div className="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t border-slate-700">
             <label className="text-sm text-gray-400">Xóa các ngày trước</label>
             <input type="date" value={delBefore} onChange={function(e) { setDelBefore(e.target.value); }} className={inputCls} />
             <button className={btnCls + (conf.armed === 'old' ? ' !border-red-500 !text-red-300' : '')} onClick={function() {
@@ -174,19 +175,19 @@ export default function HistoryView(p: Props) {
               if (!olds.length) { p.toast('Không có phiên nào trước ngày ' + dcVnDate(delBefore) + '.'); return; }
               conf.ask('old', function() { p.onDelete(olds); });
             }}>{conf.armed === 'old' ? 'Bấm lần nữa để xóa' : 'Xóa'}</button>
-          </div>
+          </div>}
         </div>
 
         <div className={cardCls + ' !mb-0'}>
           <h2 className="text-sm font-semibold text-gray-200 mb-1">Cách tính</h2>
-          <p className="text-xs text-gray-500 mb-3">Áp dụng cho mọi ngày, kể cả các ngày đã lưu.</p>
+          <p className="text-xs text-gray-500 mb-3">Áp dụng cho mọi ngày, kể cả các ngày đã lưu.{!p.isAdmin && ' Chỉ admin được đổi.'}</p>
           <label className="flex gap-2 items-start text-sm text-gray-300 mb-3 cursor-pointer">
-            <input type="checkbox" className="mt-1" checked={p.cfg.settings.hoanVaoNhap} onChange={function(e) { p.onSaveSettings(Object.assign({}, p.cfg.settings, { hoanVaoNhap: e.target.checked })); }} />
+            <input type="checkbox" className="mt-1" disabled={!p.isAdmin} checked={p.cfg.settings.hoanVaoNhap} onChange={function(e) { p.onSaveSettings(Object.assign({}, p.cfg.settings, { hoanVaoNhap: e.target.checked })); }} />
             <span>Cột Nhập trên sổ gồm cả hàng hoàn và hủy giao quay về kho
               <span className="block text-xs text-gray-500">Bật: so với tổng nhập NCC, kiểm kê tăng, nhận từ kho khác, hàng trả lại và hủy giao trên Sapo. Tắt: bỏ hàng trả lại và hủy giao.</span></span>
           </label>
           <label className="flex gap-2 items-start text-sm text-gray-300 mb-4 cursor-pointer">
-            <input type="checkbox" className="mt-1" checked={p.cfg.settings.xuatKhac} onChange={function(e) { p.onSaveSettings(Object.assign({}, p.cfg.settings, { xuatKhac: e.target.checked })); }} />
+            <input type="checkbox" className="mt-1" disabled={!p.isAdmin} checked={p.cfg.settings.xuatKhac} onChange={function(e) { p.onSaveSettings(Object.assign({}, p.cfg.settings, { xuatKhac: e.target.checked })); }} />
             <span>Tính cả xuất khác của Sapo vào xuất
               <span className="block text-xs text-gray-500">Bật: so tổng xuất trên sổ (các cột người xuất + 3 cột lỗi) với SL bán ra cộng kiểm kê giảm, chuyển kho, trả NCC. Tắt: chỉ so các cột người xuất với SL bán ra; hàng lỗi chỉ ghi nhận.</span></span>
           </label>
@@ -206,7 +207,7 @@ export default function HistoryView(p: Props) {
         }} />
         <div className="flex flex-wrap items-center gap-2">
           <button className={btnPrimaryCls + ' !py-1.5'} onClick={p.onBackup}>Xuất file sao lưu (.json)</button>
-          <button className={btnCls} onClick={function() { if (restoreRef.current) restoreRef.current.click(); }}>Khôi phục từ file (kể cả file của bản offline cũ)</button>
+          {p.isAdmin && <button className={btnCls} onClick={function() { if (restoreRef.current) restoreRef.current.click(); }}>Khôi phục từ file (kể cả file của bản offline cũ)</button>}
           <button className={btnCls} onClick={printSo}>In mẫu trang sổ kho</button>
           {restoreMsg && <span className="text-xs text-gray-300">{restoreMsg}</span>}
         </div>

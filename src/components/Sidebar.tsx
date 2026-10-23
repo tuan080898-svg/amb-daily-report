@@ -56,7 +56,7 @@ const NAV_GROUPS: NavGroup[] = [
     icon: '📦',
     items: [
       { href: '/kho/phieu-xuat', label: 'Phiếu xuất kho', icon: '🧾', roles: ['admin', 'warehouse'] },
-      { href: '/kho/doi-chieu', label: 'Đối chiếu sổ kho', icon: '⚖️', roles: ['admin'] },
+      { href: '/kho/doi-chieu', label: 'Đối chiếu sổ kho', icon: '⚖️', roles: ['admin', 'warehouse'] },
     ],
   },
   {
@@ -99,6 +99,7 @@ const MANAGER_TABS = [
 
 const WAREHOUSE_TABS = [
   { href: '/kho/phieu-xuat', label: 'Phiếu xuất kho', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+  { href: '/kho/doi-chieu', label: 'Đối chiếu sổ kho', icon: 'M3 6l3 1m0 0l-3 9a5 5 0 006 0l-3-9zm12 0l3 1m0 0l-3 9a5 5 0 006 0l-3-9zM12 4v16m-4 0h8' },
 ];
 
 function isItemActive(pathname: string, href: string): boolean {

@@ -44,7 +44,7 @@ export default function GuideView() {
       <ul className={ul}>
         <li>Tab Báo cáo tổng hợp các ngày đã lưu theo tháng: tỷ lệ lệch xuất, tỷ lệ mã lệch, tỷ lệ hàng hỏng (3 loại lỗi) và đánh giá từng nhân sự.</li>
         <li>Đánh giá: Tốt khi lệch ước tính ≤ 1% và lỗi ≤ 0,5% sản lượng; Đạt khi ≤ 3% và ≤ 1%; còn lại Cần xem lại. Lệch ước tính chỉ là chỉ báo, không phải kết luận lỗi của một người.</li>
-        <li>Trang này chỉ admin xem được vì có đánh giá từng nhân sự.</li>
+        <li>Admin và nhân sự kho cùng xem và đối chiếu được. Xóa ngày đã lưu, khôi phục từ file sao lưu và đổi cách tính chỉ admin làm được.</li>
       </ul>
 
       <h3 className={h3}>Kiểm kê</h3>

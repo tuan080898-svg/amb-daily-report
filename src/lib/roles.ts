@@ -2,9 +2,6 @@ import type { UserRole, Region } from './types';
 
 export var WAREHOUSE_HOME = '/kho/phieu-xuat';
 
-// Đối chiếu sổ kho đánh giá từng nhân sự kho nên chỉ admin vào được (máy chủ cũng chặn riêng ở /api/doichieu)
-export var ADMIN_ONLY_KHO = '/kho/doi-chieu';
-
 // Quản lý chi nhánh (Hà Nội / HCM): chỉ XEM doanh số, số lượng bán của các shop thuộc chi nhánh mình.
 // Không xem giá vốn, lãi lỗ; không nhập hay sửa báo cáo; không vào khu quản trị, kho, CSKH.
 export function managerRegion(role: UserRole): Region | null {
@@ -40,7 +37,6 @@ export function roleLabel(role: UserRole): string {
 export function canAccessPath(role: UserRole, pathname: string): boolean {
   var inKho = pathname === '/kho' || pathname.indexOf('/kho/') === 0;
   if (role === 'admin') return true;
-  if (pathname === ADMIN_ONLY_KHO || pathname.indexOf(ADMIN_ONLY_KHO + '/') === 0) return false;
   if (role === 'warehouse') return inKho;
   if (isManagerRole(role)) return MANAGER_PATHS.some(function(p) { return pathname === p || pathname.indexOf(p + '/') === 0; });
   return !inKho;

@@ -28,7 +28,8 @@ function monthBefore(m: string): string {
 
 export default function DoiChieuPage() {
   var { currentUser } = useAppState();
-  var allowed = !!currentUser && currentUser.role === 'admin';
+  var isAdmin = !!currentUser && currentUser.role === 'admin';
+  var allowed = isAdmin || (!!currentUser && currentUser.role === 'warehouse');
 
   var [cfg, setCfg] = useState<DcConfig>(dcDefaultConfig());
   var [catalog, setCatalog] = useState<DcCatalog>({});
@@ -321,7 +322,7 @@ export default function DoiChieuPage() {
     return dcMissingDays(sessions.map(function(s) { return s.ngay; }), from, dcAddDays(today, -1));
   }, [sessions]);
 
-  if (!allowed) return <div className="p-6 text-red-400">Trang này chỉ dành cho admin.</div>;
+  if (!allowed) return <div className="p-6 text-red-400">Trang này chỉ dành cho nhân sự kho và admin.</div>;
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -357,7 +358,7 @@ export default function DoiChieuPage() {
           onSapoFile={onSapoFile} onStaffNew={onStaffNew} onSave={onSave} onDirty={function() { setDirty(true); }} />
       )}
       {!loading && !loadErr && tab === 'ls' && (
-        <HistoryView cfg={cfg} catalog={catalog} sessions={sessions} allLoaded={allLoaded} loadingAll={loadingAll} onLoadAll={loadAllMonths}
+        <HistoryView isAdmin={isAdmin} cfg={cfg} catalog={catalog} sessions={sessions} allLoaded={allLoaded} loadingAll={loadingAll} onLoadAll={loadAllMonths}
           onOpenDay={function(d) { setTab('ngay'); openDay(d); }} onDelete={onDelete}
           onSaveSettings={function(s) { return saveConfigPatch({ settings: s }, 'Đã lưu cài đặt.'); }}
           onSaveBo={function(bo, combos) { return saveConfigPatch({ bo: bo, combos: combos }, 'Đã lưu danh sách bộ.'); }}

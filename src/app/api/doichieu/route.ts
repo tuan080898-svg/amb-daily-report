@@ -3,8 +3,11 @@ import { sessionUser } from '@/lib/server-security';
 import { dcGetConfig, dcSaveConfig, dcGetMonth, dcSaveSessions, dcDeleteSessions, isMonth, isDay } from '@/lib/doichieu-server';
 import type { DcSession, DcBo, DcSettings } from '@/lib/doichieu';
 
-// Đối chiếu sổ kho đánh giá từng nhân sự kho nên chỉ admin được xem và sửa. Quyền lấy từ phiên đăng nhập có chữ ký, không tin dữ liệu từ trình duyệt.
+// Đối chiếu sổ kho: admin và nhân sự kho được xem và đối chiếu (lưu phiên, sửa danh sách nhân sự/bộ/combo); chỉ admin được xóa ngày đã lưu.
+// Quyền lấy từ phiên đăng nhập có chữ ký, không tin dữ liệu từ trình duyệt.
 export const dynamic = 'force-dynamic';
+
+function canUse(role: string): boolean { return role === 'admin' || role === 'warehouse'; }
 
 function fail(status: number, message: string) {
   return NextResponse.json({ error: message }, { status: status, headers: { 'Cache-Control': 'no-store' } });
@@ -36,7 +39,7 @@ export async function GET(req: NextRequest) {
   try {
     const u = await sessionUser(req);
     if (!u) return fail(401, 'Chưa đăng nhập hoặc phiên đã hết hạn');
-    if (u.role !== 'admin') return fail(403, 'Chỉ admin được xem đối chiếu sổ kho');
+    if (!canUse(u.role)) return fail(403, 'Không có quyền xem đối chiếu sổ kho');
     const q = new URL(req.url).searchParams;
     const part = q.get('part') || 'config';
     if (part === 'config') return ok(await dcGetConfig());
@@ -55,7 +58,7 @@ export async function POST(req: NextRequest) {
   try {
     const u = await sessionUser(req);
     if (!u) return fail(401, 'Chưa đăng nhập hoặc phiên đã hết hạn');
-    if (u.role !== 'admin') return fail(403, 'Chỉ admin được sửa đối chiếu sổ kho');
+    if (!canUse(u.role)) return fail(403, 'Không có quyền sửa đối chiếu sổ kho');
     const body = await req.json();
     const action = String(body.action || '');
     const p = body.payload;
@@ -66,6 +69,11 @@ export async function POST(req: NextRequest) {
       if (p.bo !== undefined && !validBo(p.bo)) return fail(400, 'Danh sách bộ không hợp lệ');
       if (p.combos !== undefined && !validPairs(p.combos, 6000)) return fail(400, 'Danh sách combo không hợp lệ');
       if (p.catalog !== undefined && !validPairs(p.catalog, 12000)) return fail(400, 'Danh mục mã không hợp lệ');
+      if (u.role !== 'admin' && p.settings !== undefined) {
+        // nhân sự kho được thêm/sửa danh sách nhân sự, nhưng không đổi cách tính (ảnh hưởng mọi ngày đã lưu)
+        const cur = await dcGetConfig();
+        if (p.settings.hoanVaoNhap !== cur.settings.hoanVaoNhap || p.settings.xuatKhac !== cur.settings.xuatKhac) return fail(403, 'Chỉ admin được đổi cách tính');
+      }
       return ok(await dcSaveConfig({ settings: p.settings, bo: p.bo, combos: p.combos, catalog: p.catalog }));
     }
     if (action === 'saveSessions') {
@@ -74,6 +82,7 @@ export async function POST(req: NextRequest) {
       return ok({ ok: true });
     }
     if (action === 'deleteSessions') {
+      if (u.role !== 'admin') return fail(403, 'Chỉ admin được xóa ngày đã lưu');
       if (!Array.isArray(p) || p.length === 0 || p.length > 400 || !p.every(function(d) { return typeof d === 'string' && isDay(d); })) return fail(400, 'Ngày không hợp lệ');
       return ok({ deleted: await dcDeleteSessions(p as string[]) });
     }
