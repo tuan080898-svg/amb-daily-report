@@ -30,6 +30,9 @@ export async function GET() {
     const st = await fetch(base + '/storage/v1/object/list/pnl-data', { method: 'POST', headers: { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' }, body: JSON.stringify({ prefix: '', limit: 100 }), cache: 'no-store' });
     const files = st.ok ? await st.json() : [];
     out.storageOpen = Array.isArray(files) && files.some(function(f: { name?: string }) { return f.name === 'cogs.json' || f.name === 'imports.json'; });
+    // dữ liệu đối chiếu sổ kho (có đánh giá nhân sự): đọc thử bằng khóa công khai, đọc được nghĩa là còn mở
+    const dc = await fetch(base + '/storage/v1/object/authenticated/sku-data/doichieu/config.json', { headers: { apikey: key, Authorization: 'Bearer ' + key }, cache: 'no-store' });
+    out.doichieuOpen = dc.ok;
     const chk = await adminClient().rpc('amb_key_check');
     out.dbKeyMatches = !chk.error && chk.data === true;
     out.lockInstalled = !chk.error;

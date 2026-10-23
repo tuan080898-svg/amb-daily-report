@@ -3,6 +3,7 @@ import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport,
 import type { InventoryData, InventoryTransaction, InventoryConfig, InventoryPushBatch, Warehouse } from './inventory';
 import { DEFAULT_CONFIG } from './utils';
 import type { PxkData, PxkBatch } from './pxk';
+import type { DcConfig, DcSession, DcSettings, DcBo } from './doichieu';
 
 function db() {
   if (!supabase) throw new Error('Supabase not configured');
@@ -953,4 +954,36 @@ export async function dbSaveMonthlyPlanNote(note: MonthlyPlanNote): Promise<void
     updated_at: new Date().toISOString(),
   });
   if (error) throw new Error('Luu ke hoach that bai: ' + error.message);
+}
+
+// ==================== Đối chiếu sổ kho (qua /api/doichieu, chỉ admin) ====================
+
+export async function dbGetDoiChieuConfig(): Promise<DcConfig> {
+  return callApi<DcConfig>('/api/doichieu?part=config');
+}
+
+export async function dbGetDoiChieuMonth(month: string): Promise<DcSession[]> {
+  const r = await callApi<{ sessions: DcSession[] }>('/api/doichieu?part=month&month=' + encodeURIComponent(month));
+  return r.sessions || [];
+}
+
+export async function dbSaveDoiChieuConfig(patch: { settings?: DcSettings; bo?: DcBo[]; combos?: Array<[string, string]>; catalog?: Array<[string, string]> }): Promise<DcConfig> {
+  return postApi('/api/doichieu', 'saveConfig', patch) as Promise<DcConfig>;
+}
+
+// Chia nhỏ để mỗi lần gửi dưới giới hạn dung lượng của máy chủ (~4 MB)
+export async function dbSaveDoiChieuSessions(list: DcSession[]): Promise<void> {
+  let batch: DcSession[] = [];
+  let size = 0;
+  for (const s of list) {
+    const n = JSON.stringify(s).length;
+    if (batch.length > 0 && (size + n > 2500000 || batch.length >= 30)) { await postApi('/api/doichieu', 'saveSessions', batch); batch = []; size = 0; }
+    batch.push(s); size += n;
+  }
+  if (batch.length > 0) await postApi('/api/doichieu', 'saveSessions', batch);
+}
+
+export async function dbDeleteDoiChieuSessions(days: string[]): Promise<number> {
+  const r = await postApi('/api/doichieu', 'deleteSessions', days) as { deleted: number };
+  return r.deleted;
 }
