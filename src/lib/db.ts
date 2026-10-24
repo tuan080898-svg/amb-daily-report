@@ -4,6 +4,7 @@ import type { InventoryData, InventoryTransaction, InventoryConfig, InventoryPus
 import { DEFAULT_CONFIG } from './utils';
 import type { PxkData, PxkBatch } from './pxk';
 import type { DcConfig, DcSession, DcSettings, DcBo } from './doichieu';
+import type { SkData } from './sokho';
 
 function db() {
   if (!supabase) throw new Error('Supabase not configured');
@@ -986,4 +987,14 @@ export async function dbSaveDoiChieuSessions(list: DcSession[]): Promise<void> {
 export async function dbDeleteDoiChieuSessions(days: string[]): Promise<number> {
   const r = await postApi('/api/doichieu', 'deleteSessions', days) as { deleted: number };
   return r.deleted;
+}
+
+// ==================== Sổ kho thực tế (qua /api/sokho) ====================
+
+export async function dbGetSoKho(): Promise<SkData> {
+  return callApi<SkData>('/api/sokho');
+}
+
+export async function dbSoKhoAction(action: 'addCount' | 'addMove' | 'setKhoUser' | 'removeEntries', payload: Record<string, unknown>): Promise<SkData> {
+  return postApi('/api/sokho', action, payload) as Promise<SkData>;
 }

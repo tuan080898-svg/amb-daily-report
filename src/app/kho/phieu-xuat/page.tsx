@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useAppState } from '@/lib/store';
 import { getAllSkuCodes, getSkuProducts, subscribeSkuMap } from '@/lib/sku';
-import { dbGetPxk, dbUpdatePxk, dbGetPxkArchive } from '@/lib/db';
+import { dbGetPxk, dbUpdatePxk, dbGetPxkArchive, dbGetSoKho } from '@/lib/db';
+import { SK_KHO, SK_KHO_LABEL, type SkKho } from '@/lib/sokho';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
 import {
@@ -67,6 +68,8 @@ export default function PhieuXuatKhoPage() {
   const [dayDate, setDayDate] = useState(todayStr()); // ngày cần xuất phiếu tổng hợp
   const dateTouched = useRef(false); // nhân sự đã tự chọn ngày in phiếu thì không tự đổi nữa
   const dayTouched = useRef(false);
+  const [khoUsers, setKhoUsers] = useState<Record<string, SkKho>>({}); // kho gắn cho từng tài khoản nhân sự kho (Sổ kho › Gán kho)
+  const [khoSel, setKhoSel] = useState<SkKho | ''>(''); // kho xuất hàng khi tài khoản chưa được gắn kho (admin hoặc tài khoản chưa gán)
   const [shopSel, setShopSel] = useState(''); // loại phiếu sắp lập: '' = shop công ty, PXK_STAFF_SHOP = shop nhân sự (tự bán, không thuộc công ty)
   const [dayShop, setDayShop] = useState(PXK_SCOPE_COMPANY); // phạm vi phiếu tổng hợp cuối ngày (mặc định: chỉ shop công ty)
   const [histShop, setHistShop] = useState(''); // lọc lịch sử phiếu theo shop
@@ -114,11 +117,15 @@ export default function PhieuXuatKhoPage() {
   }, [sumMode, sumMonth]);
 
   useEffect(function() {
+    try { var k = localStorage.getItem('pxk-kho'); if (k === 'HCM' || k === 'HN') setKhoSel(k); } catch { /* không đọc được bộ nhớ trình duyệt */ }
+    dbGetSoKho().then(function(d) { setKhoUsers(d.khoUsers || {}); }).catch(function() { /* không đọc được: để người lập phiếu tự chọn kho */ });
     dbGetPxk().then(setData).catch(function(e) { setDataErr(e instanceof Error ? e.message : String(e)); });
     return subscribeSkuMap(function() { setSkuVer(function(v) { return v + 1; }); });
   }, []);
 
   const allowed = !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'warehouse');
+  var myKho: SkKho | '' = currentUser && khoUsers[currentUser.id] ? khoUsers[currentUser.id] : '';
+  var khoUse: SkKho | '' = myKho || khoSel;
   const skuCodes = useMemo(function() { return getAllSkuCodes(); }, [skuVer]);
 
   // Đơn đã có trong các phiếu trước (cùng sàn): mã đơn -> phiếu gần nhất chứa đơn đó
@@ -395,9 +402,11 @@ export default function PhieuXuatKhoPage() {
     var pDate = dateTouched.current ? printDate : todayStr();
     var ready = groups.filter(function(g) { return g.resolved.length > 0; });
     if (ready.length === 0) { setError('Chưa có đơn mới nào để lập phiếu.'); return; }
+    if (!khoUse) { setError('Chọn kho xuất hàng (HCM hay Hà Nội) trước khi lập phiếu, để trừ đúng kho trong Sổ kho.'); return; }
     var lines = ['LẬP VÀ IN ' + ready.length + ' PHIẾU (ngày ' + fmtDate(pDate) + ')', ''];
     if (pDate !== todayStr()) lines.push('⚠ Ngày in phiếu đang là ' + fmtDate(pDate) + ', KHÁC hôm nay (' + fmtDate(todayStr()) + '). Nếu lập phiếu cho hôm nay, bấm Hủy rồi đổi lại ngày in phiếu.', '');
     lines.push(shopSel ? '🛍 PHIẾU CỦA SHOP NHÂN SỰ (nhân sự tự bán, không thuộc công ty)' : 'Phiếu của shop công ty', '');
+    lines.push('📦 Trừ sổ kho: ' + SK_KHO_LABEL[khoUse as SkKho] + (totalOld > 0 ? ' (đơn đã có phiếu trước đó không bị trừ lại)' : ''), '');
     ready.forEach(function(g) {
       var noSku = g.summary.unresolved.reduce(function(s, u) { return s + u.qty; }, 0);
       lines.push('• ' + PXK_PLATFORM_LABELS[g.platform] + ': ' + g.resolved.length + ' đơn, ' + g.summary.totalQty + ' sản phẩm' +
@@ -424,14 +433,14 @@ export default function PhieuXuatKhoPage() {
           return { orderId: r.orderId, items: r.items, note: r.note, fi: fi, pg: src.pages };
         });
         return {
-          id: makeBatchId(), platform: g.platform, printDate: pDate, createdAt: createdAt, createdBy: by, shop: shopSel || undefined,
+          id: makeBatchId(), platform: g.platform, printDate: pDate, createdAt: createdAt, createdBy: by, shop: shopSel || undefined, warehouse: khoUse as SkKho,
           issues: g.bad.map(function(o) { return o.orderId || ('trang ' + o.pages.join('-')); }),
           notes: noteForOld(g).concat(noteForQty(g)),
           orders: stored,
           files: fileNames,
         };
       });
-      var msg = 'Đã lập ' + batches.length + ' phiếu: ' + batches.map(function(b) { return b.id; }).join(', ') + '.';
+      var msg = 'Đã lập ' + batches.length + ' phiếu: ' + batches.map(function(b) { return b.id; }).join(', ') + '. Phiếu ghi vào ' + SK_KHO_LABEL[khoUse as SkKho] + ' (Sổ kho tự trừ từ sau lần kiểm kho gần nhất, mỗi đơn chỉ trừ một lần).';
       try {
         await saveChain.current; // đợi các lần ghi nhớ SKU đang chạy xong rồi mới ghi phiếu, tránh ghi đè lẫn nhau
         var learned: Record<string, string> = {};
@@ -576,6 +585,15 @@ export default function PhieuXuatKhoPage() {
               <option value="">Shop công ty</option>
               <option value={PXK_STAFF_SHOP}>Shop nhân sự (nhân sự tự bán, không thuộc công ty)</option>
             </select>
+          </div>
+          <div>
+            <div className="text-xs text-gray-400 mb-1.5">Kho xuất hàng (trừ Sổ kho)</div>
+            {myKho ? <div className={inputCls + ' text-emerald-300'}>{SK_KHO_LABEL[myKho]} (kho của tài khoản bạn)</div> : (
+              <select value={khoSel} onChange={function(e) { var v = e.target.value as SkKho | ''; setKhoSel(v); try { localStorage.setItem('pxk-kho', v); } catch { /* không đọc được */ } }} className={inputCls + (khoSel ? '' : ' border-red-500')}>
+                <option value="">Chọn kho…</option>
+                {SK_KHO.map(function(k) { return <option key={k} value={k}>{SK_KHO_LABEL[k]}</option>; })}
+              </select>
+            )}
           </div>
           {files.length > 0 && <button onClick={reset} className="px-3 py-2 text-sm text-gray-400 hover:text-gray-200">Làm lại (xóa hết file)</button>}
         </div>
