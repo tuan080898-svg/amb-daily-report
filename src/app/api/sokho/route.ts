@@ -104,6 +104,11 @@ export async function POST(req: NextRequest) {
         return d;
       }));
     }
+    if (action === 'setDeduct') {
+      if (typeof p.on !== 'boolean') return fail(400, 'Dữ liệu không hợp lệ');
+      const on: boolean = p.on;
+      return ok(await skMutate(function(d) { d.deductFromSlips = on; return d; }));
+    }
     if (action === 'addExtra') {
       if (!okName(p.name)) return fail(400, 'Tên sản phẩm không hợp lệ');
       const nm: string = p.name.trim();

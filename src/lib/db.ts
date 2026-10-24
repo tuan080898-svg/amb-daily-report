@@ -995,6 +995,6 @@ export async function dbGetSoKho(): Promise<SkData> {
   return callApi<SkData>('/api/sokho');
 }
 
-export async function dbSoKhoAction(action: 'addCount' | 'addMove' | 'setKhoUser' | 'removeEntries' | 'hideProduct' | 'addExtra' | 'removeExtra' | 'bulkProducts', payload: Record<string, unknown>): Promise<SkData> {
+export async function dbSoKhoAction(action: 'addCount' | 'addMove' | 'setKhoUser' | 'removeEntries' | 'hideProduct' | 'addExtra' | 'removeExtra' | 'bulkProducts' | 'setDeduct', payload: Record<string, unknown>): Promise<SkData> {
   return postApi('/api/sokho', action, payload) as Promise<SkData>;
 }

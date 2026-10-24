@@ -307,6 +307,16 @@ export default function SoKhoPage() {
     setBusy(false);
   }
 
+  async function toggleDeduct(on: boolean) {
+    var ask = on
+      ? 'BẬT trừ kho theo phiếu xuất kho?\n\nTừ lúc bật, mọi phiếu lập sau số kiểm kho của từng sản phẩm (kể cả phiếu đã lập trong thời gian tạm dừng) sẽ bị trừ vào tồn. Chỉ nên bật khi đã kiểm kho đủ các sản phẩm đang theo dõi, nếu không tồn sẽ lệch.'
+      : 'TẠM DỪNG trừ kho theo phiếu xuất kho? Sổ kho chỉ còn lưu số kiểm kho, nhập hàng và điều chỉnh.';
+    if (!window.confirm(ask)) return;
+    setBusy(true);
+    try { setSk(await dbSoKhoAction('setDeduct', { on: on })); say(on ? 'Đã bật trừ kho theo phiếu.' : 'Đã tạm dừng trừ kho theo phiếu.'); } catch (e) { say(e instanceof Error ? e.message : 'Không lưu được.'); }
+    setBusy(false);
+  }
+
   async function setUserKho(userId: string, k: SkKho | '') {
     setBusy(true);
     try { setSk(await dbSoKhoAction('setKhoUser', { userId: userId, kho: k === '' ? null : k })); say('Đã lưu.'); } catch (e) { say(e instanceof Error ? e.message : 'Không lưu được.'); }
@@ -328,7 +338,7 @@ export default function SoKhoPage() {
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-100">Sổ kho thực tế</h1>
-          <p className="text-sm text-gray-500 mt-1">Nhập số hàng đếm thực tế tại một thời điểm, sau đó các phiếu xuất kho tự trừ vào kho. Mỗi đơn chỉ trừ một lần, lập lại phiếu không trừ thêm.</p>
+          <p className="text-sm text-gray-500 mt-1">Nhập số hàng đếm thực tế tại một thời điểm và lưu trữ nhập hàng, điều chỉnh. {sk.deductFromSlips ? 'Phiếu xuất kho lập sau đó tự trừ vào kho, mỗi đơn chỉ trừ một lần.' : 'Việc tự trừ kho theo phiếu xuất kho đang tạm dừng.'}</p>
         </div>
         <div>
           <div className="text-xs text-gray-500 mb-1">Kho</div>
@@ -352,18 +362,26 @@ export default function SoKhoPage() {
 
       {!loading && !err && tab === 'ton' && (
         <div>
+          {!sk.deductFromSlips ? (
+            <div className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-sm text-amber-200 flex flex-wrap items-center justify-between gap-2">
+              <span><b>Đang tạm dừng trừ kho theo phiếu xuất kho.</b> Sổ kho hiện chỉ lưu số kiểm kho, nhập hàng và điều chỉnh; tồn = số kiểm gần nhất + nhập/điều chỉnh. Chờ kiểm đủ kho rồi bật lại.</span>
+              {isAdmin && <button className={btnCls} disabled={busy} onClick={function() { toggleDeduct(true); }}>Bật trừ kho theo phiếu</button>}
+            </div>
+          ) : (
+            isAdmin && <div className="mb-3 text-xs text-gray-500">Đang trừ kho theo phiếu xuất kho. <button className="underline text-gray-400 hover:text-gray-200" disabled={busy} onClick={function() { toggleDeduct(false); }}>Tạm dừng</button></div>
+          )}
           {!isAdmin && !myKho && <div className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-sm text-amber-200">Tài khoản của bạn chưa được gán kho. Nhờ admin gán ở Sổ kho → Gán kho cho tài khoản; trong lúc chờ bạn xem được cả hai kho.</div>}
           {!lastCount && <div className="mb-3 p-3 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sm text-sky-200">{SK_KHO_LABEL[kho]} chưa có số kiểm kho nào. Admin vào tab “Kiểm kho” nhập số thực tế, từ đó phiếu xuất kho mới bắt đầu trừ.</div>}
-          {lastCount && <div className="mb-3 text-sm text-gray-400">Kiểm kho gần nhất: <b className="text-gray-200">{fmtAt(lastCount.at)}</b> ({lastCount.n} sản phẩm, {lastCount.by || 'không rõ người'}). Phiếu lập sau thời điểm này mới trừ kho.</div>}
-          {calc.noKho.length > 0 && <div className="mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-200">{calc.noKho.length} phiếu lập sau lần kiểm kho nhưng KHÔNG ghi kho nên chưa trừ được (phiếu lập trước khi có tính năng chọn kho): {calc.noKho.slice(0, 8).map(function(n) { return n.id + ' (' + n.orders + ' đơn)'; }).join(', ')}{calc.noKho.length > 8 ? ' và ' + (calc.noKho.length - 8) + ' phiếu khác' : ''}.</div>}
-          {calc.unmapped.length > 0 && (
+          {lastCount && <div className="mb-3 text-sm text-gray-400">Kiểm kho gần nhất: <b className="text-gray-200">{fmtAt(lastCount.at)}</b> ({lastCount.n} sản phẩm, {lastCount.by || 'không rõ người'}).{sk.deductFromSlips ? ' Phiếu lập sau thời điểm này mới trừ kho.' : ''}</div>}
+          {sk.deductFromSlips && calc.noKho.length > 0 && <div className="mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-200">{calc.noKho.length} phiếu lập sau lần kiểm kho nhưng KHÔNG ghi kho nên chưa trừ được (phiếu lập trước khi có tính năng chọn kho): {calc.noKho.slice(0, 8).map(function(n) { return n.id + ' (' + n.orders + ' đơn)'; }).join(', ')}{calc.noKho.length > 8 ? ' và ' + (calc.noKho.length - 8) + ' phiếu khác' : ''}.</div>}
+          {sk.deductFromSlips && calc.unmapped.length > 0 && (
             <details className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-sm text-amber-200">
               <summary className="cursor-pointer">{calc.unmapped.length} loại hàng trong phiếu chưa quy ra được sản phẩm nên CHƯA trừ kho (bấm để xem)</summary>
               <ul className="mt-2 list-disc pl-5 text-xs">{calc.unmapped.slice(0, 40).map(function(u) { return <li key={u.key}>{u.key.indexOf('sku:') === 0 ? 'SKU ' : 'Chưa có SKU: '}{u.label} — {fmt(u.qty)} cái (phiếu {u.batches.join(', ')})</li>; })}</ul>
               <div className="text-xs mt-1">Sửa bảng quy đổi SKU (hoặc gắn SKU cho dòng chưa có SKU), phiếu cũ sẽ tự tính lại.</div>
             </details>
           )}
-          {calc.dupOrders > 0 && <div className="mb-3 text-xs text-gray-500">Đã bỏ qua {calc.dupOrders} đơn lặp trong các phiếu (không trừ lần hai).</div>}
+          {sk.deductFromSlips && calc.dupOrders > 0 && <div className="mb-3 text-xs text-gray-500">Đã bỏ qua {calc.dupOrders} đơn lặp trong các phiếu (không trừ lần hai).</div>}
 
           <div className="flex flex-wrap items-center gap-2 mb-3">
             <input value={q} onChange={function(e) { setQ(e.target.value); }} placeholder="Tìm sản phẩm hoặc mã SKU…" className={inputCls + ' w-64'} />
@@ -414,7 +432,7 @@ export default function SoKhoPage() {
                       <td className="p-2"><div className="text-gray-100">{r.product}</div><div className="text-xs text-gray-500">{(skuOf[r.product] || []).slice(0, 4).join(' · ')}</div></td>
                       <td className="p-2 text-right font-mono">{r.anchor ? <>{fmt(r.anchor.qty)}<div className="text-xs text-gray-500">{fmtAt(r.anchor.at)}</div></> : <span className="text-gray-600">chưa kiểm</span>}</td>
                       <td className="p-2 text-right font-mono">{r.moveQty ? (r.moveQty > 0 ? '+' : '') + fmt(r.moveQty) : '—'}</td>
-                      <td className="p-2 text-right font-mono">{r.slipQty ? '−' + fmt(r.slipQty) : '—'}</td>
+                      <td className="p-2 text-right font-mono">{!sk.deductFromSlips ? <span className="text-gray-600 text-xs">tạm dừng</span> : r.slipQty ? '−' + fmt(r.slipQty) : '—'}</td>
                       <td className={'p-2 text-right font-mono font-semibold ' + (r.stock === null ? 'text-gray-600' : r.stock < 0 ? 'text-red-300' : 'text-emerald-300')}>{r.stock === null ? '—' : fmt(r.stock)}</td>
                       {inv && <td className="p-2 text-right font-mono text-gray-400">{app === null ? '—' : fmt(app)}</td>}
                       {inv && <td className={'p-2 text-right font-mono ' + (diff === null || diff === 0 ? 'text-gray-600' : 'text-amber-300')}>{diff === null ? '—' : diff === 0 ? '0' : (diff > 0 ? '+' : '') + fmt(diff)}</td>}

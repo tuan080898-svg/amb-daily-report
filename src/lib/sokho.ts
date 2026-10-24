@@ -43,9 +43,10 @@ export interface SkData {
   moves: SkMove[];
   hidden: Record<SkKho, string[]>; // sản phẩm Sếp đã bỏ khỏi danh sách của từng kho (không xóa dữ liệu, hiện lại được)
   extra: string[]; // sản phẩm Sếp tự thêm, ngoài bảng quy đổi SKU (vd vật tư đóng gói)
+  deductFromSlips: boolean; // false (mặc định) = sổ kho chỉ lưu số kiểm kho, nhập hàng, điều chỉnh; phiếu xuất kho CHƯA trừ. Bật khi đã kiểm đủ kho.
 }
 
-export function skEmptyData(): SkData { return { khoUsers: {}, anchors: [], moves: [], hidden: { HCM: [], HN: [] }, extra: [] }; }
+export function skEmptyData(): SkData { return { khoUsers: {}, anchors: [], moves: [], hidden: { HCM: [], HN: [] }, extra: [], deductFromSlips: false }; }
 
 // Danh sách sản phẩm đang theo dõi của một kho: sản phẩm trong bảng quy đổi SKU + sản phẩm tự thêm, trừ sản phẩm đã bỏ
 export function skVisibleProducts(fromMapping: string[], data: SkData, kho: SkKho): string[] {
@@ -143,7 +144,7 @@ export function skStock(data: SkData, calc: SkSlipCalc, kho: SkKho, products: st
     var moveQty = 0;
     data.moves.forEach(function(m) { if (m.kho === kho && m.product === p && ms(m.at) > from) moveQty += m.qty; });
     var slipQty = 0;
-    calc.deducts.forEach(function(d) { if (d.kho === kho && d.product === p && d.batchAt > from) slipQty += d.qty; });
+    if (data.deductFromSlips === true) calc.deducts.forEach(function(d) { if (d.kho === kho && d.product === p && d.batchAt > from) slipQty += d.qty; });
     rows.push({ product: p, kho: kho, anchor: anchor, moveQty: moveQty, slipQty: slipQty, stock: anchor ? anchor.qty + moveQty - slipQty : null });
   });
   return rows.sort(function(a, b) { return a.product.localeCompare(b.product, 'vi'); });
@@ -163,7 +164,7 @@ export function skProductHistory(data: SkData, calc: SkSlipCalc, kho: SkKho, pro
     if (m.kho === kho && m.product === product) out.push({ at: ms(m.at), kind: m.type === 'import' ? 'nhap' : 'dieuchinh', qty: m.qty, label: (m.type === 'import' ? 'Nhập hàng' : 'Điều chỉnh') + (m.note ? ': ' + m.note : '') + ' (' + m.by + ')', counted: ms(m.at) > from });
   });
   calc.deducts.forEach(function(d) {
-    if (d.kho === kho && d.product === product) out.push({ at: d.batchAt, kind: 'phieu', qty: -d.qty, label: 'Phiếu ' + d.batchId, counted: d.batchAt > from });
+    if (d.kho === kho && d.product === product) out.push({ at: d.batchAt, kind: 'phieu', qty: -d.qty, label: 'Phiếu ' + d.batchId + (data.deductFromSlips === true ? '' : ' (đang tạm dừng trừ kho theo phiếu)'), counted: data.deductFromSlips === true && d.batchAt > from });
   });
   return out.sort(function(a, b) { return b.at - a.at; });
 }
