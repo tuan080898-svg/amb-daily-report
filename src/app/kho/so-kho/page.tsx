@@ -8,7 +8,7 @@ import { dbGetPxk, dbGetPxkArchive, dbGetSoKho, dbSoKhoAction } from '@/lib/db';
 import { getCurrentStock, refreshInventory, type InventoryData } from '@/lib/inventory';
 import type { PxkBatch } from '@/lib/pxk';
 import {
-  SK_KHO, SK_KHO_LABEL, skCalcSlips, skEmptyData, skParseCount, skProductHistory, skStock, skVisibleProducts,
+  SK_KHO, SK_KHO_LABEL, skCalcSlips, skEmptyData, skParseCount, skParseCountSheet, skParseProductSheet, skProductHistory, skStock, skVisibleProducts,
   type SkData, type SkKho, type SkRow, type SkSlipCalc,
 } from '@/lib/sokho';
 
@@ -174,6 +174,35 @@ export default function SoKhoPage() {
     setBusy(false);
   }
 
+  async function readSheet(file: File): Promise<unknown[][]> {
+    var wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+    return XLSX.utils.sheet_to_json<unknown[]>(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null }) as unknown[][];
+  }
+
+  var [listMode, setListMode] = useState<'them' | 'giu'>('them');
+  var [listMsg, setListMsg] = useState('');
+
+  async function importProductFile(file: File) {
+    setListMsg('');
+    try {
+      var known = allProducts.concat(sk.extra || [], sk.hidden[kho] || []);
+      var r = skParseProductSheet(await readSheet(file), known, getSkuProducts);
+      if (!r.names.length) { setListMsg('Không đọc được sản phẩm nào trong file. Cần cột "Sản phẩm" (hoặc "Mã SKU").' + (r.errors.length ? ' ' + r.errors.slice(0, 3).join(' | ') : '')); return; }
+      var inFile = new Set(r.names);
+      var toShow = r.names.filter(function(n) { return products.indexOf(n) < 0; });
+      var toHide = listMode === 'giu' ? products.filter(function(p) { return !inFile.has(p); }) : [];
+      if (!toShow.length && !toHide.length) { setListMsg('Danh sách trong file đã khớp với danh sách hiện tại, không có gì thay đổi.'); return; }
+      var ask = 'Nhập danh sách sản phẩm cho ' + SK_KHO_LABEL[kho] + ' từ file (' + r.names.length + ' sản phẩm):\n\n• Thêm / hiện lại: ' + toShow.length + (r.isNew.length ? ' (trong đó ' + r.isNew.length + ' sản phẩm MỚI ngoài bảng quy đổi SKU: ' + r.isNew.slice(0, 6).join(', ') + (r.isNew.length > 6 ? '…' : '') + ')' : '') + '\n• Bỏ khỏi danh sách: ' + toHide.length + (toHide.length ? ' (số liệu vẫn giữ, hiện lại được)' : '') + (r.errors.length ? '\n• Bỏ qua ' + r.errors.length + ' dòng không hợp lệ' : '') + '\n\nTiếp tục?';
+      if (!window.confirm(ask)) return;
+      setBusy(true);
+      try {
+        setSk(await dbSoKhoAction('bulkProducts', { kho: kho, show: r.names, hide: toHide, addExtra: r.isNew }));
+        setListMsg('Đã cập nhật: thêm/hiện lại ' + toShow.length + ', bỏ ' + toHide.length + '.' + (r.errors.length ? ' Bỏ qua: ' + r.errors.slice(0, 3).join(' | ') : ''));
+      } catch (e) { setListMsg(e instanceof Error ? e.message : 'Không lưu được.'); }
+      setBusy(false);
+    } catch { setListMsg('Không đọc được file Excel này.'); }
+  }
+
   async function removeProduct(r: SkRow) {
     var hasData = r.anchor !== null || r.moveQty !== 0 || r.slipQty !== 0;
     var isExtra = sk.extra.indexOf(r.product) >= 0;
@@ -208,6 +237,28 @@ export default function SoKhoPage() {
     setCountVals(next);
     setPasteMsg('Đã điền ' + r.items.length + ' sản phẩm.' + (r.errors.length ? ' ' + r.errors.length + ' dòng bỏ qua: ' + r.errors.slice(0, 4).join(' | ') : ''));
     if (!r.errors.length) setPasteText('');
+  }
+
+  var [fileMsg, setFileMsg] = useState('');
+
+  function downloadCountTemplate() {
+    var aoa: Array<Array<string | number>> = [['Sản phẩm', 'Mã SKU', 'Tồn hiện tại', 'Số đếm thực tế']];
+    rows.forEach(function(r) { aoa.push([r.product, (skuOf[r.product] || []).join(' / '), r.stock === null ? '' : r.stock, '']); });
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Kiem kho ' + kho);
+    XLSX.writeFile(wb, 'mau-kiem-kho-' + kho + '.xlsx');
+  }
+
+  async function importCountFile(file: File) {
+    setFileMsg('');
+    try {
+      var r = skParseCountSheet(await readSheet(file), products, getSkuProducts);
+      if (!r.items.length) { setFileMsg('Không đọc được số lượng nào. Cần cột "Sản phẩm" (hoặc "Mã SKU") và cột "Số đếm thực tế" (hoặc "Số kiểm kho", "Số lượng").' + (r.errors.length ? ' ' + r.errors.slice(0, 3).join(' | ') : '')); return; }
+      var next = Object.assign({}, countVals);
+      r.items.forEach(function(i) { next[i.product] = String(i.qty); });
+      setCountVals(next);
+      setFileMsg('Đã điền ' + r.items.length + ' sản phẩm từ cột "' + r.qtyHeader + '" (chưa lưu, hãy kiểm tra rồi bấm Lưu kiểm kho).' + (r.errors.length ? ' ' + r.errors.length + ' dòng bỏ qua: ' + r.errors.slice(0, 4).join(' | ') : ''));
+    } catch { setFileMsg('Không đọc được file Excel này.'); }
   }
 
   async function saveCount() {
@@ -333,6 +384,17 @@ export default function SoKhoPage() {
                 <button className={btnPrimaryCls + ' !py-1.5'} disabled={busy} onClick={addProduct}>Thêm vào {SK_KHO_LABEL[kho]}</button>
                 <button className={btnCls} onClick={function() { setAddOpen(false); }}>Đóng</button>
               </div>
+              <div className="mt-3 pt-3 border-t border-slate-700">
+                <div className="text-xs text-gray-500 mb-2">Hoặc nhập cả danh sách từ file Excel (cột "Sản phẩm" hoặc "Mã SKU"; dùng được file vừa tải ở nút Tải Excel).</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select value={listMode} onChange={function(e) { setListMode(e.target.value as 'them' | 'giu'); }} className={inputCls}>
+                    <option value="them">Chỉ thêm / hiện lại các sản phẩm trong file</option>
+                    <option value="giu">Chỉ giữ các sản phẩm trong file (bỏ phần còn lại)</option>
+                  </select>
+                  <label className={btnCls + ' cursor-pointer'}>Chọn file Excel…<input type="file" accept=".xlsx,.xls" className="hidden" disabled={busy} onChange={function(e) { var f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) importProductFile(f); }} /></label>
+                </div>
+                {listMsg && <div className="text-xs text-gray-300 mt-2">{listMsg}</div>}
+              </div>
             </div>
           )}
 
@@ -390,6 +452,11 @@ export default function SoKhoPage() {
             <div className="flex flex-wrap items-end gap-3 mb-3">
               <div><div className="text-xs text-gray-400 mb-1">Thời điểm kiểm kho</div><input type="datetime-local" value={countAt} onChange={function(e) { setCountAt(e.target.value); }} className={inputCls} /></div>
               <div className="flex-1 min-w-[200px]"><div className="text-xs text-gray-400 mb-1">Ghi chú</div><input value={countNote} onChange={function(e) { setCountNote(e.target.value); }} placeholder="VD: Kiểm kho toàn bộ 24/10" className={inputCls + ' w-full'} /></div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <button className={btnCls} onClick={downloadCountTemplate}>Tải file mẫu kiểm kho</button>
+              <label className={btnCls + ' cursor-pointer'}>Nhập số đếm từ file Excel…<input type="file" accept=".xlsx,.xls" className="hidden" onChange={function(e) { var f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) importCountFile(f); }} /></label>
+              {fileMsg && <span className="text-xs text-gray-300">{fileMsg}</span>}
             </div>
             <details className="mb-3">
               <summary className="cursor-pointer text-sm text-gray-300">Dán bảng từ Excel (Tên sản phẩm hoặc SKU lẻ + số lượng)</summary>

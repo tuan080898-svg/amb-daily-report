@@ -84,6 +84,26 @@ export async function POST(req: NextRequest) {
         return d;
       }));
     }
+    if (action === 'bulkProducts') {
+      // áp một lần nhiều thay đổi danh sách sản phẩm của một kho (nhập từ file Excel): hiện lại / ẩn / thêm tự do
+      const lists = ['show', 'hide', 'addExtra'].map(function(k) { return p[k] === undefined ? [] : p[k]; });
+      if (!isKho(p.kho) || !lists.every(function(l) { return Array.isArray(l) && l.length <= 700 && l.every(okName); })) return fail(400, 'Dữ liệu không hợp lệ');
+      const k2: SkKho = p.kho;
+      const show = new Set<string>((lists[0] as string[]).map(function(x) { return x.trim(); }));
+      const hide = (lists[1] as string[]).map(function(x) { return x.trim(); });
+      const add = (lists[2] as string[]).map(function(x) { return x.trim(); });
+      return ok(await skMutate(function(d) {
+        const ex = new Set<string>(d.extra || []);
+        add.forEach(function(x) { ex.add(x); });
+        if (ex.size > 500) throw new Error('Quá nhiều sản phẩm tự thêm');
+        d.extra = Array.from(ex);
+        const hid = new Set<string>(d.hidden[k2] || []);
+        hide.forEach(function(x) { hid.add(x); });
+        show.forEach(function(x) { hid.delete(x); });
+        d.hidden = Object.assign({}, d.hidden, { [k2]: Array.from(hid) });
+        return d;
+      }));
+    }
     if (action === 'addExtra') {
       if (!okName(p.name)) return fail(400, 'Tên sản phẩm không hợp lệ');
       const nm: string = p.name.trim();

@@ -204,3 +204,88 @@ export function skParseCount(text: string, products: string[], getProducts: (sku
   });
   return { items: Object.keys(sum).map(function(p) { return { product: p, qty: sum[p] }; }), errors: errors };
 }
+
+// ---------- đọc file Excel kiểm kho ----------
+// File mẫu tải từ trang (Sản phẩm | Mã SKU | Tồn hiện tại | Số đếm thực tế) hoặc file "Tải Excel" của bảng tồn (có cột "Số kiểm kho"). Cột số lượng chọn theo thứ tự ưu tiên;
+// ô số lượng để trống thì bỏ qua (nên file mẫu chỉ điền những sản phẩm đã đếm). Không có dòng tiêu đề: cột 1 là tên/SKU, cột 2 là số lượng.
+export interface SkParsedSheet extends SkParsedCount { qtyHeader: string; rows: number }
+
+var QTY_HEADERS: RegExp[] = [/^số đếm/, /^số kiểm/, /^đếm thực tế/, /^thực tế/, /^số lượng/, /^sl$/, /^tồn kiểm/, /^tồn thực/, /^tồn$/, /^tồn hiện tại/];
+
+export function skParseCountSheet(aoa: unknown[][], products: string[], getProducts: (sku: string) => Array<{ product: string; quantity: number }>): SkParsedSheet {
+  var cellStr = function(c: unknown) { return String(c === null || c === undefined ? '' : c).trim(); };
+  var low = function(c: unknown) { return cellStr(c).normalize('NFC').toLowerCase(); };
+  var nameSet = new Set(products.map(normName));
+  var hRow = -1, nameCol = -1, skuCol = -1, qtyCol = -1, qtyHeader = '';
+  for (var i = 0; i < Math.min(10, aoa.length) && hRow < 0; i++) {
+    var cells = (aoa[i] || []).map(low);
+    var nc = cells.findIndex(function(c) { return /^(sản phẩm|tên sản phẩm|tên hàng|tên)$/.test(c); });
+    var sc = cells.findIndex(function(c) { return /^(mã sku|sku|mã hàng|mã)$/.test(c); });
+    var qc = -1, qh = '';
+    for (var k = 0; k < QTY_HEADERS.length && qc < 0; k++) {
+      qc = cells.findIndex(function(c) { return QTY_HEADERS[k].test(c); });
+      if (qc >= 0) qh = cellStr((aoa[i] || [])[qc]);
+    }
+    if ((nc >= 0 || sc >= 0) && qc >= 0) { hRow = i; nameCol = nc; skuCol = sc; qtyCol = qc; qtyHeader = qh; }
+  }
+  if (hRow < 0) { hRow = -1; nameCol = 0; skuCol = -1; qtyCol = 1; qtyHeader = '(cột thứ 2)'; }
+  var lines: string[] = [];
+  var rows = 0;
+  for (var r = hRow + 1; r < aoa.length; r++) {
+    var row = aoa[r] || [];
+    var qty = cellStr(row[qtyCol]);
+    if (qty === '') continue;
+    var nm = nameCol >= 0 ? cellStr(row[nameCol]) : '';
+    var sku = skuCol >= 0 ? cellStr(row[skuCol]) : '';
+    var label = nm && nameSet.has(normName(nm)) ? nm : (sku && sku.indexOf('/') < 0 && sku.indexOf('·') < 0 ? sku : nm || sku);
+    if (!label) continue;
+    rows++;
+    lines.push(label.replace(/\t/g, ' ') + '\t' + qty);
+  }
+  var res = skParseCount(lines.join('\n'), products, getProducts);
+  return { items: res.items, errors: res.errors, qtyHeader: qtyHeader, rows: rows };
+}
+
+// ---------- đọc file Excel danh sách sản phẩm ----------
+// Lấy cột tên sản phẩm (tiêu đề "Sản phẩm"/"Tên sản phẩm"/"Tên") hoặc cột SKU (SKU lẻ quy ra sản phẩm). Không có tiêu đề: cột 1.
+// known = các sản phẩm đã biết (bảng quy đổi SKU + tự thêm + đã ẩn); tên không nằm trong đó sẽ thành sản phẩm tự thêm (isNew).
+export interface SkParsedProducts { names: string[]; isNew: string[]; errors: string[] }
+
+export function skParseProductSheet(aoa: unknown[][], known: string[], getProducts: (sku: string) => Array<{ product: string; quantity: number }>): SkParsedProducts {
+  var cellStr = function(c: unknown) { return String(c === null || c === undefined ? '' : c).trim(); };
+  var byKey: Record<string, string> = {};
+  known.forEach(function(p) { byKey[normName(p)] = p; });
+  var hRow = -1, nameCol = -1, skuCol = -1;
+  for (var i = 0; i < Math.min(10, aoa.length) && hRow < 0; i++) {
+    var cells = (aoa[i] || []).map(function(c) { return cellStr(c).normalize('NFC').toLowerCase(); });
+    var nc = cells.findIndex(function(c) { return /^(sản phẩm|tên sản phẩm|tên hàng|tên)$/.test(c); });
+    var sc = cells.findIndex(function(c) { return /^(mã sku|sku|mã hàng|mã)$/.test(c); });
+    if (nc >= 0 || sc >= 0) { hRow = i; nameCol = nc; skuCol = sc; }
+  }
+  if (hRow < 0) { nameCol = 0; }
+  var seen = new Set<string>();
+  var names: string[] = [];
+  var isNew: string[] = [];
+  var errors: string[] = [];
+  for (var r = hRow + 1; r < aoa.length; r++) {
+    var row = aoa[r] || [];
+    var nm = nameCol >= 0 ? cellStr(row[nameCol]) : '';
+    var sku = skuCol >= 0 ? cellStr(row[skuCol]) : '';
+    if (!nm && !sku) continue;
+    var p = nm ? byKey[normName(nm)] : undefined;
+    if (!p && sku && sku.indexOf('/') < 0 && sku.indexOf('·') < 0) {
+      var ps = getProducts(sku.toUpperCase().replace(/\s+/g, ''));
+      if (ps.length === 1 && ps[0].quantity === 1) p = ps[0].product;
+      else if (ps.length > 0 && !nm) { errors.push('Mã ' + sku + ' là combo/bộ, hãy ghi tên sản phẩm lẻ'); continue; }
+    }
+    if (!p) {
+      if (!nm) { errors.push('Không có sản phẩm hoặc SKU "' + sku + '"'); continue; }
+      p = nm;
+      if (!seen.has(normName(p))) isNew.push(p);
+    }
+    if (seen.has(normName(p))) continue;
+    seen.add(normName(p));
+    names.push(p);
+  }
+  return { names: names, isNew: isNew, errors: errors };
+}
