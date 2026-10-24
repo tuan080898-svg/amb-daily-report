@@ -14,6 +14,7 @@ import {
 
 type Tab = 'ton' | 'kiem' | 'nhap' | 'gan';
 type Flt = 'tat-ca' | 'chua-kiem' | 'am' | 'phat-sinh';
+type SortBy = 'ten' | 'ton-giam' | 'ton-tang' | 'lech';
 
 var inputCls = 'px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none';
 var cardCls = 'bg-slate-900 border border-slate-700 rounded-xl p-4 mb-4';
@@ -28,6 +29,33 @@ function fmtAt(iso: string | number): string {
 function localInput(d: Date): string {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + 'T' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 }
+// Tìm kiếm không phân biệt dấu và hoa thường: gõ "bot thong cong" vẫn ra "Bột thông cống"; nhiều từ thì phải khớp đủ các từ
+function foldChar(c: string): string { return c === 'đ' || c === 'Đ' ? 'd' : c.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(); }
+function fold(s: string): string { var out = ''; for (var i = 0; i < s.length; i++) out += foldChar(s[i]).charAt(0) || ' '; return out; }
+function matchQ(hay: string, q: string): boolean {
+  var toks = fold(q).split(/\s+/).filter(Boolean);
+  var h = fold(hay);
+  return toks.every(function(t) { return h.indexOf(t) >= 0; });
+}
+function Hl(props: { text: string; q: string }) {
+  var toks = fold(props.q).split(/\s+/).filter(Boolean);
+  if (!toks.length) return <>{props.text}</>;
+  var h = fold(props.text);
+  var mark: boolean[] = [];
+  for (var i = 0; i < props.text.length; i++) mark.push(false);
+  toks.forEach(function(t) { var p = h.indexOf(t); while (p >= 0) { for (var k = p; k < p + t.length; k++) mark[k] = true; p = h.indexOf(t, p + t.length); } });
+  var parts: React.ReactNode[] = [];
+  var start = 0;
+  for (var j = 1; j <= props.text.length; j++) {
+    if (j === props.text.length || mark[j] !== mark[start]) {
+      var seg = props.text.slice(start, j);
+      parts.push(mark[start] ? <mark key={start} className="bg-yellow-400/30 text-yellow-100 rounded px-0.5">{seg}</mark> : <span key={start}>{seg}</span>);
+      start = j;
+    }
+  }
+  return <>{parts}</>;
+}
+
 function monthsBetween(fromMs: number, toMs: number): string[] {
   var out: string[] = [];
   var d = new Date(fromMs);
@@ -55,6 +83,9 @@ export default function SoKhoPage() {
   var [khoPick, setKhoPick] = useState<SkKho>('HCM');
   var [q, setQ] = useState('');
   var [flt, setFlt] = useState<Flt>('tat-ca');
+  var [sortBy, setSortBy] = useState<SortBy>('ten');
+  var [kq, setKq] = useState(''); // ô tìm kiếm ở tab Kiểm kho
+  var [onlyEmpty, setOnlyEmpty] = useState(false); // tab Kiểm kho: chỉ hiện sản phẩm chưa nhập số
   var [open, setOpen] = useState('');
   var [toast, setToast] = useState('');
   var [busy, setBusy] = useState(false);
@@ -130,11 +161,7 @@ export default function SoKhoPage() {
   }, [sk.anchors, kho]);
 
   var shown = rows.filter(function(r) {
-    if (q.trim()) {
-      var needle = q.trim().toLowerCase();
-      var hay = (r.product + ' ' + (skuOf[r.product] || []).join(' ')).toLowerCase();
-      if (hay.indexOf(needle) < 0) return false;
-    }
+    if (q.trim() && !matchQ(r.product + ' ' + (skuOf[r.product] || []).join(' '), q)) return false;
     if (flt === 'chua-kiem') return r.anchor === null;
     if (flt === 'am') return r.stock !== null && r.stock < 0;
     if (flt === 'phat-sinh') return r.slipQty !== 0 || r.moveQty !== 0;
@@ -330,80 +357,166 @@ export default function SoKhoPage() {
     sk.anchors.forEach(function(a) { var s = m[a.session] || (m[a.session] = { id: a.session, at: a.at, kho: a.kho, by: a.by, n: 0, note: a.note || '' }); s.n++; });
     return Object.keys(m).map(function(k) { return m[k]; }).sort(function(a, b) { return Date.parse(b.at) - Date.parse(a.at); });
   })();
-  var tabs: Array<[Tab, string]> = isAdmin ? [['ton', 'Tồn hiện tại'], ['kiem', 'Kiểm kho (nhập tồn thực tế)'], ['nhap', 'Nhập hàng / điều chỉnh'], ['gan', 'Gán kho cho tài khoản']] : [['ton', 'Tồn hiện tại']];
   var whUsers = users.filter(function(u) { return u.role === 'warehouse'; });
 
+  var khoStat = (function() {
+    var counted = rows.filter(function(r) { return r.anchor !== null; }).length;
+    var nLech = 0;
+    if (inv) rows.forEach(function(r) { var a = getCurrentStock(inv as InventoryData, r.product, kho); if (r.stock !== null && r.stock !== a) nLech++; });
+    return { total: rows.length, counted: counted, pct: rows.length ? Math.round(counted / rows.length * 100) : 0, nLech: nLech };
+  })();
+
+  // Danh sách hiển thị ở tab Tồn hiện tại: lọc + sắp xếp
+  var shownSorted = (function() {
+    var list = shown.slice();
+    var diffOf = function(r: SkRow) { return inv && r.stock !== null ? Math.abs(r.stock - getCurrentStock(inv as InventoryData, r.product, kho)) : -1; };
+    if (sortBy === 'ton-giam') list.sort(function(a, b) { return (b.stock === null ? -Infinity : b.stock) - (a.stock === null ? -Infinity : a.stock); });
+    else if (sortBy === 'ton-tang') list.sort(function(a, b) { return (a.stock === null ? Infinity : a.stock) - (b.stock === null ? Infinity : b.stock); });
+    else if (sortBy === 'lech') list.sort(function(a, b) { return diffOf(b) - diffOf(a); });
+    return list;
+  })();
+
+  var tabs: Array<[Tab, string, string]> = isAdmin
+    ? [['ton', '📦', 'Tồn hiện tại'], ['kiem', '📝', 'Kiểm kho'], ['nhap', '➕', 'Nhập hàng / điều chỉnh'], ['gan', '👤', 'Gán kho']]
+    : [['ton', '📦', 'Tồn hiện tại']];
+
+  var gridCls = inv
+    ? (isAdmin ? 'md:grid-cols-[minmax(0,3fr)_repeat(5,minmax(0,1fr))_2rem]' : 'md:grid-cols-[minmax(0,3fr)_repeat(5,minmax(0,1fr))]')
+    : (isAdmin ? 'md:grid-cols-[minmax(0,3fr)_repeat(4,minmax(0,1fr))_2rem]' : 'md:grid-cols-[minmax(0,3fr)_repeat(4,minmax(0,1fr))]');
+
+  var kiemRows = rows.filter(function(r) {
+    if (kq.trim() && !matchQ(r.product + ' ' + (skuOf[r.product] || []).join(' '), kq)) return false;
+    if (onlyEmpty && (countVals[r.product] || '').trim() !== '') return false;
+    return true;
+  });
+  var filledN = products.filter(function(p) { return (countVals[p] || '').trim() !== ''; }).length;
+
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-100">Sổ kho thực tế</h1>
-          <p className="text-sm text-gray-500 mt-1">Nhập số hàng đếm thực tế tại một thời điểm và lưu trữ nhập hàng, điều chỉnh. {sk.deductFromSlips ? 'Phiếu xuất kho lập sau đó tự trừ vào kho, mỗi đơn chỉ trừ một lần.' : 'Việc tự trừ kho theo phiếu xuất kho đang tạm dừng.'}</p>
+    <div className="max-w-6xl mx-auto pb-24">
+      {/* Tiêu đề + chọn kho */}
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-5">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-gray-100 flex items-center gap-2">📒 Sổ kho thực tế</h1>
+          <p className="text-sm text-gray-500 mt-1">Số hàng đếm thực tế của kho, cộng nhập hàng và điều chỉnh{sk.deductFromSlips ? ', trừ theo phiếu xuất kho.' : '.'}</p>
         </div>
-        <div>
-          <div className="text-xs text-gray-500 mb-1">Kho</div>
-          {!isAdmin && myKho ? <div className={inputCls + ' text-emerald-300'}>{SK_KHO_LABEL[myKho]}</div> : (
-            <div className="flex gap-1">{SK_KHO.map(function(k) {
-              return <button key={k} onClick={function() { setKhoPick(k); }} className={'px-3 py-2 text-sm rounded-lg border ' + (kho === k ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-800 border-slate-600 text-gray-300 hover:bg-slate-700')}>{SK_KHO_LABEL[k]}</button>;
+        <div className="flex items-center gap-3">
+          <span className={'hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs border ' + (sk.deductFromSlips ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-amber-500/10 border-amber-500/30 text-amber-300')}>
+            <span className={'w-2 h-2 rounded-full ' + (sk.deductFromSlips ? 'bg-emerald-400' : 'bg-amber-400')}></span>{sk.deductFromSlips ? 'Đang trừ kho theo phiếu' : 'Tạm dừng trừ kho theo phiếu'}
+          </span>
+          {!isAdmin && myKho ? <div className="px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm font-medium">{SK_KHO_LABEL[myKho]}</div> : (
+            <div className="inline-flex p-1 rounded-xl bg-slate-800 border border-slate-700">{SK_KHO.map(function(k) {
+              return <button key={k} onClick={function() { setKhoPick(k); }} className={'px-4 py-1.5 text-sm font-medium rounded-lg transition-colors ' + (kho === k ? 'bg-blue-600 text-white shadow' : 'text-gray-400 hover:text-gray-200')}>{SK_KHO_LABEL[k]}</button>;
             })}</div>
           )}
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-1 border-b border-slate-700 mb-4" role="tablist">
-        {tabs.map(function(t) {
-          return <button key={t[0]} role="tab" aria-selected={tab === t[0]} onClick={function() { setTab(t[0]); }}
-            className={'px-4 py-2 text-sm rounded-t-lg ' + (tab === t[0] ? 'bg-slate-800 text-white border border-slate-700 border-b-slate-800 -mb-px' : 'text-gray-400 hover:text-gray-200')}>{t[1]}</button>;
-        })}
-      </div>
+      {/* Tab */}
+      {tabs.length > 1 && (
+        <div className="flex flex-wrap gap-2 mb-5" role="tablist">
+          {tabs.map(function(t) {
+            return <button key={t[0]} role="tab" aria-selected={tab === t[0]} onClick={function() { setTab(t[0]); }}
+              className={'inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-xl border transition-colors ' + (tab === t[0] ? 'bg-blue-600 border-blue-500 text-white shadow' : 'bg-slate-900 border-slate-700 text-gray-300 hover:bg-slate-800')}><span>{t[1]}</span>{t[2]}</button>;
+          })}
+        </div>
+      )}
 
       {err && <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-300">Không tải được dữ liệu sổ kho: {err}</div>}
-      {loading && !err && <div className="p-6 text-gray-400 text-sm">Đang tải…</div>}
+      {loading && !err && <div className="p-10 text-center text-gray-400 text-sm">Đang tải…</div>}
 
+      {/* ===== TỒN HIỆN TẠI ===== */}
       {!loading && !err && tab === 'ton' && (
         <div>
+          {/* Thẻ tổng quan */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
+              <div className="text-xs text-gray-500">Sản phẩm theo dõi</div>
+              <div className="text-2xl font-bold text-gray-100 mt-1">{khoStat.total}</div>
+              <div className="text-xs text-gray-500 mt-1">{SK_KHO_LABEL[kho]}</div>
+            </div>
+            <button onClick={function() { setFlt(flt === 'chua-kiem' ? 'tat-ca' : 'chua-kiem'); }} className="text-left bg-slate-900 border border-slate-700 hover:border-blue-500/60 rounded-xl p-4 transition-colors">
+              <div className="text-xs text-gray-500">Đã kiểm kho</div>
+              <div className="text-2xl font-bold text-gray-100 mt-1">{khoStat.counted}<span className="text-base font-normal text-gray-500"> / {khoStat.total}</span></div>
+              <div className="h-1.5 rounded-full bg-slate-800 mt-2 overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: khoStat.pct + '%' }}></div></div>
+              <div className="text-xs text-gray-500 mt-1">{nChua > 0 ? 'Bấm để xem ' + nChua + ' sản phẩm chưa kiểm' : 'Đã kiểm đủ'}</div>
+            </button>
+            <button onClick={function() { setFlt(flt === 'am' ? 'tat-ca' : 'am'); }} className="text-left bg-slate-900 border border-slate-700 hover:border-blue-500/60 rounded-xl p-4 transition-colors">
+              <div className="text-xs text-gray-500">Tồn âm</div>
+              <div className={'text-2xl font-bold mt-1 ' + (nAm ? 'text-red-300' : 'text-gray-100')}>{nAm}</div>
+              <div className="text-xs text-gray-500 mt-1">{nAm ? 'Bấm để lọc' : 'Không có'}</div>
+            </button>
+            <div className="bg-slate-900 border border-slate-700 rounded-xl p-4">
+              <div className="text-xs text-gray-500">Kiểm kho gần nhất</div>
+              {lastCount ? (
+                <>
+                  <div className="text-lg font-bold text-gray-100 mt-1">{fmtAt(lastCount.at)}</div>
+                  <div className="text-xs text-gray-500 mt-1">{lastCount.n} sản phẩm · {lastCount.by || 'không rõ người'}</div>
+                </>
+              ) : <div className="text-sm text-gray-400 mt-2">Chưa có số kiểm nào</div>}
+            </div>
+          </div>
+
+          {/* Thông báo */}
           {!sk.deductFromSlips ? (
-            <div className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-sm text-amber-200 flex flex-wrap items-center justify-between gap-2">
-              <span><b>Đang tạm dừng trừ kho theo phiếu xuất kho.</b> Sổ kho hiện chỉ lưu số kiểm kho, nhập hàng và điều chỉnh; tồn = số kiểm gần nhất + nhập/điều chỉnh. Chờ kiểm đủ kho rồi bật lại.</span>
+            <div className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-sm text-amber-200 flex flex-wrap items-center justify-between gap-2">
+              <span><b>Đang tạm dừng trừ kho theo phiếu xuất kho.</b> Tồn = số kiểm gần nhất + nhập/điều chỉnh. Chờ kiểm đủ kho rồi bật lại.</span>
               {isAdmin && <button className={btnCls} disabled={busy} onClick={function() { toggleDeduct(true); }}>Bật trừ kho theo phiếu</button>}
             </div>
           ) : (
             isAdmin && <div className="mb-3 text-xs text-gray-500">Đang trừ kho theo phiếu xuất kho. <button className="underline text-gray-400 hover:text-gray-200" disabled={busy} onClick={function() { toggleDeduct(false); }}>Tạm dừng</button></div>
           )}
-          {!isAdmin && !myKho && <div className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-sm text-amber-200">Tài khoản của bạn chưa được gán kho. Nhờ admin gán ở Sổ kho → Gán kho cho tài khoản; trong lúc chờ bạn xem được cả hai kho.</div>}
-          {!lastCount && <div className="mb-3 p-3 rounded-lg bg-sky-500/10 border border-sky-500/30 text-sm text-sky-200">{SK_KHO_LABEL[kho]} chưa có số kiểm kho nào. Admin vào tab “Kiểm kho” nhập số thực tế, từ đó phiếu xuất kho mới bắt đầu trừ.</div>}
-          {lastCount && <div className="mb-3 text-sm text-gray-400">Kiểm kho gần nhất: <b className="text-gray-200">{fmtAt(lastCount.at)}</b> ({lastCount.n} sản phẩm, {lastCount.by || 'không rõ người'}).{sk.deductFromSlips ? ' Phiếu lập sau thời điểm này mới trừ kho.' : ''}</div>}
-          {sk.deductFromSlips && calc.noKho.length > 0 && <div className="mb-3 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-200">{calc.noKho.length} phiếu lập sau lần kiểm kho nhưng KHÔNG ghi kho nên chưa trừ được (phiếu lập trước khi có tính năng chọn kho): {calc.noKho.slice(0, 8).map(function(n) { return n.id + ' (' + n.orders + ' đơn)'; }).join(', ')}{calc.noKho.length > 8 ? ' và ' + (calc.noKho.length - 8) + ' phiếu khác' : ''}.</div>}
+          {!isAdmin && !myKho && <div className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-sm text-amber-200">Tài khoản của bạn chưa được gán kho. Nhờ admin gán ở mục Gán kho; trong lúc chờ bạn xem được cả hai kho.</div>}
+          {!lastCount && <div className="mb-4 p-3 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sm text-sky-200">{SK_KHO_LABEL[kho]} chưa có số kiểm kho nào. Admin vào mục “Kiểm kho” nhập số đếm thực tế.</div>}
+          {sk.deductFromSlips && calc.noKho.length > 0 && <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 text-sm text-red-200">{calc.noKho.length} phiếu lập sau lần kiểm kho nhưng KHÔNG ghi kho nên chưa trừ được: {calc.noKho.slice(0, 8).map(function(n) { return n.id + ' (' + n.orders + ' đơn)'; }).join(', ')}{calc.noKho.length > 8 ? ' và ' + (calc.noKho.length - 8) + ' phiếu khác' : ''}.</div>}
           {sk.deductFromSlips && calc.unmapped.length > 0 && (
-            <details className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-sm text-amber-200">
+            <details className="mb-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-sm text-amber-200">
               <summary className="cursor-pointer">{calc.unmapped.length} loại hàng trong phiếu chưa quy ra được sản phẩm nên CHƯA trừ kho (bấm để xem)</summary>
               <ul className="mt-2 list-disc pl-5 text-xs">{calc.unmapped.slice(0, 40).map(function(u) { return <li key={u.key}>{u.key.indexOf('sku:') === 0 ? 'SKU ' : 'Chưa có SKU: '}{u.label} — {fmt(u.qty)} cái (phiếu {u.batches.join(', ')})</li>; })}</ul>
               <div className="text-xs mt-1">Sửa bảng quy đổi SKU (hoặc gắn SKU cho dòng chưa có SKU), phiếu cũ sẽ tự tính lại.</div>
             </details>
           )}
-          {sk.deductFromSlips && calc.dupOrders > 0 && <div className="mb-3 text-xs text-gray-500">Đã bỏ qua {calc.dupOrders} đơn lặp trong các phiếu (không trừ lần hai).</div>}
 
-          <div className="flex flex-wrap items-center gap-2 mb-3">
-            <input value={q} onChange={function(e) { setQ(e.target.value); }} placeholder="Tìm sản phẩm hoặc mã SKU…" className={inputCls + ' w-64'} />
-            {([['tat-ca', 'Tất cả', rows.length], ['chua-kiem', 'Chưa kiểm kho', nChua], ['am', 'Tồn âm', nAm], ['phat-sinh', 'Có phát sinh', rows.filter(function(r) { return r.slipQty !== 0 || r.moveQty !== 0; }).length]] as Array<[Flt, string, number]>).map(function(c) {
-              return <button key={c[0]} onClick={function() { setFlt(c[0]); }} aria-pressed={flt === c[0]} className={'px-3 py-1 rounded-full text-xs border ' + (flt === c[0] ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-800 border-slate-600 text-gray-300 hover:bg-slate-700')}>{c[1]} <b>{c[2]}</b></button>;
-            })}
-            <span className="ml-auto flex gap-2">
-              {isAdmin && <button className={btnCls} onClick={function() { setAddOpen(!addOpen); }}>＋ Thêm sản phẩm</button>}
-              <button className={btnCls} onClick={exportExcel}>Tải Excel</button>
-            </span>
+          {/* Thanh tìm kiếm + lọc (dính trên đầu khi cuộn) */}
+          <div className="sticky top-0 z-20 -mx-1 px-1 pt-1 pb-3 bg-slate-950/95 backdrop-blur">
+            <div className="relative">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 text-lg pointer-events-none">🔍</span>
+              <input value={q} onChange={function(e) { setQ(e.target.value); }} placeholder="Tìm sản phẩm hoặc mã SKU… (gõ không dấu cũng được)" autoFocus
+                className="w-full pl-12 pr-24 py-3.5 bg-slate-900 border border-slate-600 focus:border-blue-500 rounded-xl text-base text-gray-100 outline-none placeholder:text-gray-500" />
+              <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                {q && <span className="text-xs text-gray-400">{shownSorted.length} kết quả</span>}
+                {q && <button aria-label="Xóa tìm kiếm" onClick={function() { setQ(''); }} className="w-7 h-7 rounded-full bg-slate-700 hover:bg-slate-600 text-gray-200 text-sm">×</button>}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              {([['tat-ca', 'Tất cả', rows.length], ['chua-kiem', 'Chưa kiểm kho', nChua], ['am', 'Tồn âm', nAm], ['phat-sinh', 'Có phát sinh', rows.filter(function(r) { return r.slipQty !== 0 || r.moveQty !== 0; }).length]] as Array<[Flt, string, number]>).map(function(c) {
+                return <button key={c[0]} onClick={function() { setFlt(c[0]); }} aria-pressed={flt === c[0]} className={'px-3.5 py-1.5 rounded-full text-sm border transition-colors ' + (flt === c[0] ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900 border-slate-700 text-gray-300 hover:bg-slate-800')}>{c[1]} <b className={flt === c[0] ? '' : 'text-gray-100'}>{c[2]}</b></button>;
+              })}
+              <span className="ml-auto flex flex-wrap items-center gap-2">
+                <label className="text-xs text-gray-500 hidden sm:block">Sắp xếp</label>
+                <select value={sortBy} onChange={function(e) { setSortBy(e.target.value as SortBy); }} className={inputCls + ' !py-1.5'}>
+                  <option value="ten">Tên A → Z</option>
+                  <option value="ton-giam">Tồn cao → thấp</option>
+                  <option value="ton-tang">Tồn thấp → cao</option>
+                  {inv && <option value="lech">Lệch Sapo nhiều nhất</option>}
+                </select>
+                {isAdmin && <button className={btnCls} onClick={function() { setAddOpen(!addOpen); }}>＋ Thêm sản phẩm</button>}
+                <button className={btnCls} onClick={exportExcel}>⬇ Tải Excel</button>
+              </span>
+            </div>
           </div>
+
           {isAdmin && addOpen && (
-            <div className={cardCls + ' !p-3'}>
-              <div className="text-xs text-gray-500 mb-2">Chọn sản phẩm đã ẩn hoặc trong bảng quy đổi SKU để hiện lại, hoặc gõ tên mới (vật tư, bao bì… ngoài bảng quy đổi: tự nhập kiểm kho và nhập/điều chỉnh, phiếu xuất kho chưa tự trừ).</div>
+            <div className={cardCls + ' !p-4'}>
+              <div className="text-sm font-medium text-gray-200 mb-1">Thêm sản phẩm vào {SK_KHO_LABEL[kho]}</div>
+              <div className="text-xs text-gray-500 mb-3">Chọn sản phẩm đã ẩn hoặc trong bảng quy đổi SKU để hiện lại, hoặc gõ tên mới (vật tư, bao bì… ngoài bảng quy đổi: tự nhập kiểm kho và nhập/điều chỉnh, phiếu xuất kho chưa tự trừ).</div>
               <div className="flex flex-wrap gap-2">
                 <input list="sk-add-list" value={addName} onChange={function(e) { setAddName(e.target.value); }} placeholder="Tên sản phẩm" className={inputCls + ' w-72'} />
                 <datalist id="sk-add-list">{allProducts.concat(sk.hidden[kho] || []).filter(function(p, i, a) { return a.indexOf(p) === i && products.indexOf(p) < 0; }).map(function(p) { return <option key={p} value={p} />; })}</datalist>
                 <button className={btnPrimaryCls + ' !py-1.5'} disabled={busy} onClick={addProduct}>Thêm vào {SK_KHO_LABEL[kho]}</button>
                 <button className={btnCls} onClick={function() { setAddOpen(false); }}>Đóng</button>
               </div>
-              <div className="mt-3 pt-3 border-t border-slate-700">
-                <div className="text-xs text-gray-500 mb-2">Hoặc nhập cả danh sách từ file Excel (cột "Sản phẩm" hoặc "Mã SKU"; dùng được file vừa tải ở nút Tải Excel).</div>
+              <div className="mt-4 pt-3 border-t border-slate-700">
+                <div className="text-xs text-gray-500 mb-2">Hoặc nhập cả danh sách từ file Excel (cột “Sản phẩm” hoặc “Mã SKU”; dùng được file vừa tải ở nút Tải Excel).</div>
                 <div className="flex flex-wrap items-center gap-2">
                   <select value={listMode} onChange={function(e) { setListMode(e.target.value as 'them' | 'giu'); }} className={inputCls}>
                     <option value="them">Chỉ thêm / hiện lại các sản phẩm trong file</option>
@@ -416,150 +529,225 @@ export default function SoKhoPage() {
             </div>
           )}
 
-          <div className="overflow-x-auto bg-slate-900 border border-slate-700 rounded-xl">
-            <table className="w-full text-sm">
-              <thead><tr className="text-xs text-gray-400 border-b border-slate-700">
-                <th className="p-2 text-left">Sản phẩm</th><th className="p-2 text-right">Số kiểm kho</th><th className="p-2 text-right">Nhập / điều chỉnh</th><th className="p-2 text-right">Xuất theo phiếu</th><th className="p-2 text-right">Tồn hiện tại</th>{inv && <th className="p-2 text-right" title="Số trong trang Kho (đồng bộ từ Sapo)">Tồn Sapo/app</th>}{inv && <th className="p-2 text-right">Lệch</th>}{isAdmin && <th className="p-2"></th>}
-              </tr></thead>
-              <tbody>
-                {shown.map(function(r) {
-                  var app = inv ? getCurrentStock(inv, r.product, kho) : null;
-                  var diff = r.stock !== null && app !== null ? r.stock - app : null;
-                  var isOpen = open === r.product;
-                  var hist = isOpen ? skProductHistory(sk, calc, kho, r.product) : [];
-                  return [
-                    <tr key={r.product} className="border-t border-slate-800 cursor-pointer hover:bg-slate-800/50" onClick={function() { setOpen(isOpen ? '' : r.product); }}>
-                      <td className="p-2"><div className="text-gray-100">{r.product}</div><div className="text-xs text-gray-500">{(skuOf[r.product] || []).slice(0, 4).join(' · ')}</div></td>
-                      <td className="p-2 text-right font-mono">{r.anchor ? <>{fmt(r.anchor.qty)}<div className="text-xs text-gray-500">{fmtAt(r.anchor.at)}</div></> : <span className="text-gray-600">chưa kiểm</span>}</td>
-                      <td className="p-2 text-right font-mono">{r.moveQty ? (r.moveQty > 0 ? '+' : '') + fmt(r.moveQty) : '—'}</td>
-                      <td className="p-2 text-right font-mono">{!sk.deductFromSlips ? <span className="text-gray-600 text-xs">tạm dừng</span> : r.slipQty ? '−' + fmt(r.slipQty) : '—'}</td>
-                      <td className={'p-2 text-right font-mono font-semibold ' + (r.stock === null ? 'text-gray-600' : r.stock < 0 ? 'text-red-300' : 'text-emerald-300')}>{r.stock === null ? '—' : fmt(r.stock)}</td>
-                      {inv && <td className="p-2 text-right font-mono text-gray-400">{app === null ? '—' : fmt(app)}</td>}
-                      {inv && <td className={'p-2 text-right font-mono ' + (diff === null || diff === 0 ? 'text-gray-600' : 'text-amber-300')}>{diff === null ? '—' : diff === 0 ? '0' : (diff > 0 ? '+' : '') + fmt(diff)}</td>}
-                      {isAdmin && <td className="p-2 text-right"><button title="Bỏ khỏi danh sách" aria-label="Bỏ khỏi danh sách" disabled={busy} className="text-gray-600 hover:text-red-400 px-2" onClick={function(e) { e.stopPropagation(); removeProduct(r); }}>×</button></td>}
-                    </tr>,
-                    isOpen && <tr key={r.product + '-h'} className="bg-slate-950/60"><td colSpan={(inv ? 7 : 5) + (isAdmin ? 1 : 0)} className="p-3">
-                      {hist.length === 0 ? <div className="text-xs text-gray-500">Chưa có biến động nào cho sản phẩm này ở {SK_KHO_LABEL[kho]}.</div> : (
-                        <ul className="text-xs space-y-0.5">{hist.map(function(h, i) {
-                          return <li key={i} className={h.counted ? 'text-gray-200' : 'text-gray-600 line-through'}><span className="font-mono">{fmtAt(h.at)}</span> · {h.label} · <b className={h.qty < 0 ? 'text-red-300' : 'text-emerald-300'}>{h.kind === 'kiem' ? '= ' + fmt(h.qty) : (h.qty > 0 ? '+' : '') + fmt(h.qty)}</b>{!h.counted && ' (trước lần kiểm kho gần nhất, không tính)'}</li>;
+          {/* Tiêu đề cột (máy tính) */}
+          <div className={'hidden md:grid gap-x-4 px-4 pb-2 text-xs font-medium text-gray-500 ' + gridCls}>
+            <div>Sản phẩm</div><div className="text-right">Tồn hiện tại</div><div className="text-right">Số kiểm kho</div><div className="text-right">Nhập / điều chỉnh</div><div className="text-right">Xuất theo phiếu</div>{inv && <div className="text-right" title="Số trong trang Kho (đồng bộ từ Sapo)">Tồn Sapo / lệch</div>}{isAdmin && <div></div>}
+          </div>
+
+          {/* Danh sách sản phẩm */}
+          <div className="space-y-2">
+            {shownSorted.map(function(r) {
+              var app = inv ? getCurrentStock(inv, r.product, kho) : null;
+              var diff = r.stock !== null && app !== null ? r.stock - app : null;
+              var isOpen = open === r.product;
+              var hist = isOpen ? skProductHistory(sk, calc, kho, r.product) : [];
+              var tone = r.stock === null ? 'border-l-slate-600' : r.stock < 0 ? 'border-l-red-500' : r.stock === 0 ? 'border-l-amber-500' : 'border-l-emerald-500';
+              var stockCls = r.stock === null ? 'text-gray-500' : r.stock < 0 ? 'text-red-300' : r.stock === 0 ? 'text-amber-300' : 'text-emerald-300';
+              return (
+                <div key={r.product} className={'bg-slate-900 border border-slate-700 border-l-4 rounded-xl overflow-hidden ' + tone + (isOpen ? ' ring-1 ring-blue-500/40' : '')}>
+                  <div role="button" tabIndex={0} onClick={function() { setOpen(isOpen ? '' : r.product); }} onKeyDown={function(e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(isOpen ? '' : r.product); } }}
+                    className={'grid grid-cols-2 gap-x-4 gap-y-3 p-3 md:p-4 items-center cursor-pointer hover:bg-slate-800/60 ' + gridCls}>
+                    <div className="col-span-2 md:col-span-1 min-w-0">
+                      <div className="font-medium text-gray-100 leading-snug"><Hl text={r.product} q={q} /></div>
+                      <div className="flex flex-wrap gap-1 mt-1">{(skuOf[r.product] || []).slice(0, 4).map(function(c) { return <code key={c} className="px-1.5 py-0.5 bg-slate-800 rounded text-[11px] text-blue-300 font-mono"><Hl text={c} q={q} /></code>; })}{sk.extra.indexOf(r.product) >= 0 && <span className="px-1.5 py-0.5 rounded text-[11px] bg-purple-500/15 text-purple-300">tự thêm</span>}</div>
+                    </div>
+                    <div className="md:text-right"><span className="md:hidden text-[11px] text-gray-500 block">Tồn hiện tại</span>
+                      {r.stock === null ? <span className="inline-block px-2 py-0.5 rounded-md bg-slate-800 text-gray-500 text-xs">Chưa kiểm</span> : <span className={'text-xl font-bold font-mono ' + stockCls}>{fmt(r.stock)}</span>}</div>
+                    <div className="md:text-right font-mono text-sm text-gray-200"><span className="md:hidden text-[11px] text-gray-500 block font-sans">Số kiểm kho</span>
+                      {r.anchor ? <>{fmt(r.anchor.qty)}<div className="text-[11px] text-gray-500 font-sans">{fmtAt(r.anchor.at)}</div></> : <span className="text-gray-600">—</span>}</div>
+                    <div className="md:text-right font-mono text-sm"><span className="md:hidden text-[11px] text-gray-500 block font-sans">Nhập / điều chỉnh</span>
+                      {r.moveQty ? <span className={r.moveQty > 0 ? 'text-emerald-300' : 'text-red-300'}>{(r.moveQty > 0 ? '+' : '') + fmt(r.moveQty)}</span> : <span className="text-gray-600">—</span>}</div>
+                    <div className="md:text-right font-mono text-sm"><span className="md:hidden text-[11px] text-gray-500 block font-sans">Xuất theo phiếu</span>
+                      {!sk.deductFromSlips ? <span className="text-gray-600 text-xs font-sans">tạm dừng</span> : r.slipQty ? <span className="text-red-300">{'−' + fmt(r.slipQty)}</span> : <span className="text-gray-600">—</span>}</div>
+                    {inv && <div className="md:text-right font-mono text-sm text-gray-300"><span className="md:hidden text-[11px] text-gray-500 block font-sans">Tồn Sapo / lệch</span>
+                      {app === null ? '—' : fmt(app)}
+                      {diff !== null && diff !== 0 && <div className="text-[11px] text-amber-300 font-sans">lệch {(diff > 0 ? '+' : '') + fmt(diff)}</div>}
+                      {diff === 0 && <div className="text-[11px] text-emerald-400 font-sans">khớp</div>}</div>}
+                    {isAdmin && <div className="text-right"><button title="Bỏ khỏi danh sách" aria-label="Bỏ khỏi danh sách" disabled={busy} className="w-7 h-7 rounded-full text-gray-600 hover:text-red-400 hover:bg-red-500/10" onClick={function(e) { e.stopPropagation(); removeProduct(r); }}>×</button></div>}
+                  </div>
+                  {isOpen && (
+                    <div className="border-t border-slate-800 bg-slate-950/60 px-4 py-3">
+                      <div className="text-xs font-medium text-gray-400 mb-2">Lịch sử biến động · {SK_KHO_LABEL[kho]}</div>
+                      {hist.length === 0 ? <div className="text-xs text-gray-500">Chưa có biến động nào cho sản phẩm này.</div> : (
+                        <ul className="space-y-1.5">{hist.map(function(h, i) {
+                          return <li key={i} className={'flex flex-wrap items-baseline gap-x-3 text-xs ' + (h.counted ? 'text-gray-200' : 'text-gray-600 line-through')}>
+                            <span className="font-mono text-gray-400 w-24 shrink-0">{fmtAt(h.at)}</span>
+                            <span className="flex-1 min-w-[10rem]">{h.label}{!h.counted && ' (không tính)'}</span>
+                            <b className={'font-mono ' + (h.kind === 'kiem' ? 'text-sky-300' : h.qty < 0 ? 'text-red-300' : 'text-emerald-300')}>{h.kind === 'kiem' ? '= ' + fmt(h.qty) : (h.qty > 0 ? '+' : '') + fmt(h.qty)}</b>
+                          </li>;
                         })}</ul>
                       )}
-                    </td></tr>,
-                  ];
-                })}
-                {shown.length === 0 && <tr><td colSpan={8} className="p-4 text-gray-500">Không có sản phẩm nào.</td></tr>}
-              </tbody>
-            </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {shownSorted.length === 0 && (
+              <div className="p-10 text-center bg-slate-900 border border-slate-700 rounded-xl">
+                <div className="text-3xl mb-2">🔎</div>
+                <div className="text-gray-300">{q ? 'Không tìm thấy sản phẩm nào khớp “' + q + '”' : 'Không có sản phẩm nào trong nhóm này'}</div>
+                {(q || flt !== 'tat-ca') && <button className={btnCls + ' mt-3'} onClick={function() { setQ(''); setFlt('tat-ca'); }}>Xóa tìm kiếm và bộ lọc</button>}
+              </div>
+            )}
           </div>
+
           {isAdmin && hiddenRows.length > 0 && (
-            <details className="mt-4 p-3 rounded-lg bg-slate-900 border border-slate-700">
+            <details className="mt-5 p-3 rounded-xl bg-slate-900 border border-slate-700">
               <summary className="cursor-pointer text-sm text-gray-300">Đã ẩn khỏi danh sách {SK_KHO_LABEL[kho]} ({hiddenRows.length})</summary>
               <ul className="mt-2 text-sm">{hiddenRows.map(function(r) {
-                return <li key={r.product} className="flex items-center gap-3 py-1 border-t border-slate-800"><span className="flex-1 text-gray-300">{r.product}{(r.slipQty !== 0 || r.anchor) && <span className="ml-2 text-xs text-gray-500">{r.anchor ? 'có số kiểm kho' : ''}{r.slipQty !== 0 ? ' · đã xuất theo phiếu ' + fmt(r.slipQty) : ''}</span>}</span><button className={btnCls} disabled={busy} onClick={function() { restoreProduct(r.product); }}>Hiện lại</button></li>;
+                return <li key={r.product} className="flex items-center gap-3 py-1.5 border-t border-slate-800"><span className="flex-1 text-gray-300">{r.product}{(r.slipQty !== 0 || r.anchor) && <span className="ml-2 text-xs text-gray-500">{r.anchor ? 'có số kiểm kho' : ''}{r.slipQty !== 0 ? ' · đã xuất theo phiếu ' + fmt(r.slipQty) : ''}</span>}</span><button className={btnCls} disabled={busy} onClick={function() { restoreProduct(r.product); }}>Hiện lại</button></li>;
               })}</ul>
             </details>
           )}
         </div>
       )}
 
+      {/* ===== KIỂM KHO ===== */}
       {!loading && !err && tab === 'kiem' && isAdmin && (
         <div>
           <div className={cardCls}>
-            <h2 className="text-sm font-semibold text-gray-200 mb-1">Kiểm kho {SK_KHO_LABEL[kho]}: nhập số đếm thực tế</h2>
-            <p className="text-xs text-gray-500 mb-3">Chọn đúng thời điểm đếm kho (ví dụ 24/10 lúc 9:00). Phiếu xuất kho lập TRƯỚC thời điểm này không trừ (hàng đã có trong số đếm); phiếu lập SAU sẽ tự trừ. Sản phẩm để trống giữ nguyên số kiểm cũ, nên đếm một phần cũng được.</p>
-            <div className="flex flex-wrap items-end gap-3 mb-3">
+            <h2 className="text-base font-semibold text-gray-100 mb-1">Kiểm kho {SK_KHO_LABEL[kho]}</h2>
+            <p className="text-xs text-gray-500 mb-4">Chọn đúng thời điểm đếm kho, nhập số đếm thực tế vào ô bên phải mỗi sản phẩm (bấm Enter để xuống dòng dưới). Sản phẩm để trống giữ nguyên số kiểm cũ, nên đếm một phần cũng được.</p>
+            <div className="flex flex-wrap items-end gap-3 mb-4">
               <div><div className="text-xs text-gray-400 mb-1">Thời điểm kiểm kho</div><input type="datetime-local" value={countAt} onChange={function(e) { setCountAt(e.target.value); }} className={inputCls} /></div>
               <div className="flex-1 min-w-[200px]"><div className="text-xs text-gray-400 mb-1">Ghi chú</div><input value={countNote} onChange={function(e) { setCountNote(e.target.value); }} placeholder="VD: Kiểm kho toàn bộ 24/10" className={inputCls + ' w-full'} /></div>
             </div>
-            <div className="flex flex-wrap items-center gap-2 mb-3">
-              <button className={btnCls} onClick={downloadCountTemplate}>Tải file mẫu kiểm kho</button>
-              <label className={btnCls + ' cursor-pointer'}>Nhập số đếm từ file Excel…<input type="file" accept=".xlsx,.xls" className="hidden" onChange={function(e) { var f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) importCountFile(f); }} /></label>
-              {fileMsg && <span className="text-xs text-gray-300">{fileMsg}</span>}
-            </div>
-            <details className="mb-3">
-              <summary className="cursor-pointer text-sm text-gray-300">Dán bảng từ Excel (Tên sản phẩm hoặc SKU lẻ + số lượng)</summary>
-              <textarea rows={5} value={pasteText} onChange={function(e) { setPasteText(e.target.value); }} className={inputCls + ' w-full mt-2'} placeholder={'GH040-1\t120\nKeo vá tường\t45'} />
-              <div className="flex items-center gap-2 mt-2"><button className={btnCls} onClick={doPaste} disabled={!pasteText.trim()}>Điền vào bảng</button>{pasteMsg && <span className="text-xs text-gray-300">{pasteMsg}</span>}</div>
+            <details className="rounded-lg border border-slate-700 bg-slate-950/40 p-3">
+              <summary className="cursor-pointer text-sm text-gray-300">⚡ Nhập nhanh bằng file Excel hoặc dán bảng</summary>
+              <div className="flex flex-wrap items-center gap-2 mt-3">
+                <button className={btnCls} onClick={downloadCountTemplate}>Tải file mẫu kiểm kho</button>
+                <label className={btnCls + ' cursor-pointer'}>Nhập số đếm từ file Excel…<input type="file" accept=".xlsx,.xls" className="hidden" onChange={function(e) { var f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) importCountFile(f); }} /></label>
+                {fileMsg && <span className="text-xs text-gray-300">{fileMsg}</span>}
+              </div>
+              <div className="mt-3">
+                <div className="text-xs text-gray-500 mb-1">Hoặc dán bảng (Tên sản phẩm hoặc SKU lẻ + số lượng, mỗi dòng một sản phẩm):</div>
+                <textarea rows={4} value={pasteText} onChange={function(e) { setPasteText(e.target.value); }} className={inputCls + ' w-full'} placeholder={'GH040-1\t120\nKeo vá tường\t45'} />
+                <div className="flex items-center gap-2 mt-2"><button className={btnCls} onClick={doPaste} disabled={!pasteText.trim()}>Điền vào bảng</button>{pasteMsg && <span className="text-xs text-gray-300">{pasteMsg}</span>}</div>
+              </div>
             </details>
-            <div className="overflow-x-auto max-h-[520px] overflow-y-auto border border-slate-700 rounded-lg">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-slate-800"><tr className="text-xs text-gray-400"><th className="p-2 text-left">Sản phẩm</th><th className="p-2 text-right">Tồn hiện tại</th><th className="p-2 text-right w-36">Số đếm thực tế</th></tr></thead>
-                <tbody>
-                  {rows.map(function(r) {
-                    return (
-                      <tr key={r.product} className="border-t border-slate-800">
-                        <td className="p-2"><div className="text-gray-100">{r.product}</div><div className="text-xs text-gray-500">{(skuOf[r.product] || []).slice(0, 4).join(' · ')}</div></td>
-                        <td className="p-2 text-right font-mono text-gray-400">{r.stock === null ? '—' : fmt(r.stock)}</td>
-                        <td className="p-2 text-right"><input inputMode="decimal" value={countVals[r.product] || ''} onChange={function(e) { var v = e.target.value; setCountVals(function(c) { return Object.assign({}, c, { [r.product]: v }); }); }} className={inputCls + ' w-28 text-right !py-1'} /></td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+          </div>
+
+          <div className="sticky top-0 z-20 -mx-1 px-1 pb-3 bg-slate-950/95 backdrop-blur">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative flex-1 min-w-[220px]">
+                <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none">🔍</span>
+                <input value={kq} onChange={function(e) { setKq(e.target.value); }} placeholder="Tìm sản phẩm để nhập số đếm…" className="w-full pl-10 pr-9 py-2.5 bg-slate-900 border border-slate-600 focus:border-blue-500 rounded-xl text-sm text-gray-100 outline-none" />
+                {kq && <button aria-label="Xóa tìm kiếm" onClick={function() { setKq(''); }} className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-slate-700 hover:bg-slate-600 text-gray-200 text-xs">×</button>}
+              </div>
+              <label className="inline-flex items-center gap-2 text-sm text-gray-300 cursor-pointer"><input type="checkbox" checked={onlyEmpty} onChange={function(e) { setOnlyEmpty(e.target.checked); }} className="w-4 h-4 accent-blue-500" />Chỉ hiện sản phẩm chưa nhập</label>
             </div>
-            <div className="flex items-center justify-between mt-3">
-              <span className="text-xs text-gray-500">Đã điền {products.filter(function(p) { return (countVals[p] || '').trim() !== ''; }).length} / {products.length} sản phẩm</span>
-              <button className={btnPrimaryCls} disabled={busy} onClick={saveCount}>{busy ? 'Đang lưu…' : 'Lưu kiểm kho'}</button>
+            <div className="mt-2.5 flex items-center gap-3">
+              <div className="flex-1 h-2 rounded-full bg-slate-800 overflow-hidden"><div className="h-full bg-blue-500 transition-all" style={{ width: (products.length ? Math.round(filledN / products.length * 100) : 0) + '%' }}></div></div>
+              <span className="text-xs text-gray-400 whitespace-nowrap">Đã nhập <b className="text-gray-100">{filledN}</b> / {products.length} sản phẩm</span>
             </div>
           </div>
-          <div className={cardCls}>
+
+          <div className="space-y-1.5">
+            {kiemRows.map(function(r, idx) {
+              var v = countVals[r.product] || '';
+              var filled = v.trim() !== '';
+              var delta = filled && r.stock !== null && isFinite(parseFloat(v.replace(',', '.'))) ? parseFloat(v.replace(',', '.')) - r.stock : null;
+              return (
+                <div key={r.product} className={'flex items-center gap-3 rounded-xl border px-3 py-2.5 ' + (filled ? 'bg-blue-500/10 border-blue-500/40' : 'bg-slate-900 border-slate-700')}>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm text-gray-100 leading-snug"><Hl text={r.product} q={kq} /></div>
+                    <div className="text-[11px] text-gray-500 mt-0.5">{(skuOf[r.product] || []).slice(0, 3).join(' · ')}{r.stock !== null ? ' · tồn hiện tại ' + fmt(r.stock) : ' · chưa kiểm'}</div>
+                  </div>
+                  {delta !== null && delta !== 0 && <span className={'text-xs font-mono ' + (delta > 0 ? 'text-emerald-300' : 'text-red-300')}>{(delta > 0 ? '+' : '') + fmt(delta)}</span>}
+                  <input data-ck={idx} inputMode="decimal" value={v} placeholder="Số đếm"
+                    onChange={function(e) { var val = e.target.value; setCountVals(function(c) { return Object.assign({}, c, { [r.product]: val }); }); }}
+                    onKeyDown={function(e) { if (e.key === 'Enter') { e.preventDefault(); var nx = document.querySelector('[data-ck="' + (idx + 1) + '"]') as HTMLInputElement | null; if (nx) { nx.focus(); nx.select(); } } }}
+                    className="w-32 text-right text-lg font-mono px-3 py-2 bg-slate-800 border border-slate-600 focus:border-blue-500 rounded-lg text-gray-100 outline-none" />
+                </div>
+              );
+            })}
+            {kiemRows.length === 0 && <div className="p-8 text-center text-gray-500 bg-slate-900 border border-slate-700 rounded-xl">{onlyEmpty && !kq ? 'Đã nhập hết các sản phẩm.' : 'Không tìm thấy sản phẩm nào.'}</div>}
+          </div>
+
+          <div className="sticky bottom-3 z-20 mt-5 flex flex-wrap items-center justify-between gap-3 p-3 rounded-2xl bg-slate-900/95 border border-slate-600 shadow-xl backdrop-blur">
+            <span className="text-sm text-gray-300">Đã nhập <b className="text-gray-100">{filledN}</b> / {products.length} sản phẩm · kiểm lúc <b className="text-gray-100">{countAt ? fmtAt(new Date(countAt).getTime()) : '—'}</b></span>
+            <span className="flex gap-2">
+              {filledN > 0 && <button className={btnCls} onClick={function() { setCountVals({}); }}>Xóa số đã nhập</button>}
+              <button className={btnPrimaryCls} disabled={busy || filledN === 0} onClick={saveCount}>{busy ? 'Đang lưu…' : 'Lưu kiểm kho'}</button>
+            </span>
+          </div>
+
+          <div className={cardCls + ' mt-6'}>
             <h2 className="text-sm font-semibold text-gray-200 mb-2">Các lần kiểm kho đã lưu</h2>
             {sessions.length === 0 ? <div className="text-sm text-gray-500">Chưa có.</div> : (
-              <table className="w-full text-sm"><thead><tr className="text-xs text-gray-400"><th className="p-2 text-left">Thời điểm kiểm</th><th className="p-2 text-left">Kho</th><th className="p-2 text-right">Số sản phẩm</th><th className="p-2 text-left">Người nhập</th><th className="p-2 text-left">Ghi chú</th><th></th></tr></thead>
-                <tbody>{sessions.map(function(s) {
-                  return <tr key={s.id} className="border-t border-slate-800"><td className="p-2 font-mono">{fmtAt(s.at)}</td><td className="p-2">{SK_KHO_LABEL[s.kho]}</td><td className="p-2 text-right">{s.n}</td><td className="p-2 text-gray-400">{s.by}</td><td className="p-2 text-xs text-gray-500">{s.note}</td>
-                    <td className="p-2 text-right"><button className={btnCls} disabled={busy} onClick={function() { removeEntries({ sessions: [s.id] }, 'Xóa lần kiểm kho ' + fmtAt(s.at) + ' (' + s.n + ' sản phẩm)? Tồn sẽ quay về theo lần kiểm trước đó.'); }}>Xóa</button></td></tr>;
-                })}</tbody></table>
+              <div className="space-y-2">{sessions.map(function(s) {
+                return <div key={s.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 border-t border-slate-800 first:border-0 text-sm">
+                  <span className="font-mono text-gray-100">{fmtAt(s.at)}</span><span className="px-2 py-0.5 rounded-md bg-slate-800 text-gray-300 text-xs">{SK_KHO_LABEL[s.kho]}</span>
+                  <span className="text-gray-400">{s.n} sản phẩm</span><span className="text-gray-500 text-xs">{s.by}</span><span className="text-gray-500 text-xs flex-1 min-w-[6rem]">{s.note}</span>
+                  <button className={btnCls} disabled={busy} onClick={function() { removeEntries({ sessions: [s.id] }, 'Xóa lần kiểm kho ' + fmtAt(s.at) + ' (' + s.n + ' sản phẩm)? Tồn sẽ quay về theo lần kiểm trước đó.'); }}>Xóa</button>
+                </div>;
+              })}</div>
             )}
           </div>
         </div>
       )}
 
+      {/* ===== NHẬP HÀNG / ĐIỀU CHỈNH ===== */}
       {!loading && !err && tab === 'nhap' && isAdmin && (
         <div>
           <div className={cardCls}>
-            <h2 className="text-sm font-semibold text-gray-200 mb-1">Nhập hàng hoặc điều chỉnh {SK_KHO_LABEL[kho]}</h2>
-            <p className="text-xs text-gray-500 mb-3">Hàng nhập về kho thì chọn “Nhập hàng”. Hàng hỏng, mất, tặng, chuyển kho thì chọn “Điều chỉnh” và nhập số âm. Chỉ tính các lần ghi sau thời điểm kiểm kho gần nhất của sản phẩm đó.</p>
-            <div className="flex flex-wrap items-end gap-3">
-              <div><div className="text-xs text-gray-400 mb-1">Sản phẩm</div><select value={mvProduct} onChange={function(e) { setMvProduct(e.target.value); }} className={inputCls + ' w-64'}><option value="">Chọn sản phẩm…</option>{products.map(function(p) { return <option key={p} value={p}>{p}</option>; })}</select></div>
-              <div><div className="text-xs text-gray-400 mb-1">Loại</div><select value={mvType} onChange={function(e) { setMvType(e.target.value as 'import' | 'adjust'); }} className={inputCls}><option value="import">Nhập hàng (+)</option><option value="adjust">Điều chỉnh (+ hoặc −)</option></select></div>
-              <div><div className="text-xs text-gray-400 mb-1">Số lượng</div><input inputMode="decimal" value={mvQty} onChange={function(e) { setMvQty(e.target.value); }} className={inputCls + ' w-28 text-right'} /></div>
-              <div><div className="text-xs text-gray-400 mb-1">Thời điểm</div><input type="datetime-local" value={mvAt} onChange={function(e) { setMvAt(e.target.value); }} className={inputCls} /></div>
-              <div className="flex-1 min-w-[180px]"><div className="text-xs text-gray-400 mb-1">Ghi chú</div><input value={mvNote} onChange={function(e) { setMvNote(e.target.value); }} className={inputCls + ' w-full'} placeholder="VD: nhập từ NCC, vỡ 3 cái" /></div>
-              <button className={btnPrimaryCls} disabled={busy} onClick={saveMove}>Ghi</button>
+            <h2 className="text-base font-semibold text-gray-100 mb-1">Ghi nhập hàng hoặc điều chỉnh · {SK_KHO_LABEL[kho]}</h2>
+            <p className="text-xs text-gray-500 mb-4">Chỉ tính các lần ghi sau thời điểm kiểm kho gần nhất của sản phẩm đó.</p>
+            <div className="inline-flex p-1 rounded-xl bg-slate-800 border border-slate-700 mb-4">
+              <button onClick={function() { setMvType('import'); }} className={'px-4 py-1.5 text-sm font-medium rounded-lg ' + (mvType === 'import' ? 'bg-emerald-600 text-white' : 'text-gray-400 hover:text-gray-200')}>📥 Nhập hàng (+)</button>
+              <button onClick={function() { setMvType('adjust'); }} className={'px-4 py-1.5 text-sm font-medium rounded-lg ' + (mvType === 'adjust' ? 'bg-amber-600 text-white' : 'text-gray-400 hover:text-gray-200')}>🛠 Điều chỉnh (+ / −)</button>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">{mvType === 'import' ? 'Hàng nhập về kho: nhập số dương.' : 'Hàng hỏng, mất, tặng, chuyển kho: nhập số âm (ví dụ −3). Kiểm thấy thừa thì nhập số dương.'}</p>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="lg:col-span-2">
+                <div className="text-xs text-gray-400 mb-1">Sản phẩm (gõ để tìm)</div>
+                <input list="sk-mv-list" value={mvProduct} onChange={function(e) { setMvProduct(e.target.value); }} placeholder="Gõ tên hoặc chọn sản phẩm…" className={inputCls + ' w-full'} />
+                <datalist id="sk-mv-list">{products.map(function(p) { return <option key={p} value={p} />; })}</datalist>
+              </div>
+              <div><div className="text-xs text-gray-400 mb-1">Số lượng</div><input inputMode="decimal" value={mvQty} onChange={function(e) { setMvQty(e.target.value); }} placeholder={mvType === 'import' ? '120' : '-3'} className={inputCls + ' w-full text-right text-lg font-mono'} /></div>
+              <div><div className="text-xs text-gray-400 mb-1">Thời điểm</div><input type="datetime-local" value={mvAt} onChange={function(e) { setMvAt(e.target.value); }} className={inputCls + ' w-full'} /></div>
+              <div className="sm:col-span-2 lg:col-span-3"><div className="text-xs text-gray-400 mb-1">Ghi chú</div><input value={mvNote} onChange={function(e) { setMvNote(e.target.value); }} className={inputCls + ' w-full'} placeholder="VD: nhập từ NCC, vỡ 3 cái" /></div>
+              <div className="flex items-end"><button className={btnPrimaryCls + ' w-full'} disabled={busy} onClick={saveMove}>Ghi vào sổ</button></div>
             </div>
           </div>
           <div className={cardCls}>
-            <h2 className="text-sm font-semibold text-gray-200 mb-2">Các lần nhập / điều chỉnh gần đây ({SK_KHO_LABEL[kho]})</h2>
+            <h2 className="text-sm font-semibold text-gray-200 mb-2">Các lần nhập / điều chỉnh gần đây</h2>
             {(function() {
               var list = sk.moves.filter(function(m) { return m.kho === kho; }).sort(function(a, b) { return Date.parse(b.at) - Date.parse(a.at); }).slice(0, 60);
               return list.length === 0 ? <div className="text-sm text-gray-500">Chưa có.</div> : (
-                <table className="w-full text-sm"><thead><tr className="text-xs text-gray-400"><th className="p-2 text-left">Thời điểm</th><th className="p-2 text-left">Sản phẩm</th><th className="p-2 text-left">Loại</th><th className="p-2 text-right">SL</th><th className="p-2 text-left">Người ghi</th><th className="p-2 text-left">Ghi chú</th><th></th></tr></thead>
-                  <tbody>{list.map(function(m) {
-                    return <tr key={m.id} className="border-t border-slate-800"><td className="p-2 font-mono">{fmtAt(m.at)}</td><td className="p-2">{m.product}</td><td className="p-2">{m.type === 'import' ? 'Nhập hàng' : 'Điều chỉnh'}</td><td className={'p-2 text-right font-mono ' + (m.qty < 0 ? 'text-red-300' : 'text-emerald-300')}>{m.qty > 0 ? '+' : ''}{fmt(m.qty)}</td><td className="p-2 text-gray-400">{m.by}</td><td className="p-2 text-xs text-gray-500">{m.note}</td>
-                      <td className="p-2 text-right"><button className={btnCls} disabled={busy} onClick={function() { removeEntries({ moveIds: [m.id] }, 'Xóa dòng này?'); }}>Xóa</button></td></tr>;
-                  })}</tbody></table>
+                <div>{list.map(function(m) {
+                  return <div key={m.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 border-t border-slate-800 first:border-0 text-sm">
+                    <span className="font-mono text-gray-400 w-28 shrink-0">{fmtAt(m.at)}</span>
+                    <span className="flex-1 min-w-[10rem] text-gray-100">{m.product}</span>
+                    <span className={'px-2 py-0.5 rounded-md text-xs ' + (m.type === 'import' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300')}>{m.type === 'import' ? 'Nhập hàng' : 'Điều chỉnh'}</span>
+                    <b className={'font-mono w-20 text-right ' + (m.qty < 0 ? 'text-red-300' : 'text-emerald-300')}>{m.qty > 0 ? '+' : ''}{fmt(m.qty)}</b>
+                    <span className="text-xs text-gray-500 min-w-[6rem]">{m.by}{m.note ? ' · ' + m.note : ''}</span>
+                    <button className={btnCls} disabled={busy} onClick={function() { removeEntries({ moveIds: [m.id] }, 'Xóa dòng này?'); }}>Xóa</button>
+                  </div>;
+                })}</div>
               );
             })()}
           </div>
         </div>
       )}
 
+      {/* ===== GÁN KHO ===== */}
       {!loading && !err && tab === 'gan' && isAdmin && (
         <div className={cardCls}>
-          <h2 className="text-sm font-semibold text-gray-200 mb-1">Gán kho cho tài khoản nhân sự kho</h2>
-          <p className="text-xs text-gray-500 mb-3">Tài khoản đã gán kho thì lập phiếu xuất kho là tự trừ kho của mình, không phải chọn. Tài khoản chưa gán (và admin) phải chọn kho mỗi lần lập phiếu.</p>
+          <h2 className="text-base font-semibold text-gray-100 mb-1">Gán kho cho tài khoản nhân sự kho</h2>
+          <p className="text-xs text-gray-500 mb-4">Tài khoản đã gán kho thì lập phiếu xuất kho là tự ghi kho của mình, không phải chọn. Tài khoản chưa gán (và admin) có thể chọn kho khi lập phiếu.</p>
           {whUsers.length === 0 ? <div className="text-sm text-gray-500">Chưa có tài khoản vai trò Nhân sự kho (tạo ở Admin → User).</div> : (
-            <table className="w-full text-sm"><thead><tr className="text-xs text-gray-400"><th className="p-2 text-left">Tài khoản</th><th className="p-2 text-left">Email</th><th className="p-2 text-left">Kho</th></tr></thead>
-              <tbody>{whUsers.map(function(u) {
-                return <tr key={u.id} className="border-t border-slate-800"><td className="p-2 text-gray-100">{u.name}</td><td className="p-2 text-xs text-gray-500">{u.email}</td>
-                  <td className="p-2"><select value={sk.khoUsers[u.id] || ''} disabled={busy} onChange={function(e) { setUserKho(u.id, e.target.value as SkKho | ''); }} className={inputCls + (sk.khoUsers[u.id] ? '' : ' border-amber-500')}><option value="">Chưa gán</option>{SK_KHO.map(function(k) { return <option key={k} value={k}>{SK_KHO_LABEL[k]}</option>; })}</select></td></tr>;
-              })}</tbody></table>
+            <div>{whUsers.map(function(u) {
+              return <div key={u.id} className="flex flex-wrap items-center gap-3 py-3 border-t border-slate-800 first:border-0">
+                <div className="flex-1 min-w-[10rem]"><div className="text-gray-100">{u.name}</div><div className="text-xs text-gray-500">{u.email}</div></div>
+                <select value={sk.khoUsers[u.id] || ''} disabled={busy} onChange={function(e) { setUserKho(u.id, e.target.value as SkKho | ''); }} className={inputCls + (sk.khoUsers[u.id] ? '' : ' border-amber-500')}><option value="">Chưa gán</option>{SK_KHO.map(function(k) { return <option key={k} value={k}>{SK_KHO_LABEL[k]}</option>; })}</select>
+              </div>;
+            })}</div>
           )}
         </div>
       )}
 
-      {toast && <div role="status" aria-live="polite" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg bg-slate-700 border border-slate-500 text-sm text-gray-100 shadow-lg max-w-[90vw]">{toast}</div>}
+      {toast && <div role="status" aria-live="polite" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-xl bg-slate-700 border border-slate-500 text-sm text-gray-100 shadow-lg max-w-[90vw]">{toast}</div>}
     </div>
   );
 }
