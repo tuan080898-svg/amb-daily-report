@@ -9,7 +9,7 @@ export async function skGet(): Promise<SkData> {
   const j = await readJson<Partial<SkData>>(PATH);
   const e = skEmptyData();
   if (!j) return e;
-  return { khoUsers: j.khoUsers || e.khoUsers, anchors: j.anchors || [], moves: j.moves || [] };
+  return { khoUsers: j.khoUsers || e.khoUsers, anchors: j.anchors || [], moves: j.moves || [], hidden: { HCM: (j.hidden && j.hidden.HCM) || [], HN: (j.hidden && j.hidden.HN) || [] }, extra: j.extra || [] };
 }
 
 // Đọc bản mới nhất -> áp thay đổi -> ghi lại, để không đè thay đổi của người khác vừa lưu

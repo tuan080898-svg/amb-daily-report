@@ -74,6 +74,31 @@ export async function POST(req: NextRequest) {
         return d;
       }));
     }
+    if (action === 'hideProduct') {
+      if (!isKho(p.kho) || !okName(p.product) || typeof p.hide !== 'boolean') return fail(400, 'Dữ liệu không hợp lệ');
+      const kh: SkKho = p.kho;
+      const name: string = p.product.trim();
+      return ok(await skMutate(function(d) {
+        const cur = (d.hidden[kh] || []).filter(function(x) { return x !== name; });
+        d.hidden = Object.assign({}, d.hidden, { [kh]: p.hide ? cur.concat([name]) : cur });
+        return d;
+      }));
+    }
+    if (action === 'addExtra') {
+      if (!okName(p.name)) return fail(400, 'Tên sản phẩm không hợp lệ');
+      const nm: string = p.name.trim();
+      return ok(await skMutate(function(d) {
+        if ((d.extra || []).length >= 500) throw new Error('Quá nhiều sản phẩm tự thêm');
+        if ((d.extra || []).indexOf(nm) < 0) d.extra = (d.extra || []).concat([nm]);
+        d.hidden = { HCM: d.hidden.HCM.filter(function(x) { return x !== nm; }), HN: d.hidden.HN.filter(function(x) { return x !== nm; }) };
+        return d;
+      }));
+    }
+    if (action === 'removeExtra') {
+      if (!okName(p.name)) return fail(400, 'Tên sản phẩm không hợp lệ');
+      const nm2: string = p.name.trim();
+      return ok(await skMutate(function(d) { d.extra = (d.extra || []).filter(function(x) { return x !== nm2; }); return d; }));
+    }
     if (action === 'removeEntries') {
       const sessions: string[] = Array.isArray(p.sessions) ? p.sessions.filter(function(x: unknown) { return typeof x === 'string'; }) : [];
       const moves: string[] = Array.isArray(p.moveIds) ? p.moveIds.filter(function(x: unknown) { return typeof x === 'string'; }) : [];

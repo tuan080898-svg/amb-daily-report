@@ -41,9 +41,19 @@ export interface SkData {
   khoUsers: Record<string, SkKho>; // mã tài khoản nhân sự kho -> kho
   anchors: SkAnchor[];
   moves: SkMove[];
+  hidden: Record<SkKho, string[]>; // sản phẩm Sếp đã bỏ khỏi danh sách của từng kho (không xóa dữ liệu, hiện lại được)
+  extra: string[]; // sản phẩm Sếp tự thêm, ngoài bảng quy đổi SKU (vd vật tư đóng gói)
 }
 
-export function skEmptyData(): SkData { return { khoUsers: {}, anchors: [], moves: [] }; }
+export function skEmptyData(): SkData { return { khoUsers: {}, anchors: [], moves: [], hidden: { HCM: [], HN: [] }, extra: [] }; }
+
+// Danh sách sản phẩm đang theo dõi của một kho: sản phẩm trong bảng quy đổi SKU + sản phẩm tự thêm, trừ sản phẩm đã bỏ
+export function skVisibleProducts(fromMapping: string[], data: SkData, kho: SkKho): string[] {
+  var hide = new Set(data.hidden[kho] || []);
+  var set = new Set<string>();
+  fromMapping.concat(data.extra || []).forEach(function(p) { if (!hide.has(p)) set.add(p); });
+  return Array.from(set).sort(function(a, b) { return a.localeCompare(b, 'vi'); });
+}
 
 export interface SkProductQty { sku: string; quantity: number; product: string }
 

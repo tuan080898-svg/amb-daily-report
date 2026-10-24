@@ -8,7 +8,7 @@ import { dbGetPxk, dbGetPxkArchive, dbGetSoKho, dbSoKhoAction } from '@/lib/db';
 import { getCurrentStock, refreshInventory, type InventoryData } from '@/lib/inventory';
 import type { PxkBatch } from '@/lib/pxk';
 import {
-  SK_KHO, SK_KHO_LABEL, skCalcSlips, skEmptyData, skParseCount, skProductHistory, skStock,
+  SK_KHO, SK_KHO_LABEL, skCalcSlips, skEmptyData, skParseCount, skProductHistory, skStock, skVisibleProducts,
   type SkData, type SkKho, type SkRow, type SkSlipCalc,
 } from '@/lib/sokho';
 
@@ -105,12 +105,21 @@ export default function SoKhoPage() {
     return subscribeSkuMap(function() { setSkuVer(function(v) { return v + 1; }); });
   }, [allowed, reload]);
 
-  var products = useMemo(function() { return getAllProducts(); }, [skuVer]);
+  var allProducts = useMemo(function() { return getAllProducts(); }, [skuVer]);
+  // Danh sách đang theo dõi của kho này: bảng quy đổi SKU + sản phẩm tự thêm, trừ sản phẩm đã bỏ
+  var products = useMemo(function() { return skVisibleProducts(allProducts, sk, kho); }, [allProducts, sk, kho]);
   var skuOf = useMemo(function() { return getProductSkuCodes(); }, [skuVer]);
   var calc: SkSlipCalc = useMemo(function() {
     return skCalcSlips(batches, earliest === null ? Infinity : earliest, getSkuProducts);
   }, [batches, earliest, skuVer]);
-  var rows: SkRow[] = useMemo(function() { return skStock(sk, calc, kho, products); }, [sk, calc, kho, products]);
+  var rows: SkRow[] = useMemo(function() {
+    var vis = new Set(products);
+    return skStock(sk, calc, kho, products).filter(function(r) { return vis.has(r.product); });
+  }, [sk, calc, kho, products]);
+  var hiddenRows: SkRow[] = useMemo(function() {
+    var hid = new Set(sk.hidden[kho] || []);
+    return skStock(sk, calc, kho, sk.hidden[kho] || []).filter(function(r) { return hid.has(r.product); });
+  }, [sk, calc, kho]);
 
   var lastCount = useMemo(function() {
     var best: { at: string; n: number; by: string } | null = null;
@@ -143,6 +152,46 @@ export default function SoKhoPage() {
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), SK_KHO_LABEL[kho]);
     XLSX.writeFile(wb, 'so-kho-' + kho + '-' + localInput(new Date()).slice(0, 10) + '.xlsx');
+  }
+
+  // ----- Thêm / bỏ sản phẩm khỏi danh sách -----
+  var [addOpen, setAddOpen] = useState(false);
+  var [addName, setAddName] = useState('');
+
+  async function addProduct() {
+    var name = addName.trim();
+    if (!name) { say('Nhập hoặc chọn tên sản phẩm.'); return; }
+    if (products.indexOf(name) >= 0) { say('Sản phẩm này đã có trong danh sách.'); return; }
+    setBusy(true);
+    try {
+      var wasHidden = (sk.hidden[kho] || []).indexOf(name) >= 0;
+      var inMapping = allProducts.indexOf(name) >= 0;
+      if (wasHidden || inMapping) setSk(await dbSoKhoAction('hideProduct', { kho: kho, product: name, hide: false }));
+      else setSk(await dbSoKhoAction('addExtra', { name: name }));
+      setAddName(''); setAddOpen(false);
+      say(wasHidden ? 'Đã hiện lại ' + name + '.' : inMapping ? 'Đã thêm ' + name + '.' : 'Đã thêm ' + name + ' (sản phẩm tự thêm, ngoài bảng quy đổi SKU: tự nhập kiểm kho và nhập/điều chỉnh, phiếu xuất kho chưa tự trừ).');
+    } catch (e) { say(e instanceof Error ? e.message : 'Không thêm được.'); }
+    setBusy(false);
+  }
+
+  async function removeProduct(r: SkRow) {
+    var hasData = r.anchor !== null || r.moveQty !== 0 || r.slipQty !== 0;
+    var isExtra = sk.extra.indexOf(r.product) >= 0;
+    var ask = 'Bỏ "' + r.product + '" khỏi danh sách ' + SK_KHO_LABEL[kho] + '?' + (hasData ? '\n\nSản phẩm này đang có số liệu (kiểm kho/nhập/xuất theo phiếu). Số liệu vẫn được giữ, chỉ ẩn khỏi bảng; hiện lại được ở mục "Đã ẩn" bên dưới.' : '');
+    if (!window.confirm(ask)) return;
+    setBusy(true);
+    try {
+      if (isExtra && !hasData) setSk(await dbSoKhoAction('removeExtra', { name: r.product }));
+      else setSk(await dbSoKhoAction('hideProduct', { kho: kho, product: r.product, hide: true }));
+      say('Đã bỏ ' + r.product + ' khỏi danh sách.');
+    } catch (e) { say(e instanceof Error ? e.message : 'Không bỏ được.'); }
+    setBusy(false);
+  }
+
+  async function restoreProduct(name: string) {
+    setBusy(true);
+    try { setSk(await dbSoKhoAction('hideProduct', { kho: kho, product: name, hide: false })); say('Đã hiện lại ' + name + '.'); } catch (e) { say(e instanceof Error ? e.message : 'Không hiện lại được.'); }
+    setBusy(false);
   }
 
   // ----- Kiểm kho -----
@@ -270,13 +319,27 @@ export default function SoKhoPage() {
             {([['tat-ca', 'Tất cả', rows.length], ['chua-kiem', 'Chưa kiểm kho', nChua], ['am', 'Tồn âm', nAm], ['phat-sinh', 'Có phát sinh', rows.filter(function(r) { return r.slipQty !== 0 || r.moveQty !== 0; }).length]] as Array<[Flt, string, number]>).map(function(c) {
               return <button key={c[0]} onClick={function() { setFlt(c[0]); }} aria-pressed={flt === c[0]} className={'px-3 py-1 rounded-full text-xs border ' + (flt === c[0] ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-800 border-slate-600 text-gray-300 hover:bg-slate-700')}>{c[1]} <b>{c[2]}</b></button>;
             })}
-            <button className={btnCls + ' ml-auto'} onClick={exportExcel}>Tải Excel</button>
+            <span className="ml-auto flex gap-2">
+              {isAdmin && <button className={btnCls} onClick={function() { setAddOpen(!addOpen); }}>＋ Thêm sản phẩm</button>}
+              <button className={btnCls} onClick={exportExcel}>Tải Excel</button>
+            </span>
           </div>
+          {isAdmin && addOpen && (
+            <div className={cardCls + ' !p-3'}>
+              <div className="text-xs text-gray-500 mb-2">Chọn sản phẩm đã ẩn hoặc trong bảng quy đổi SKU để hiện lại, hoặc gõ tên mới (vật tư, bao bì… ngoài bảng quy đổi: tự nhập kiểm kho và nhập/điều chỉnh, phiếu xuất kho chưa tự trừ).</div>
+              <div className="flex flex-wrap gap-2">
+                <input list="sk-add-list" value={addName} onChange={function(e) { setAddName(e.target.value); }} placeholder="Tên sản phẩm" className={inputCls + ' w-72'} />
+                <datalist id="sk-add-list">{allProducts.concat(sk.hidden[kho] || []).filter(function(p, i, a) { return a.indexOf(p) === i && products.indexOf(p) < 0; }).map(function(p) { return <option key={p} value={p} />; })}</datalist>
+                <button className={btnPrimaryCls + ' !py-1.5'} disabled={busy} onClick={addProduct}>Thêm vào {SK_KHO_LABEL[kho]}</button>
+                <button className={btnCls} onClick={function() { setAddOpen(false); }}>Đóng</button>
+              </div>
+            </div>
+          )}
 
           <div className="overflow-x-auto bg-slate-900 border border-slate-700 rounded-xl">
             <table className="w-full text-sm">
               <thead><tr className="text-xs text-gray-400 border-b border-slate-700">
-                <th className="p-2 text-left">Sản phẩm</th><th className="p-2 text-right">Số kiểm kho</th><th className="p-2 text-right">Nhập / điều chỉnh</th><th className="p-2 text-right">Xuất theo phiếu</th><th className="p-2 text-right">Tồn hiện tại</th>{inv && <th className="p-2 text-right" title="Số trong trang Kho (đồng bộ từ Sapo)">Tồn Sapo/app</th>}{inv && <th className="p-2 text-right">Lệch</th>}
+                <th className="p-2 text-left">Sản phẩm</th><th className="p-2 text-right">Số kiểm kho</th><th className="p-2 text-right">Nhập / điều chỉnh</th><th className="p-2 text-right">Xuất theo phiếu</th><th className="p-2 text-right">Tồn hiện tại</th>{inv && <th className="p-2 text-right" title="Số trong trang Kho (đồng bộ từ Sapo)">Tồn Sapo/app</th>}{inv && <th className="p-2 text-right">Lệch</th>}{isAdmin && <th className="p-2"></th>}
               </tr></thead>
               <tbody>
                 {shown.map(function(r) {
@@ -293,8 +356,9 @@ export default function SoKhoPage() {
                       <td className={'p-2 text-right font-mono font-semibold ' + (r.stock === null ? 'text-gray-600' : r.stock < 0 ? 'text-red-300' : 'text-emerald-300')}>{r.stock === null ? '—' : fmt(r.stock)}</td>
                       {inv && <td className="p-2 text-right font-mono text-gray-400">{app === null ? '—' : fmt(app)}</td>}
                       {inv && <td className={'p-2 text-right font-mono ' + (diff === null || diff === 0 ? 'text-gray-600' : 'text-amber-300')}>{diff === null ? '—' : diff === 0 ? '0' : (diff > 0 ? '+' : '') + fmt(diff)}</td>}
+                      {isAdmin && <td className="p-2 text-right"><button title="Bỏ khỏi danh sách" aria-label="Bỏ khỏi danh sách" disabled={busy} className="text-gray-600 hover:text-red-400 px-2" onClick={function(e) { e.stopPropagation(); removeProduct(r); }}>×</button></td>}
                     </tr>,
-                    isOpen && <tr key={r.product + '-h'} className="bg-slate-950/60"><td colSpan={inv ? 7 : 5} className="p-3">
+                    isOpen && <tr key={r.product + '-h'} className="bg-slate-950/60"><td colSpan={(inv ? 7 : 5) + (isAdmin ? 1 : 0)} className="p-3">
                       {hist.length === 0 ? <div className="text-xs text-gray-500">Chưa có biến động nào cho sản phẩm này ở {SK_KHO_LABEL[kho]}.</div> : (
                         <ul className="text-xs space-y-0.5">{hist.map(function(h, i) {
                           return <li key={i} className={h.counted ? 'text-gray-200' : 'text-gray-600 line-through'}><span className="font-mono">{fmtAt(h.at)}</span> · {h.label} · <b className={h.qty < 0 ? 'text-red-300' : 'text-emerald-300'}>{h.kind === 'kiem' ? '= ' + fmt(h.qty) : (h.qty > 0 ? '+' : '') + fmt(h.qty)}</b>{!h.counted && ' (trước lần kiểm kho gần nhất, không tính)'}</li>;
@@ -303,10 +367,18 @@ export default function SoKhoPage() {
                     </td></tr>,
                   ];
                 })}
-                {shown.length === 0 && <tr><td colSpan={7} className="p-4 text-gray-500">Không có sản phẩm nào.</td></tr>}
+                {shown.length === 0 && <tr><td colSpan={8} className="p-4 text-gray-500">Không có sản phẩm nào.</td></tr>}
               </tbody>
             </table>
           </div>
+          {isAdmin && hiddenRows.length > 0 && (
+            <details className="mt-4 p-3 rounded-lg bg-slate-900 border border-slate-700">
+              <summary className="cursor-pointer text-sm text-gray-300">Đã ẩn khỏi danh sách {SK_KHO_LABEL[kho]} ({hiddenRows.length})</summary>
+              <ul className="mt-2 text-sm">{hiddenRows.map(function(r) {
+                return <li key={r.product} className="flex items-center gap-3 py-1 border-t border-slate-800"><span className="flex-1 text-gray-300">{r.product}{(r.slipQty !== 0 || r.anchor) && <span className="ml-2 text-xs text-gray-500">{r.anchor ? 'có số kiểm kho' : ''}{r.slipQty !== 0 ? ' · đã xuất theo phiếu ' + fmt(r.slipQty) : ''}</span>}</span><button className={btnCls} disabled={busy} onClick={function() { restoreProduct(r.product); }}>Hiện lại</button></li>;
+              })}</ul>
+            </details>
+          )}
         </div>
       )}
 
