@@ -42,6 +42,9 @@ export default function AdminSkuPage() {
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState<EditingEntry | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
+  const [selected, setSelected] = useState<Record<string, boolean>>({}); // các mã SKU đang được tích chọn để xóa hàng loạt
+  const [lastDeleted, setLastDeleted] = useState<SkuMap | null>(null); // bản ngay trước lần xóa hàng loạt gần nhất, để hoàn tác
+  const lastPick = useRef<number>(-1); // vị trí dòng vừa tích, để giữ Shift chọn cả khoảng
   const cogsFileRef = useRef<HTMLInputElement>(null);
   const [cogsUploading, setCogsUploading] = useState(false);
 
@@ -197,12 +200,61 @@ export default function AdminSkuPage() {
 
   function handleDelete(code: string) {
     if (!confirm('Xóa SKU "' + code + '"?')) return;
+    setLastDeleted(null);
     var updated = Object.assign({}, skuMap);
     delete updated[code];
     saveSkuMap(updated);
     invalidateCache();
     setSkuMap(getSkuMap());
     showSuccess('Đã xóa SKU ' + code);
+  }
+
+  // ----- Chọn nhiều SKU để xóa hàng loạt (chỉ tác động lên các dòng đang hiển thị) -----
+  var visibleCodes = entries.map(function(e) { return e.code; });
+  var selectedVisible = visibleCodes.filter(function(c) { return selected[c]; });
+  var allVisibleSelected = visibleCodes.length > 0 && selectedVisible.length === visibleCodes.length;
+
+  function toggleOne(idx: number, code: string, shift: boolean) {
+    var next = Object.assign({}, selected);
+    var on = !selected[code];
+    if (shift && lastPick.current >= 0 && lastPick.current < visibleCodes.length) {
+      var a = Math.min(lastPick.current, idx), b = Math.max(lastPick.current, idx);
+      for (var i = a; i <= b; i++) { if (on) next[visibleCodes[i]] = true; else delete next[visibleCodes[i]]; }
+    } else if (on) next[code] = true; else delete next[code];
+    lastPick.current = idx;
+    setSelected(next);
+  }
+
+  function toggleAllVisible() {
+    var next = Object.assign({}, selected);
+    visibleCodes.forEach(function(c) { if (allVisibleSelected) delete next[c]; else next[c] = true; });
+    setSelected(next);
+  }
+
+  function handleBulkDelete() {
+    var codes = selectedVisible;
+    if (codes.length === 0) return;
+    var preview = codes.slice(0, 12).join(', ') + (codes.length > 12 ? ' … và ' + (codes.length - 12) + ' mã khác' : '');
+    if (!confirm('Xóa ' + codes.length + ' SKU đã chọn?\n\n' + preview + '\n\nCác mã này sẽ không còn trong bảng quy đổi (phiếu xuất kho, sổ kho, báo cáo sẽ không nhận ra chúng nữa). Có nút Hoàn tác ngay sau khi xóa.')) return;
+    var before = Object.assign({}, skuMap);
+    var updated = Object.assign({}, skuMap);
+    codes.forEach(function(c) { delete updated[c]; });
+    saveSkuMap(updated);
+    invalidateCache();
+    setSkuMap(getSkuMap());
+    setSelected({});
+    lastPick.current = -1;
+    setLastDeleted(before);
+    showSuccess('Đã xóa ' + codes.length + ' SKU');
+  }
+
+  function handleUndoBulk() {
+    if (!lastDeleted) return;
+    saveSkuMap(lastDeleted);
+    invalidateCache();
+    setSkuMap(getSkuMap());
+    setLastDeleted(null);
+    showSuccess('Đã hoàn tác, khôi phục lại các SKU vừa xóa');
   }
 
   function handleSave() {
@@ -352,6 +404,16 @@ export default function AdminSkuPage() {
       {successMsg && (
         <div className="mb-4 px-4 py-3 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-sm text-emerald-400">
           {successMsg}
+        </div>
+      )}
+
+      {lastDeleted && (
+        <div className="mb-4 px-4 py-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-sm text-amber-300 flex items-center justify-between gap-3">
+          <span>Vừa xóa hàng loạt. Nếu xóa nhầm, bấm Hoàn tác để khôi phục (chỉ dùng được khi chưa sửa hay xóa mã khác).</span>
+          <span className="flex gap-2 shrink-0">
+            <button onClick={handleUndoBulk} className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-medium">Hoàn tác</button>
+            <button onClick={function() { setLastDeleted(null); }} className="px-3 py-1 text-amber-300 hover:text-amber-100 text-xs">Ẩn</button>
+          </span>
         </div>
       )}
 
@@ -509,15 +571,28 @@ export default function AdminSkuPage() {
 
       {/* Table */}
       <div className="bg-slate-900 border border-slate-700/50 rounded-xl overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-700/50">
+        <div className="px-5 py-4 border-b border-slate-700/50 flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-semibold text-gray-100 text-sm">
             Bảng mapping {search.trim() ? '(' + entries.length + ' kết quả)' : ''}
           </h2>
+          {selectedVisible.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-blue-300">Đã chọn <b>{selectedVisible.length}</b> / {visibleCodes.length} SKU</span>
+              {!allVisibleSelected && <button onClick={toggleAllVisible} className="px-3 py-1 text-gray-300 hover:text-white border border-slate-600 rounded-lg hover:bg-slate-800 text-xs">Chọn tất cả {visibleCodes.length}{search.trim() ? ' kết quả' : ''}</button>}
+              <button onClick={function() { setSelected({}); }} className="px-3 py-1 text-gray-300 hover:text-white border border-slate-600 rounded-lg hover:bg-slate-800 text-xs">Bỏ chọn</button>
+              <button onClick={handleBulkDelete} className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-medium">Xóa {selectedVisible.length} SKU đã chọn</button>
+            </div>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-800/80 border-b border-slate-700/50">
+                <th className="px-3 py-2.5 w-10 text-center">
+                  <input type="checkbox" aria-label="Chọn tất cả SKU đang hiển thị" checked={allVisibleSelected} disabled={visibleCodes.length === 0}
+                    ref={function(el) { if (el) el.indeterminate = selectedVisible.length > 0 && !allVisibleSelected; }}
+                    onChange={toggleAllVisible} className="w-4 h-4 accent-blue-500 cursor-pointer" />
+                </th>
                 <th className="text-left px-4 py-2.5 font-medium text-gray-400 w-40">Mã SKU</th>
                 <th className="text-left px-4 py-2.5 font-medium text-gray-400">Sản phẩm</th>
                 <th className="text-center px-4 py-2.5 font-medium text-gray-400 w-20">SL</th>
@@ -527,12 +602,12 @@ export default function AdminSkuPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
-              {entries.map(function(entry) {
+              {entries.map(function(entry, rowIdx) {
                 var isCombo = entry.items.length > 1;
                 var isEditingThis = editing && !editing.isNew && editing.originalCode === entry.code;
                 return isEditingThis ? (
                   <tr key={entry.code + '-edit'} className="bg-blue-950/30 border-l-2 border-l-blue-500">
-                    <td colSpan={isAdmin ? 6 : 5} className="px-4 py-4">
+                    <td colSpan={isAdmin ? 7 : 6} className="px-4 py-4">
                       <div className="space-y-3">
                         <div className="flex items-center gap-2 mb-2">
                           <code className="px-2 py-0.5 bg-slate-800 rounded text-blue-300 text-xs font-mono">{editing!.skuCode}</code>
@@ -613,7 +688,12 @@ export default function AdminSkuPage() {
                     </td>
                   </tr>
                 ) : (
-                  <tr key={entry.code} className="hover:bg-slate-800/50">
+                  <tr key={entry.code} className={selected[entry.code] ? 'bg-blue-950/40 hover:bg-blue-950/50' : 'hover:bg-slate-800/50'}>
+                    <td className="px-3 py-3 text-center">
+                      <input type="checkbox" aria-label={'Chọn ' + entry.code} checked={!!selected[entry.code]} readOnly
+                        onClick={function(e) { toggleOne(rowIdx, entry.code, (e as unknown as React.MouseEvent).shiftKey); }}
+                        className="w-4 h-4 accent-blue-500 cursor-pointer" />
+                    </td>
                     <td className="px-4 py-3">
                       <code className="px-2 py-0.5 bg-slate-800 rounded text-blue-300 text-xs font-mono">{entry.code}</code>
                     </td>
