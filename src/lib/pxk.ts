@@ -36,6 +36,7 @@ export interface PxkOrder {
   totalQty: number; // tổng SL ghi trên nhãn
   note?: string; // nhãn đơn ngoài sàn (Sapo): ghi chú của đơn in sau chữ "ĐƠN NGOÀI SÀN."
   ok: boolean; // tổng các dòng khớp tổng SL trên nhãn
+  platform?: PxkPlatform; // chỉ có khi file trộn nhiều sàn: sàn của riêng nhãn này (không có = theo sàn của file)
   pages: number[];
   file: string;
 }
@@ -306,9 +307,50 @@ export function detectPxkPlatform(pages: RawItem[][]): PxkPlatform | null {
   return null;
 }
 
+// Sàn của MỘT trang nhãn (null = trang nối tiếp không có dấu hiệu riêng). Một file in từ nhiều sàn (vd Shopee Hỏa tốc + TikTok Hỏa tốc) có thể trộn các loại nhãn.
+function pagePlatform(items: RawItem[]): PxkPlatform | null {
+  var text = toLines(items).join('\n').normalize('NFC');
+  if (/Nội dung hàng/.test(text)) return /ĐƠN NGOÀI SÀN|\sx\s+\d+\.\d{3}\s*[;,]/.test(text) ? 'sapo' : 'shopee';
+  if (/Seller SKU|Qty Total|Order ID:/.test(text)) return 'tiktok';
+  return null;
+}
+
+// File trộn nhiều loại nhãn: đọc từng đoạn trang liên tiếp bằng đúng bộ đọc của sàn đó, gắn sàn vào từng đơn. File một sàn trả null (đọc như cũ).
+export function parseMixedPages(pages: RawItem[][], fileName: string): { platform: PxkPlatform; orders: PxkOrder[] } | null {
+  var cls = pages.map(pagePlatform);
+  var kinds = new Set<PxkPlatform>();
+  cls.forEach(function(c) { if (c) kinds.add(c); });
+  if (kinds.size < 2) return null;
+  // trang không rõ sàn (nhãn dài nhiều trang) theo trang trước; trang đầu file không rõ thì theo trang có sàn đầu tiên
+  var first = cls.find(function(c) { return !!c; }) as PxkPlatform;
+  var cur: PxkPlatform = first;
+  var plats = cls.map(function(c) { if (c) cur = c; return cur; });
+  var orders: PxkOrder[] = [];
+  var count: Record<string, number> = {};
+  var start = 0;
+  for (var i = 1; i <= pages.length; i++) {
+    if (i < pages.length && plats[i] === plats[start]) continue;
+    var plat = plats[start];
+    var part = parsePxkPages(pages.slice(start, i), plat, fileName);
+    part.forEach(function(o) {
+      o.pages = o.pages.map(function(p) { return p + start; });
+      o.platform = plat;
+      orders.push(o);
+    });
+    count[plat] = (count[plat] || 0) + part.length;
+    start = i;
+  }
+  var main = Object.keys(count).sort(function(a, b) { return count[b] - count[a]; })[0] as PxkPlatform;
+  return { platform: main, orders: orders };
+}
+
 // Đọc một file PDF, tự nhận diện sàn (hoặc dùng sàn được chỉ định tay). Không phân biệt kho.
 export async function parsePxkFileAuto(file: File, force?: PxkPlatform): Promise<{ platform: PxkPlatform | null; orders: PxkOrder[] }> {
   var pages = await readPages(file);
+  if (!force) {
+    var mixed = parseMixedPages(pages, file.name);
+    if (mixed) return mixed;
+  }
   var platform = force || detectPxkPlatform(pages);
   if (!platform) return { platform: null, orders: [] };
   return { platform: platform, orders: parsePxkPages(pages, platform, file.name) };

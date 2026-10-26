@@ -168,8 +168,8 @@ export default function PhieuXuatKhoPage() {
     var noId: PxkOrder[] = [];
     files.forEach(function(f) {
       if (!f.platform) return;
-      var plat = f.platform;
       f.orders.forEach(function(o0) {
+        var plat = o0.platform || f.platform as PxkPlatform; // file trộn nhiều sàn: mỗi nhãn theo sàn riêng của nó
         var o = o0;
         if (!o.orderId) {
           // Không bỏ nhãn: vẫn đưa lên phiếu với mã tạm theo file/trang và đánh dấu "chưa chắc" để kiểm tra tay
@@ -513,7 +513,7 @@ export default function PhieuXuatKhoPage() {
   }
 
   var inputCls = 'px-3 py-2 bg-slate-800 border border-slate-600 rounded-lg text-sm text-gray-200 focus:border-blue-500 outline-none';
-  var hasShopee = files.some(function(f) { return f.platform === 'shopee'; });
+  var hasShopee = files.some(function(f) { return f.platform === 'shopee' || f.orders.some(function(o) { return o.platform === 'shopee'; }); });
 
   if (!allowed) {
     return <div className="p-6 text-red-400">Trang này chỉ dành cho nhân sự kho và admin.</div>;
@@ -616,7 +616,11 @@ export default function PhieuXuatKhoPage() {
                       </td>
                       <td className="px-2 py-2">
                         {f.platform
-                          ? <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + platformBadge(f.platform)}>{PXK_PLATFORM_LABELS[f.platform]}</span>
+                          ? <span className="inline-flex flex-wrap gap-1">{(function() {
+                              var ps = new Set<PxkPlatform>([f.platform]);
+                              f.orders.forEach(function(o) { if (o.platform) ps.add(o.platform); });
+                              return Array.from(ps).map(function(p) { return <span key={p} className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + platformBadge(p)}>{PXK_PLATFORM_LABELS[p]}</span>; });
+                            })()}</span>
                           : <select value="" onChange={function(e) { if (e.target.value) forcePlatform(f.id, e.target.value as PxkPlatform); }} className={inputCls + ' py-1'}>
                               <option value="">Chọn sàn...</option><option value="shopee">Shopee</option><option value="tiktok">TikTok Shop</option><option value="sapo">Đơn ngoài sàn (Sapo)</option>
                             </select>}
