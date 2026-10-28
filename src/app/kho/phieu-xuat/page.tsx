@@ -8,8 +8,8 @@ import { SK_KHO, SK_KHO_LABEL, type SkKho } from '@/lib/sokho';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
 import {
-  parsePxkFileAuto, summarizePxk, summarizeRange, pxkPartsLabel, repackOrders, pxkScopeMatch, PXK_SCOPE_COMPANY, PXK_SCOPE_STAFF, PXK_STAFF_SHOP, buildGiftCatalog, expandGiftNote, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
-  type PxkPlatform, type PxkOrder, type PxkBatch, type PxkStoredOrder, type PxkData, type PxkItem,
+  parsePxkFileAuto, pxkFindRaceDup, summarizePxk, summarizeRange, pxkPartsLabel, repackOrders, pxkScopeMatch, PXK_SCOPE_COMPANY, PXK_SCOPE_STAFF, PXK_STAFF_SHOP, buildGiftCatalog, expandGiftNote, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
+  type PxkPlatform, type PxkOrder, type PxkBatch, type PxkStoredOrder, type PxkData, type PxkItem, type PxkRaceDup,
 } from '@/lib/pxk';
 import { downloadPxkPdf, downloadPxkDayPdf } from '@/lib/pxk-pdf';
 
@@ -441,18 +441,31 @@ export default function PhieuXuatKhoPage() {
           files: fileNames,
         };
       });
+      var race: { list: PxkRaceDup[] } = { list: [] };
       var msg = 'Đã lập ' + batches.length + ' phiếu: ' + batches.map(function(b) { return b.id; }).join(', ') + '.' + (khoUse ? ' Phiếu ghi vào ' + SK_KHO_LABEL[khoUse as SkKho] + (deductOn ? ' (Sổ kho tự trừ từ sau lần kiểm kho gần nhất, mỗi đơn chỉ trừ một lần).' : ' (Sổ kho đang tạm dừng trừ kho theo phiếu).') : '');
       try {
         await saveChain.current; // đợi các lần ghi nhớ SKU đang chạy xong rồi mới ghi phiếu, tránh ghi đè lẫn nhau
         var learned: Record<string, string> = {};
         Object.keys(assign).forEach(function(k) { if (assign[k] && assign[k].sku) learned[k] = assign[k].sku; });
         var next = await dbUpdatePxk(function(cur) {
+          // Kiểm tra lại trùng trên dữ liệu mới nhất của máy chủ ngay trước khi ghi: có người vừa lập phiếu cùng đơn thì dừng, không ghi gì
+          var dups = pxkFindRaceDup(cur.batches, batches, prevOrders);
+          if (dups.length > 0) { race.list = dups; throw new Error('PXK_RACE'); }
           var amb = Object.assign({}, cur.ambiguous || {});
           Object.keys(learned).forEach(function(k) { delete amb[k]; });
           return Object.assign({}, cur, { names: Object.assign({}, cur.names, learned), ambiguous: amb, batches: cur.batches.concat(batches) });
         });
         setData(next);
       } catch (e) {
+        if (race.list.length > 0) {
+          // Có người vừa lập phiếu chứa các đơn này: chưa ghi, chưa in; nạp lại dữ liệu mới để cảnh báo trùng hiện đúng
+          if (w) w.close();
+          try { setData(await dbGetPxk()); } catch { /* không nạp lại được: người lập tải lại trang */ }
+          var byBatch: Record<string, number> = {};
+          race.list.forEach(function(d) { var k = d.batchId + ' (' + (d.by || 'không rõ') + ')'; byBatch[k] = (byBatch[k] || 0) + 1; });
+          setError('CHƯA LẬP PHIẾU: có ' + race.list.length + ' đơn vừa được người khác lập phiếu trong lúc Sếp chuẩn bị: ' + Object.keys(byBatch).map(function(k) { return k + ' ' + byBatch[k] + ' đơn'; }).join('; ') + '. Đã cập nhật lại dữ liệu. Xem lại số đơn trùng bên dưới (có thể tích "chỉ in các đơn chưa từng lập phiếu") rồi bấm lập phiếu lần nữa.');
+          return;
+        }
         msg += ' ⚠ Chưa lưu được lịch sử phiếu (' + (e instanceof Error ? e.message : String(e)) + '). Phiếu vẫn được in, nhưng sẽ không có trong Lịch sử.';
       }
       setNotice(msg);

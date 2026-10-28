@@ -934,6 +934,25 @@ export function pxkBatchQty(b: PxkBatch): number {
   return b.orders.reduce(function(s, o) { return s + o.items.reduce(function(a, x) { return a + x.qty; }, 0); }, 0);
 }
 
+// Kiểm tra trùng lúc lập phiếu, trên dữ liệu MỚI NHẤT của máy chủ: đơn trong phiếu sắp lập đã có trong một phiếu khác mà màn hình của người lập
+// CHƯA biết (known = các đơn đã thấy lúc mở trang, đã cảnh báo cho người lập). Thường do người khác vừa lập phiếu cùng lúc.
+export interface PxkRaceDup { platform: PxkPlatform; orderId: string; batchId: string; by: string }
+export function pxkFindRaceDup(existing: PxkBatch[], incoming: PxkBatch[], known: Record<PxkPlatform, Record<string, unknown>>): PxkRaceDup[] {
+  var latest: Record<PxkPlatform, Record<string, { id: string; by: string }>> = { shopee: {}, tiktok: {}, sapo: {} };
+  existing.slice().sort(function(a, b) { return a.createdAt.localeCompare(b.createdAt); }).forEach(function(b) {
+    b.orders.forEach(function(o) { latest[b.platform][o.orderId] = { id: b.id, by: b.createdBy }; });
+  });
+  var out: PxkRaceDup[] = [];
+  incoming.forEach(function(b) {
+    b.orders.forEach(function(o) {
+      if (!o.orderId || o.orderId.indexOf('(không đọc được mã đơn)') === 0) return; // nhãn không có mã đơn: không so trùng được
+      var hit = latest[b.platform][o.orderId];
+      if (hit && !known[b.platform][o.orderId]) out.push({ platform: b.platform, orderId: o.orderId, batchId: hit.id, by: hit.by });
+    });
+  });
+  return out;
+}
+
 // Tổng hợp mọi phiếu có ngày in trong [from, to] (YYYY-MM-DD): một ngày, một tháng hay khoảng bất kỳ.
 // Đơn xuất hiện ở nhiều phiếu (in lại) chỉ tính một lần.
 export function summarizeRange(from: string, to: string, all: PxkBatch[], scope?: string, label?: string): PxkDaySummary {
