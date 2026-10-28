@@ -74,6 +74,7 @@ export default function PhieuXuatKhoPage() {
   const [shopSel, setShopSel] = useState(''); // loại phiếu sắp lập: '' = shop công ty, PXK_STAFF_SHOP = shop nhân sự (tự bán, không thuộc công ty)
   const [dayShop, setDayShop] = useState(PXK_SCOPE_COMPANY); // phạm vi phiếu tổng hợp cuối ngày (mặc định: chỉ shop công ty)
   const [histShop, setHistShop] = useState(''); // lọc lịch sử phiếu theo shop
+  const [histLimit, setHistLimit] = useState(30); // số phiếu đang hiện ở bảng Lịch sử (bấm Xem thêm để hiện nhiều hơn)
   const [sumMode, setSumMode] = useState<'day' | 'month'>('day'); // phiếu tổng hợp theo ngày hay theo tháng
   const [sumMonth, setSumMonth] = useState(todayStr().slice(0, 7));
   const [archive, setArchive] = useState<{ month: string; batches: PxkBatch[]; error: string }>({ month: '', batches: [], error: '' }); // phiếu đã chuyển vào lưu trữ của tháng đang xem
@@ -967,7 +968,7 @@ export default function PhieuXuatKhoPage() {
                 <th className="px-4 py-2 text-left">Người lập</th><th className="px-4 py-2"></th>
               </tr></thead>
               <tbody>
-                {data.batches.filter(function(b) { return pxkScopeMatch(b, histShop); }).sort(function(a, b) { return b.createdAt.localeCompare(a.createdAt); }).slice(0, 30).map(function(b) {
+                {data.batches.filter(function(b) { return pxkScopeMatch(b, histShop); }).sort(function(a, b) { return b.createdAt.localeCompare(a.createdAt); }).slice(0, histLimit).map(function(b) {
                   var qty = b.orders.reduce(function(s, o) { return s + o.items.reduce(function(a, x) { return a + x.qty; }, 0); }, 0);
                   return (
                     <tr key={b.id} className="border-b border-slate-800">
@@ -986,6 +987,18 @@ export default function PhieuXuatKhoPage() {
                 })}
               </tbody>
             </table>
+            {(function() {
+              var total = data.batches.filter(function(b) { return pxkScopeMatch(b, histShop); }).length;
+              return (
+                <div className="px-4 py-3 flex flex-wrap items-center gap-3 text-sm text-gray-400 border-t border-slate-800">
+                  <span>Đang hiện {Math.min(histLimit, total)}/{total} phiếu (mới nhất trước).</span>
+                  {total > histLimit && <button onClick={function() { setHistLimit(histLimit + 30); }} className="text-blue-400 hover:text-blue-300">Xem thêm 30 phiếu</button>}
+                  {total > histLimit && <button onClick={function() { setHistLimit(total); }} className="text-blue-400 hover:text-blue-300">Hiện tất cả</button>}
+                  {histLimit > 30 && <button onClick={function() { setHistLimit(30); }} className="text-gray-400 hover:text-gray-200">Thu gọn</button>}
+                  <span className="text-xs text-gray-500">App giữ {data.batches.length} phiếu gần nhất ở đây; phiếu cũ hơn được chuyển vào lưu trữ theo tháng (xem ở Phiếu tổng hợp › theo tháng).</span>
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
