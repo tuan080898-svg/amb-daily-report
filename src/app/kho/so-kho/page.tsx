@@ -56,6 +56,57 @@ function Hl(props: { text: string; q: string }) {
   return <>{parts}</>;
 }
 
+// Ô chọn sản phẩm có tìm kiếm: gõ không dấu, nhiều từ, hoặc mã SKU đều ra; bấm hoặc Enter để chọn (thay cho danh sách gợi ý mặc định của trình duyệt, vốn đòi gõ đúng dấu)
+function ProductPicker(props: { value: string; onChange: (v: string) => void; options: string[]; skuOf: Record<string, string[]>; placeholder: string; className?: string; emptyHint?: string }) {
+  var [open, setOpen] = useState(false);
+  var [hi, setHi] = useState(0);
+  var q = props.value;
+  var list = useMemo(function() {
+    return q.trim() ? props.options.filter(function(p) { return matchQ(p + ' ' + (props.skuOf[p] || []).join(' '), q); }) : props.options;
+  }, [q, props.options, props.skuOf]);
+  var shown = list.slice(0, 50);
+  function pick(p: string) { props.onChange(p); setOpen(false); }
+  return (
+    <div className="relative">
+      <input
+        value={q}
+        placeholder={props.placeholder}
+        className={props.className}
+        autoComplete="off"
+        onFocus={function() { setOpen(true); }}
+        onBlur={function() { setOpen(false); }}
+        onChange={function(e) { props.onChange(e.target.value); setOpen(true); setHi(0); }}
+        onKeyDown={function(e) {
+          if (e.key === 'ArrowDown') { e.preventDefault(); setOpen(true); setHi(Math.min(hi + 1, shown.length - 1)); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setHi(Math.max(hi - 1, 0)); }
+          else if (e.key === 'Enter' && open && shown[hi]) { e.preventDefault(); pick(shown[hi]); }
+          else if (e.key === 'Escape') setOpen(false);
+        }}
+      />
+      {q && <button type="button" aria-label="Xóa" className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full text-gray-400 hover:text-white hover:bg-slate-700" onMouseDown={function(e) { e.preventDefault(); props.onChange(''); setOpen(true); }}>×</button>}
+      {open && (
+        <div className="absolute z-30 left-0 right-0 mt-1 max-h-72 overflow-auto rounded-lg border border-slate-600 bg-slate-900 shadow-xl">
+          {shown.length === 0 ? (
+            <div className="px-3 py-3 text-sm text-gray-400">Không tìm thấy sản phẩm nào khớp “{q}”.{props.emptyHint ? ' ' + props.emptyHint : ''}</div>
+          ) : (
+            <div>
+              <div className="px-3 py-1.5 text-[11px] text-gray-500 border-b border-slate-800">{list.length} sản phẩm{list.length > shown.length ? ' (hiện 50 đầu, gõ thêm để lọc)' : ''}</div>
+              {shown.map(function(p, i) {
+                return (
+                  <div key={p} onMouseDown={function(e) { e.preventDefault(); pick(p); }} onMouseEnter={function() { setHi(i); }} className={'px-3 py-2 cursor-pointer text-sm flex flex-wrap items-baseline gap-x-3 ' + (i === hi ? 'bg-blue-600/30 text-white' : 'text-gray-200')}>
+                    <span><Hl text={p} q={q} /></span>
+                    <span className="text-[11px] font-mono text-blue-300">{(props.skuOf[p] || []).slice(0, 3).join(' · ')}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function monthsBetween(fromMs: number, toMs: number): string[] {
   var out: string[] = [];
   var d = new Date(fromMs);
@@ -316,11 +367,15 @@ export default function SoKhoPage() {
 
   async function saveMove() {
     var qty = parseFloat(mvQty.replace(',', '.'));
-    if (!mvProduct || !isFinite(qty) || qty === 0) { say('Chọn sản phẩm và nhập số lượng khác 0.'); return; }
+    // gõ chưa chọn trong danh sách: chấp nhận nếu chỉ có đúng 1 sản phẩm khớp
+    var prod = products.indexOf(mvProduct) >= 0 ? mvProduct : '';
+    if (!prod && mvProduct.trim()) { var hit = products.filter(function(p) { return matchQ(p + ' ' + (skuOf[p] || []).join(' '), mvProduct); }); if (hit.length === 1) prod = hit[0]; }
+    if (!prod) { say(mvProduct.trim() ? 'Chưa chọn đúng sản phẩm: bấm một dòng trong danh sách gợi ý.' : 'Chọn sản phẩm.'); return; }
+    if (!isFinite(qty) || qty === 0) { say('Nhập số lượng khác 0.'); return; }
     if (mvType === 'import' && qty < 0) { say('Nhập hàng phải là số dương. Hàng hỏng/mất thì chọn "Điều chỉnh" và nhập số âm.'); return; }
     setBusy(true);
     try {
-      setSk(await dbSoKhoAction('addMove', { kho: kho, product: mvProduct, qty: qty, type: mvType, at: new Date(mvAt).toISOString(), note: mvNote, by: currentUser ? currentUser.name : '' }));
+      setSk(await dbSoKhoAction('addMove', { kho: kho, product: prod, qty: qty, type: mvType, at: new Date(mvAt).toISOString(), note: mvNote, by: currentUser ? currentUser.name : '' }));
       setMvQty(''); setMvNote('');
       say('Đã ghi.');
     } catch (e) { say(e instanceof Error ? e.message : 'Không lưu được.'); }
@@ -510,8 +565,7 @@ export default function SoKhoPage() {
               <div className="text-sm font-medium text-gray-200 mb-1">Thêm sản phẩm vào {SK_KHO_LABEL[kho]}</div>
               <div className="text-xs text-gray-500 mb-3">Chọn sản phẩm đã ẩn hoặc trong bảng quy đổi SKU để hiện lại, hoặc gõ tên mới (vật tư, bao bì… ngoài bảng quy đổi: tự nhập kiểm kho và nhập/điều chỉnh, phiếu xuất kho chưa tự trừ).</div>
               <div className="flex flex-wrap gap-2">
-                <input list="sk-add-list" value={addName} onChange={function(e) { setAddName(e.target.value); }} placeholder="Tên sản phẩm" className={inputCls + ' w-72'} />
-                <datalist id="sk-add-list">{allProducts.concat(sk.hidden[kho] || []).filter(function(p, i, a) { return a.indexOf(p) === i && products.indexOf(p) < 0; }).map(function(p) { return <option key={p} value={p} />; })}</datalist>
+                <div className="w-80 max-w-full"><ProductPicker value={addName} onChange={setAddName} options={allProducts.concat(sk.hidden[kho] || []).filter(function(p, i, a) { return a.indexOf(p) === i && products.indexOf(p) < 0; })} skuOf={skuOf} placeholder="Tên sản phẩm (gõ để tìm hoặc nhập tên mới)" className={inputCls + ' w-full pr-9'} emptyHint="Bấm Thêm để tạo sản phẩm mới đúng tên này." /></div>
                 <button className={btnPrimaryCls + ' !py-1.5'} disabled={busy} onClick={addProduct}>Thêm vào {SK_KHO_LABEL[kho]}</button>
                 <button className={btnCls} onClick={function() { setAddOpen(false); }}>Đóng</button>
               </div>
@@ -701,8 +755,7 @@ export default function SoKhoPage() {
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="lg:col-span-2">
                 <div className="text-xs text-gray-400 mb-1">Sản phẩm (gõ để tìm)</div>
-                <input list="sk-mv-list" value={mvProduct} onChange={function(e) { setMvProduct(e.target.value); }} placeholder="Gõ tên hoặc chọn sản phẩm…" className={inputCls + ' w-full'} />
-                <datalist id="sk-mv-list">{products.map(function(p) { return <option key={p} value={p} />; })}</datalist>
+                <ProductPicker value={mvProduct} onChange={setMvProduct} options={products} skuOf={skuOf} placeholder="Gõ tên (không dấu cũng được) hoặc mã SKU…" className={inputCls + ' w-full pr-9'} emptyHint={'Sản phẩm phải nằm trong danh sách của ' + SK_KHO_LABEL[kho] + '; nếu đang ẩn thì thêm lại ở tab Tồn hiện tại.'} />
               </div>
               <div><div className="text-xs text-gray-400 mb-1">Số lượng</div><input inputMode="decimal" value={mvQty} onChange={function(e) { setMvQty(e.target.value); }} placeholder={mvType === 'import' ? '120' : '-3'} className={inputCls + ' w-full text-right text-lg font-mono'} /></div>
               <div><div className="text-xs text-gray-400 mb-1">Thời điểm</div><input type="datetime-local" value={mvAt} onChange={function(e) { setMvAt(e.target.value); }} className={inputCls + ' w-full'} /></div>
