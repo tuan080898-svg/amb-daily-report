@@ -273,6 +273,18 @@ function parseSapoPages(pages: RawItem[][], fileName: string): PxkOrder[] {
     var re = /(.+?)\s+x\s+(\d[\d.]*)\s*(?:;|$)/g;
     var m: RegExpExecArray | null;
     while ((m = re.exec(txt))) its.push({ sku: '', name: m[1].trim(), qty: parseSapoQty(m[2]) });
+    // Nhãn dạng đánh số như Shopee: "1.Keo vá tường, SL: 1" / "2.Lẻ sơn phủ tường trắng 500g, SL: 1" (mỗi dòng hàng bắt đầu bằng "n.", xuống dòng thì nối tiếp)
+    if (its.length === 0) {
+      var chunks: string[] = [];
+      block.forEach(function(l) {
+        if (/^\s*\d+\.\s*\S/.test(l)) chunks.push(l.replace(/^\s*\d+\.\s*/, ''));
+        else if (chunks.length) chunks[chunks.length - 1] += ' ' + l.trim();
+      });
+      chunks.forEach(function(c) {
+        var p = parseShopeeItemText(c);
+        if (p.name) its.push({ sku: '', name: p.name, qty: p.qty });
+      });
+    }
     var sum = its.reduce(function(s, x) { return s + x.qty; }, 0);
     orders.push({ orderId: orderId, items: its, totalQty: tot, note: sapoNote(items), ok: its.length > 0 && sum === tot && its.every(function(i) { return i.qty > 0; }), pages: [idx + 1], file: fileName });
   });
