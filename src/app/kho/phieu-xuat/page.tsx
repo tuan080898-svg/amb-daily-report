@@ -8,7 +8,7 @@ import { SK_KHO, SK_KHO_LABEL, type SkKho } from '@/lib/sokho';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
 import {
-  parsePxkFileAuto, pxkFindRaceDup, summarizePxk, summarizeRange, pxkPartsLabel, repackOrders, pxkScopeMatch, PXK_SCOPE_COMPANY, PXK_SCOPE_STAFF, PXK_STAFF_SHOP, buildGiftCatalog, expandGiftNote, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
+  parsePxkFileAuto, pxkFindRaceDup, pxkMatchStaffShop, summarizePxk, summarizeRange, pxkPartsLabel, repackOrders, pxkScopeMatch, PXK_SCOPE_COMPANY, PXK_SCOPE_STAFF, PXK_STAFF_SHOP, buildGiftCatalog, expandGiftNote, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
   type PxkPlatform, type PxkOrder, type PxkBatch, type PxkStoredOrder, type PxkData, type PxkItem, type PxkRaceDup,
 } from '@/lib/pxk';
 import { downloadPxkPdf, downloadPxkDayPdf } from '@/lib/pxk-pdf';
@@ -46,6 +46,8 @@ interface PxkFile {
 interface GroupView {
   key: string;
   platform: PxkPlatform;
+  staff: boolean; // phiếu của shop nhân sự (chọn tay hoặc nhận ra tên shop trên nhãn)
+  staffNames: string[]; // tên shop nhân sự nhận ra trên nhãn của nhóm này
   used: PxkOrder[];
   oldCount: number;
   resolved: Array<{ orderId: string; items: PxkItem[]; note?: string }>; // đã gắn SKU
@@ -73,6 +75,7 @@ export default function PhieuXuatKhoPage() {
   const [khoSel, setKhoSel] = useState<SkKho | ''>(''); // kho xuất hàng khi tài khoản chưa được gắn kho (admin hoặc tài khoản chưa gán)
   const [shopSel, setShopSel] = useState(''); // loại phiếu sắp lập: '' = shop công ty, PXK_STAFF_SHOP = shop nhân sự (tự bán, không thuộc công ty)
   const [dayShop, setDayShop] = useState(PXK_SCOPE_COMPANY); // phạm vi phiếu tổng hợp cuối ngày (mặc định: chỉ shop công ty)
+  const [newStaffShop, setNewStaffShop] = useState(''); // ô thêm tên shop nhân sự
   const [histShop, setHistShop] = useState(''); // lọc lịch sử phiếu theo shop
   const [histLimit, setHistLimit] = useState(30); // số phiếu đang hiện ở bảng Lịch sử (bấm Xem thêm để hiện nhiều hơn)
   const [sumMode, setSumMode] = useState<'day' | 'month'>('day'); // phiếu tổng hợp theo ngày hay theo tháng
@@ -164,7 +167,7 @@ export default function PhieuXuatKhoPage() {
   // Gộp các file theo (sàn, kho); mã đơn lặp giữa các file chỉ tính một lần
   const analysis = useMemo(function() {
     var seen: Record<PxkPlatform, Set<string>> = { shopee: new Set<string>(), tiktok: new Set<string>(), sapo: new Set<string>() };
-    var map: Record<string, { platform: PxkPlatform; fresh: PxkOrder[]; old: PxkOrder[] }> = {};
+    var map: Record<string, { platform: PxkPlatform; staff: boolean; staffNames: string[]; fresh: PxkOrder[]; old: PxkOrder[] }> = {};
     var dupInUpload = 0;
     var noId: PxkOrder[] = [];
     files.forEach(function(f) {
@@ -179,12 +182,17 @@ export default function PhieuXuatKhoPage() {
         }
         if (seen[plat].has(o.orderId)) { dupInUpload++; return; }
         seen[plat].add(o.orderId);
-        var g = map[plat] || (map[plat] = { platform: plat, fresh: [], old: [] });
+        // Nhãn in tên một shop nhân sự trong danh sách: tự đưa vào luồng shop nhân sự, không cần chọn tay
+        var sname = pxkMatchStaffShop(o0.pageKey, data.shops);
+        var staff = !!shopSel || !!sname;
+        var gk = plat + (staff ? '|nv' : '');
+        var g = map[gk] || (map[gk] = { platform: plat, staff: staff, staffNames: [], fresh: [], old: [] });
+        if (sname && g.staffNames.indexOf(sname) < 0) g.staffNames.push(sname);
         (prevOrders[plat][o.orderId] ? g.old : g.fresh).push(o);
       });
     });
     return { groups: Object.keys(map).sort().map(function(k) { return Object.assign({ key: k }, map[k]); }), dupInUpload: dupInUpload, noId: noId };
-  }, [files, prevOrders]);
+  }, [files, prevOrders, shopSel, data.shops]);
 
   const groups: GroupView[] = useMemo(function() {
     return analysis.groups.map(function(g) {
@@ -192,7 +200,7 @@ export default function PhieuXuatKhoPage() {
       var resolved = resolveOrders(used);
       var packed = repackOrders(resolved, data.packProducts);
       return {
-        key: g.key, platform: g.platform, used: used, oldCount: g.old.length,
+        key: g.key, platform: g.platform, staff: g.staff, staffNames: g.staffNames, used: used, oldCount: g.old.length,
         resolved: resolved, packed: packed, summary: summarizePxk(packed), bad: used.filter(function(o) { return !o.ok; }),
       };
     });
@@ -374,6 +382,22 @@ export default function PhieuXuatKhoPage() {
     });
   }
 
+  // Danh sách tên shop nhân sự để tự nhận diện trên nhãn (lưu chung trên cloud, chỉ admin sửa)
+  function saveStaffShops(next: string[]) {
+    saveChain.current = saveChain.current.then(function() {
+      return dbUpdatePxk(function(c) { return Object.assign({}, c, { shops: next }); }).then(setData);
+    }).catch(function(e) {
+      setError('Chưa lưu được danh sách shop nhân sự (' + (e instanceof Error ? e.message : String(e)) + ').');
+    });
+  }
+  function addStaffShop() {
+    var n = newStaffShop.trim();
+    if (n.length < 5) { setError('Tên shop nhân sự quá ngắn (cần ít nhất 5 ký tự, để không nhận nhầm nhãn của shop khác).'); return; }
+    var cur = data.shops || [];
+    if (cur.some(function(x) { return x.toLowerCase() === n.toLowerCase(); })) { setNewStaffShop(''); return; }
+    saveStaffShops(cur.concat([n])); setNewStaffShop(''); setError('');
+  }
+
   function reset() { setFiles([]); setAssign({}); setError(''); setNotice(''); setExcludeOld(false); setParsingMsg(''); }
 
   // Ghi chú in lên phiếu: bao nhiêu đơn trong phiếu đã nằm trong phiếu cũ nào
@@ -407,11 +431,11 @@ export default function PhieuXuatKhoPage() {
     if (deductOn && !khoUse) { setError('Chọn kho xuất hàng (HCM hay Hà Nội) trước khi lập phiếu, để trừ đúng kho trong Sổ kho.'); return; }
     var lines = ['LẬP VÀ IN ' + ready.length + ' PHIẾU (ngày ' + fmtDate(pDate) + ')', ''];
     if (pDate !== todayStr()) lines.push('⚠ Ngày in phiếu đang là ' + fmtDate(pDate) + ', KHÁC hôm nay (' + fmtDate(todayStr()) + '). Nếu lập phiếu cho hôm nay, bấm Hủy rồi đổi lại ngày in phiếu.', '');
-    lines.push(shopSel ? '🛍 PHIẾU CỦA SHOP NHÂN SỰ (nhân sự tự bán, không thuộc công ty)' : 'Phiếu của shop công ty', '');
+    if (ready.some(function(g) { return g.staff; })) lines.push('🛍 Có phiếu của SHOP NHÂN SỰ (nhân sự tự bán, không thuộc công ty), tách riêng khỏi phiếu shop công ty.', '');
     if (deductOn) lines.push('📦 Trừ sổ kho: ' + SK_KHO_LABEL[khoUse as SkKho] + (totalOld > 0 ? ' (đơn đã có phiếu trước đó không bị trừ lại)' : ''), '');
     ready.forEach(function(g) {
       var noSku = g.summary.unresolved.reduce(function(s, u) { return s + u.qty; }, 0);
-      lines.push('• ' + PXK_PLATFORM_LABELS[g.platform] + ': ' + g.resolved.length + ' đơn, ' + g.summary.totalQty + ' sản phẩm' +
+      lines.push('• ' + (g.staff ? '🛍 SHOP NHÂN SỰ' + (g.staffNames.length ? ' (' + g.staffNames.join(', ') + ')' : '') + ' · ' : 'Shop công ty · ') + PXK_PLATFORM_LABELS[g.platform] + ': ' + g.resolved.length + ' đơn, ' + g.summary.totalQty + ' sản phẩm' +
         (noSku > 0 ? ' (⚠ ' + noSku + ' sản phẩm chưa có SKU)' : '') + (g.bad.length > 0 ? ' (⚠ ' + g.bad.length + ' nhãn đọc chưa chắc)' : ''));
     });
     if (qtyMismatches.length > 0) lines.push('', '⚠ ' + qtyMismatches.length + ' dòng nghi gắn sai SKU (số lượng trên nhãn khác số lượng của SKU): ' + qtyMismatches.map(function(c) { return c.sku + ' (nhãn ghi ' + c.nameQty + ', SKU = ' + c.skuUnits + ')'; }).join('; '));
@@ -435,7 +459,7 @@ export default function PhieuXuatKhoPage() {
           return { orderId: r.orderId, items: r.items, note: r.note, fi: fi, pg: src.pages };
         });
         return {
-          id: makeBatchId(), platform: g.platform, printDate: pDate, createdAt: createdAt, createdBy: by, shop: shopSel || undefined, warehouse: (khoUse || undefined) as SkKho | undefined,
+          id: makeBatchId(), platform: g.platform, printDate: pDate, createdAt: createdAt, createdBy: by, shop: g.staff ? PXK_STAFF_SHOP : undefined, warehouse: (khoUse || undefined) as SkKho | undefined,
           issues: g.bad.map(function(o) { return o.orderId || ('trang ' + o.pages.join('-')); }),
           notes: noteForOld(g).concat(noteForQty(g)),
           orders: stored,
@@ -613,6 +637,20 @@ export default function PhieuXuatKhoPage() {
           {files.length > 0 && <button onClick={reset} className="px-3 py-2 text-sm text-gray-400 hover:text-gray-200">Làm lại (xóa hết file)</button>}
         </div>
 
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-gray-400">
+          <span>Shop nhân sự tự nhận diện trên nhãn:</span>
+          {(data.shops || []).length === 0 && <span className="text-gray-500">chưa có</span>}
+          {(data.shops || []).map(function(n) {
+            return <span key={n} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-200 border border-amber-500/30">{n}{currentUser && currentUser.role === 'admin' && <button type="button" aria-label={'Xóa ' + n} className="text-amber-300 hover:text-white" onClick={function() { saveStaffShops((data.shops || []).filter(function(x) { return x !== n; })); }}>×</button>}</span>;
+          })}
+          {currentUser && currentUser.role === 'admin' && (
+            <span className="inline-flex items-center gap-1">
+              <input value={newStaffShop} onChange={function(e) { setNewStaffShop(e.target.value); }} onKeyDown={function(e) { if (e.key === 'Enter') addStaffShop(); }} placeholder="Thêm tên shop nhân sự…" className={inputCls + ' !py-1 !text-xs w-48'} />
+              <button type="button" onClick={addStaffShop} className="px-2 py-1 rounded-md bg-slate-800 border border-slate-600 text-gray-200 hover:bg-slate-700">Thêm</button>
+            </span>
+          )}
+        </div>
+
         {files.length > 0 && (
           <div className="mt-4 overflow-x-auto">
             <table className="w-full text-sm">
@@ -627,6 +665,11 @@ export default function PhieuXuatKhoPage() {
                       <td className="px-2 py-2 text-gray-300 max-w-[320px] break-words">
                         {f.name}
                         {f.error && <div className="text-xs text-amber-300 mt-0.5">{f.error}</div>}
+                        {(function() {
+                          var names: string[] = []; var cnt = 0;
+                          f.orders.forEach(function(o) { var n = pxkMatchStaffShop(o.pageKey, data.shops); if (n) { cnt++; if (names.indexOf(n) < 0) names.push(n); } });
+                          return cnt > 0 ? <div className="text-xs text-amber-300 mt-0.5">🛍 {cnt}/{f.orders.length} nhãn là shop nhân sự: {names.join(', ')}</div> : null;
+                        })()}
                       </td>
                       <td className="px-2 py-2">
                         {f.platform
@@ -764,12 +807,19 @@ export default function PhieuXuatKhoPage() {
             </div>
           )}
 
+          {!shopSel && groups.some(function(g) { return g.staff; }) && (
+            <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-sm text-amber-200">
+              🛍 Đã tự nhận ra {groups.filter(function(g) { return g.staff; }).reduce(function(n, g) { return n + g.resolved.length; }, 0)} đơn của shop nhân sự ({groups.filter(function(g) { return g.staff; }).reduce(function(a, g) { return a.concat(g.staffNames); }, [] as string[]).filter(function(x, i, arr) { return arr.indexOf(x) === i; }).join(', ')}) và đưa vào <b>phiếu shop nhân sự riêng</b>, tách khỏi phiếu shop công ty. Không cần chọn tay mục “Loại phiếu”.
+            </div>
+          )}
+
           {groups.map(function(g) {
             var s = g.summary;
             return (
               <details key={g.key} open={groups.length === 1} className="bg-slate-900 border border-slate-700 rounded-xl overflow-hidden mb-4">
                 <summary className="px-4 py-3 cursor-pointer flex flex-wrap items-center gap-3 text-sm">
                   <span className={'inline-flex px-2 py-0.5 rounded text-xs font-medium ' + platformBadge(g.platform)}>{PXK_PLATFORM_LABELS[g.platform]}</span>
+                  {g.staff && <span className="inline-flex px-2 py-0.5 rounded text-xs font-medium bg-amber-500/20 text-amber-200 border border-amber-500/30">🛍 Shop nhân sự{g.staffNames.length ? ': ' + g.staffNames.join(', ') : ''}</span>}
                   <span className="font-semibold text-gray-100">1 phiếu: {g.resolved.length} đơn · {s.totalQty} sản phẩm · {s.skuLines.length + s.unresolved.length} mã SKU</span>
                   {g.oldCount > 0 && <span className="text-xs text-amber-300">({g.oldCount} đơn đã lập phiếu trước{excludeOld ? ', ĐÃ BỎ' : ', vẫn in'})</span>}
                   {g.bad.length > 0 && <span className="text-xs text-amber-300">⚠ {g.bad.length} nhãn chưa chắc</span>}

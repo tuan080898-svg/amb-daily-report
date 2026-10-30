@@ -36,6 +36,7 @@ export interface PxkOrder {
   totalQty: number; // tổng SL ghi trên nhãn
   note?: string; // nhãn đơn ngoài sàn (Sapo): ghi chú của đơn in sau chữ "ĐƠN NGOÀI SÀN."
   ok: boolean; // tổng các dòng khớp tổng SL trên nhãn
+  pageKey?: string; // chữ trên các trang của nhãn, đã bỏ dấu và ký tự phân cách: dùng để nhận ra tên shop gửi (shop nhân sự); không lưu vào phiếu
   platform?: PxkPlatform; // chỉ có khi file trộn nhiều sàn: sàn của riêng nhãn này (không có = theo sàn của file)
   pages: number[];
   file: string;
@@ -291,10 +292,28 @@ function parseSapoPages(pages: RawItem[][], fileName: string): PxkOrder[] {
   return orders;
 }
 
+// Khoá so tên shop: bỏ dấu, bỏ mọi ký tự không phải chữ/số (nhãn PDF hay tách chữ, thêm khoảng trắng lạ)
+export function pxkShopKey(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+// Nhãn có in tên shop nhân sự nào trong danh sách không (khớp cả khi nhãn không ghi chữ "Shop" ở đầu). Trả về tên trong danh sách, rỗng nếu không.
+export function pxkMatchStaffShop(pageKey: string | undefined, shops: string[] | undefined): string {
+  if (!pageKey || !shops) return '';
+  for (var i = 0; i < shops.length; i++) {
+    var k = pxkShopKey(shops[i]);
+    var k2 = k.replace(/^shop/, '');
+    if (k2.length >= 5 && pageKey.indexOf(k2) >= 0) return shops[i];
+    if (k.length >= 5 && pageKey.indexOf(k) >= 0) return shops[i];
+  }
+  return '';
+}
+
 export function parsePxkPages(pages: RawItem[][], platform: PxkPlatform, fileName: string): PxkOrder[] {
-  if (platform === 'tiktok') return parseTiktokPages(pages, fileName);
-  if (platform === 'sapo') return parseSapoPages(pages, fileName);
-  return parseShopeePages(pages, fileName);
+  var orders = platform === 'tiktok' ? parseTiktokPages(pages, fileName) : platform === 'sapo' ? parseSapoPages(pages, fileName) : parseShopeePages(pages, fileName);
+  var keys = pages.map(function(items) { return pxkShopKey(toLines(items).join(' ')).slice(0, 6000); });
+  orders.forEach(function(o) { o.pageKey = o.pages.map(function(p) { return keys[p - 1] || ''; }).join(''); });
+  return orders;
 }
 
 export async function parsePxkFile(file: File, platform: PxkPlatform): Promise<PxkOrder[]> {
