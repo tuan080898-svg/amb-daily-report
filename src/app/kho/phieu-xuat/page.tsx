@@ -272,6 +272,8 @@ export default function PhieuXuatKhoPage() {
   const totalQty = groups.reduce(function(s, g) { return s + g.summary.totalQty; }, 0);
   const totalOld = groups.reduce(function(s, g) { return s + g.oldCount; }, 0);
   const totalBad = groups.reduce(function(s, g) { return s + g.bad.length; }, 0);
+  // Đang chọn tay "shop nhân sự": bao nhiêu nhãn KHÔNG mang tên shop nào trong danh sách shop nhân sự (nghi chọn nhầm)
+  const forcedOther = shopSel ? groups.reduce(function(n, g) { return n + g.used.filter(function(o) { return !pxkMatchStaffShop(o.pageKey, data.shops); }).length; }, 0) : 0;
 
   async function addFiles(list: FileList | File[] | null) {
     if (!list || list.length === 0) return;
@@ -324,7 +326,9 @@ export default function PhieuXuatKhoPage() {
   }
 
   function removeFile(id: string) {
-    setFiles(function(prev) { return prev.filter(function(f) { return f.id !== id; }); });
+    var left = files.filter(function(f) { return f.id !== id; });
+    setFiles(left);
+    if (left.length === 0) setShopSel(''); // hết file thì bỏ lựa chọn tay, tránh dính sang lần tải sau
   }
 
   async function onLearnFiles(fl: FileList | null) {
@@ -398,7 +402,7 @@ export default function PhieuXuatKhoPage() {
     saveStaffShops(cur.concat([n])); setNewStaffShop(''); setError('');
   }
 
-  function reset() { setFiles([]); setAssign({}); setError(''); setNotice(''); setExcludeOld(false); setParsingMsg(''); }
+  function reset() { setFiles([]); setAssign({}); setError(''); setNotice(''); setExcludeOld(false); setParsingMsg(''); setShopSel(''); }
 
   // Ghi chú in lên phiếu: bao nhiêu đơn trong phiếu đã nằm trong phiếu cũ nào
   function noteForOld(g: GroupView): string[] {
@@ -431,6 +435,7 @@ export default function PhieuXuatKhoPage() {
     if (deductOn && !khoUse) { setError('Chọn kho xuất hàng (HCM hay Hà Nội) trước khi lập phiếu, để trừ đúng kho trong Sổ kho.'); return; }
     var lines = ['LẬP VÀ IN ' + ready.length + ' PHIẾU (ngày ' + fmtDate(pDate) + ')', ''];
     if (pDate !== todayStr()) lines.push('⚠ Ngày in phiếu đang là ' + fmtDate(pDate) + ', KHÁC hôm nay (' + fmtDate(todayStr()) + '). Nếu lập phiếu cho hôm nay, bấm Hủy rồi đổi lại ngày in phiếu.', '');
+    if (shopSel && forcedOther > 0) lines.push('⚠⚠ ĐANG ÉP TOÀN BỘ thành SHOP NHÂN SỰ (ô "Loại phiếu" chọn tay), trong đó ' + forcedOther + '/' + totalOrders + ' nhãn KHÔNG mang tên shop nhân sự nào trong danh sách. Nếu đây là đơn shop công ty, bấm Hủy và bỏ chọn "Loại phiếu".', '');
     if (ready.some(function(g) { return g.staff; })) lines.push('🛍 Có phiếu của SHOP NHÂN SỰ (nhân sự tự bán, không thuộc công ty), tách riêng khỏi phiếu shop công ty.', '');
     if (deductOn) lines.push('📦 Trừ sổ kho: ' + SK_KHO_LABEL[khoUse as SkKho] + (totalOld > 0 ? ' (đơn đã có phiếu trước đó không bị trừ lại)' : ''), '');
     ready.forEach(function(g) {
@@ -443,6 +448,7 @@ export default function PhieuXuatKhoPage() {
     if (totalOld > 0) lines.push('', (excludeOld ? 'ℹ Đã BỎ ' : '⚠ Có ') + totalOld + (excludeOld ? ' đơn đã lập phiếu trước đó (không in).' : ' đơn đã lập phiếu trước đó — vẫn được in lại trong các phiếu này.'));
     lines.push('', 'Tiếp tục?');
     if (!window.confirm(lines.join('\n'))) return;
+    if (shopSel && totalOrders > 0 && forcedOther === totalOrders && !window.confirm('XÁC NHẬN LẦN 2: không có nhãn nào mang tên shop nhân sự trong danh sách, nhưng Sếp đang ép lập phiếu SHOP NHÂN SỰ cho ' + totalOrders + ' đơn. Phiếu shop nhân sự KHÔNG nằm trong phiếu tổng hợp shop công ty. Vẫn lập?')) return;
 
     var w = window.open('', '_blank');
     setBusy(true);
@@ -621,8 +627,8 @@ export default function PhieuXuatKhoPage() {
           <div>
             <div className="text-xs text-gray-400 mb-1.5">Loại phiếu</div>
             <select value={shopSel} onChange={function(e) { setShopSel(e.target.value); }} className={inputCls + (shopSel ? ' border-amber-500 text-amber-200' : '')}>
-              <option value="">Shop công ty</option>
-              <option value={PXK_STAFF_SHOP}>Shop nhân sự (nhân sự tự bán, không thuộc công ty)</option>
+              <option value="">Tự nhận diện theo tên shop trên nhãn (mặc định)</option>
+              <option value={PXK_STAFF_SHOP}>ÉP TOÀN BỘ thành shop nhân sự</option>
             </select>
           </div>
           <div>
@@ -804,6 +810,14 @@ export default function PhieuXuatKhoPage() {
           {unmappedAll.length > 0 && (
             <div className="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-sm text-amber-200">
               SKU chưa có trong bảng quy đổi (vẫn in, không quy ra được sản phẩm gốc): {unmappedAll.join(', ')}. Thêm ở Quản lý SKU để lần sau có tên sản phẩm gốc.
+            </div>
+          )}
+
+          {shopSel && (
+            <div className={'mb-4 p-3 rounded-lg border text-sm ' + (forcedOther > 0 ? 'bg-red-500/10 border-red-500/40 text-red-200' : 'bg-amber-500/10 border-amber-500/30 text-amber-200')}>
+              ⚠ Đang <b>ÉP TOÀN BỘ</b> phiếu lần này thành <b>shop nhân sự</b> vì ô “Loại phiếu” đang chọn tay.
+              {forcedOther > 0 ? ' Có ' + forcedOther + '/' + totalOrders + ' nhãn KHÔNG mang tên shop nhân sự nào trong danh sách. Nếu đây là đơn shop công ty thì bỏ chọn.' : ''}
+              <button type="button" onClick={function() { setShopSel(''); }} className="ml-2 underline text-white">Bỏ chọn, để app tự nhận diện</button>
             </div>
           )}
 
