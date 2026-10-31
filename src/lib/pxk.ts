@@ -36,6 +36,7 @@ export interface PxkOrder {
   totalQty: number; // tổng SL ghi trên nhãn
   note?: string; // nhãn đơn ngoài sàn (Sapo): ghi chú của đơn in sau chữ "ĐƠN NGOÀI SÀN."
   ok: boolean; // tổng các dòng khớp tổng SL trên nhãn
+  sender?: string; // tên shop gửi in trên nhãn (đọc từ dòng "Từ:"), rỗng nếu không đọc được
   pageKey?: string; // chữ trên các trang của nhãn, đã bỏ dấu và ký tự phân cách: dùng để nhận ra tên shop gửi (shop nhân sự); không lưu vào phiếu
   platform?: PxkPlatform; // chỉ có khi file trộn nhiều sàn: sàn của riêng nhãn này (không có = theo sàn của file)
   pages: number[];
@@ -49,6 +50,7 @@ export interface PxkStoredOrder {
   note?: string; // ghi chú của đơn (đơn ngoài sàn Sapo)
   fi?: number;
   pg?: number[];
+  sn?: number; // chỉ số trong batch.shopNames: tên shop in trên nhãn của đơn này (phiếu cũ không có)
 }
 
 export interface PxkBatch {
@@ -63,6 +65,7 @@ export interface PxkBatch {
   notes?: string[]; // ghi chú in lên phiếu (vd: có đơn đã lập phiếu trước đó)
   orders: Array<PxkStoredOrder>;
   files?: string[]; // tên các file PDF đã tải lên để lập phiếu này (phiếu cũ không có)
+  shopNames?: string[]; // các tên shop in trên nhãn của phiếu (đơn trỏ tới bằng PxkStoredOrder.sn)
   shop?: string; // phiếu của shop nhân sự (bán hàng của công ty); không có = shop công ty
 }
 
@@ -292,6 +295,50 @@ function parseSapoPages(pages: RawItem[][], fileName: string): PxkOrder[] {
   return orders;
 }
 
+// Tên shop gửi in trên nhãn. Shopee / Sapo (SPX): dòng "Từ: ... Đến:" rồi dòng ngay dưới, cột bên trái là tên shop gửi, cột bên phải là người nhận.
+// TikTok: "Từ : TÊN SHOP (+84)..." cùng một dòng. Không đọc được thì trả về rỗng.
+export function pxkSenderName(items: RawItem[]): string {
+  var rows: Array<{ y: number; a: RawItem[] }> = [];
+  items.forEach(function(i) {
+    var r = rows.find(function(r) { return Math.abs(r.y - i.y) < 2.5; });
+    if (!r) { r = { y: i.y, a: [] }; rows.push(r); }
+    r.a.push(i);
+  });
+  rows.sort(function(a, b) { return b.y - a.y; });
+  rows.forEach(function(r) { r.a.sort(function(p, q) { return p.x - q.x; }); });
+  var clean = function(t: string) { return t.normalize('NFC').replace(/\s+/g, ' ').replace(/^[\s:：-]+|[\s:：-]+$/g, '').slice(0, 80); };
+  for (var k = 0; k < rows.length; k++) {
+    var r2 = rows[k];
+    var text = r2.a.map(function(o) { return o.s; }).join('').normalize('NFC');
+    if (!/^(Từ|From)\s*[:：]/.test(text)) continue;
+    // Shopee / SPX: cùng dòng có "Đến:" -> lấy cột trái của dòng kế tiếp
+    var den = r2.a.find(function(o) { return /^Đ/.test(o.s.normalize('NFC')) && o.x > r2.a[0].x + 20; });
+    if (den && /Đến\s*[:：]|To\s*[:：]/.test(text)) {
+      var next = rows[k + 1];
+      if (!next || r2.y - next.y > 25) return '';
+      var left = next.a.filter(function(o) { return o.x < den!.x - 3; }).map(function(o) { return o.s; }).join('');
+      return clean(left);
+    }
+    // TikTok: tên shop nằm cùng dòng sau "Từ :", dừng ở số điện thoại
+    var parts: string[] = [];
+    var seenLabel = false;
+    r2.a.forEach(function(o) {
+      var t = o.s;
+      if (!seenLabel) { if (/[:：]/.test(t)) seenLabel = true; return; }
+      if (/^\(?\+?\d{2}\)?\s*\d/.test(t.trim()) || /^\(\+\d/.test(t.trim())) { seenLabel = false; parts.push('\u0000'); return; }
+      if (parts.indexOf('\u0000') < 0) parts.push(t);
+    });
+    var nm = clean(parts.filter(function(p) { return p !== '\u0000'; }).join(''));
+    if (nm) return nm;
+  }
+  return '';
+}
+
+// Tên shop của một đơn đã lưu trong phiếu ('' nếu phiếu cũ chưa lưu)
+export function pxkOrderShop(b: PxkBatch, o: PxkStoredOrder): string {
+  return o.sn !== undefined && b.shopNames && b.shopNames[o.sn] ? b.shopNames[o.sn] : '';
+}
+
 // Khoá so tên shop: bỏ dấu, bỏ mọi ký tự không phải chữ/số (nhãn PDF hay tách chữ, thêm khoảng trắng lạ)
 export function pxkShopKey(s: string): string {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/[^a-z0-9]+/g, '');
@@ -312,7 +359,10 @@ export function pxkMatchStaffShop(pageKey: string | undefined, shops: string[] |
 export function parsePxkPages(pages: RawItem[][], platform: PxkPlatform, fileName: string): PxkOrder[] {
   var orders = platform === 'tiktok' ? parseTiktokPages(pages, fileName) : platform === 'sapo' ? parseSapoPages(pages, fileName) : parseShopeePages(pages, fileName);
   var keys = pages.map(function(items) { return pxkShopKey(toLines(items).join(' ')).slice(0, 6000); });
-  orders.forEach(function(o) { o.pageKey = o.pages.map(function(p) { return keys[p - 1] || ''; }).join(''); });
+  orders.forEach(function(o) {
+    o.pageKey = o.pages.map(function(p) { return keys[p - 1] || ''; }).join('');
+    for (var q = 0; q < o.pages.length && !o.sender; q++) { var sn = pxkSenderName(pages[o.pages[q] - 1] || []); if (sn) o.sender = sn; }
+  });
   return orders;
 }
 
@@ -860,7 +910,7 @@ function slipBody(batch: PxkBatch, opts: { showOrders: boolean }): string {
   var sum = summarizePxk(batch.orders);
   var whLabel = batch.warehouse === 'HN' ? 'Kho Hà Nội · ' : batch.warehouse === 'HCM' ? 'Kho HCM · ' : '';
   var title = 'PHIẾU XUẤT KHO — ' + PXK_PLATFORM_LABELS[batch.platform].toUpperCase();
-  var head = '<div class="head"><div><h1>' + esc(title) + '</h1><div class="sub">' + esc(whLabel) + (batch.shop ? '<b>SHOP NHÂN SỰ</b> (bán riêng, không thuộc công ty) · ' : '') + 'Mã phiếu: ' + esc(batch.id) + '</div></div>' +
+  var head = '<div class="head"><div><h1>' + esc(title) + '</h1><div class="sub">' + esc(whLabel) + (batch.shop ? '<b>SHOP NHÂN SỰ</b> (bán riêng, không thuộc công ty) · ' : '') + (batch.shopNames && batch.shopNames.length > 0 ? 'Shop: ' + esc(batch.shopNames.join(', ')) + ' · ' : '') + 'Mã phiếu: ' + esc(batch.id) + '</div></div>' +
     '<div class="meta">Ngày in phiếu: <b>' + esc(fmtDateTime(batch)) + '</b><br>Số đơn: <b>' + sum.orderCount + '</b> · Tổng SL: <b>' + sum.totalQty + '</b></div></div>';
 
   var shopee = batch.platform === 'shopee';

@@ -8,7 +8,7 @@ import { SK_KHO, SK_KHO_LABEL, type SkKho } from '@/lib/sokho';
 import { learnShopeeFromRowSets } from '@/lib/pxk-learn';
 import * as XLSX from 'xlsx';
 import {
-  parsePxkFileAuto, pxkFindRaceDup, pxkMatchStaffShop, summarizePxk, summarizeRange, pxkPartsLabel, repackOrders, pxkScopeMatch, PXK_SCOPE_COMPANY, PXK_SCOPE_STAFF, PXK_STAFF_SHOP, buildGiftCatalog, expandGiftNote, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
+  parsePxkFileAuto, pxkFindRaceDup, pxkMatchStaffShop, pxkOrderShop, summarizePxk, summarizeRange, pxkPartsLabel, repackOrders, pxkScopeMatch, PXK_SCOPE_COMPANY, PXK_SCOPE_STAFF, PXK_STAFF_SHOP, buildGiftCatalog, expandGiftNote, packProductList, findQtyMismatches, buildPxkHtmlMulti, buildPxkDayHtml, summarizeDay, pxkBatchQty, pxkNameKey, fmtDateTime, fmtTime, PXK_PLATFORM_LABELS,
   type PxkPlatform, type PxkOrder, type PxkBatch, type PxkStoredOrder, type PxkData, type PxkItem, type PxkRaceDup,
 } from '@/lib/pxk';
 import { downloadPxkPdf, downloadPxkDayPdf } from '@/lib/pxk-pdf';
@@ -141,6 +141,9 @@ export default function PhieuXuatKhoPage() {
     });
     return out;
   }, [data]);
+
+  // Tên shop của một nhãn: tên trong danh sách shop nhân sự nếu khớp, không thì tên shop đọc được trên nhãn (dòng "Từ:")
+  function shopOf(o: PxkOrder): string { return pxkMatchStaffShop(o.pageKey, data.shops) || o.sender || ''; }
 
   function resolveOrders(os: PxkOrder[]): Array<{ orderId: string; items: PxkItem[]; note?: string }> {
     var catalog: ReturnType<typeof buildGiftCatalog> | null = null;
@@ -440,7 +443,7 @@ export default function PhieuXuatKhoPage() {
     if (deductOn) lines.push('📦 Trừ sổ kho: ' + SK_KHO_LABEL[khoUse as SkKho] + (totalOld > 0 ? ' (đơn đã có phiếu trước đó không bị trừ lại)' : ''), '');
     ready.forEach(function(g) {
       var noSku = g.summary.unresolved.reduce(function(s, u) { return s + u.qty; }, 0);
-      lines.push('• ' + (g.staff ? '🛍 SHOP NHÂN SỰ' + (g.staffNames.length ? ' (' + g.staffNames.join(', ') + ')' : '') + ' · ' : 'Shop công ty · ') + PXK_PLATFORM_LABELS[g.platform] + ': ' + g.resolved.length + ' đơn, ' + g.summary.totalQty + ' sản phẩm' +
+      lines.push('• ' + (g.staff ? '🛍 SHOP NHÂN SỰ' + (g.staffNames.length ? ' (' + g.staffNames.join(', ') + ')' : '') + ' · ' : 'Shop công ty · ') + PXK_PLATFORM_LABELS[g.platform] + ': ' + g.resolved.length + ' đơn' + (function() { var u: string[] = []; g.used.forEach(function(o) { var n = shopOf(o); if (n && u.indexOf(n) < 0) u.push(n); }); return u.length ? ' [shop: ' + u.slice(0, 6).join(', ') + (u.length > 6 ? '…' : '') + ']' : ''; })() + ', ' + g.summary.totalQty + ' sản phẩm' +
         (noSku > 0 ? ' (⚠ ' + noSku + ' sản phẩm chưa có SKU)' : '') + (g.bad.length > 0 ? ' (⚠ ' + g.bad.length + ' nhãn đọc chưa chắc)' : ''));
     });
     if (qtyMismatches.length > 0) lines.push('', '⚠ ' + qtyMismatches.length + ' dòng nghi gắn sai SKU (số lượng trên nhãn khác số lượng của SKU): ' + qtyMismatches.map(function(c) { return c.sku + ' (nhãn ghi ' + c.nameQty + ', SKU = ' + c.skuUnits + ')'; }).join('; '));
@@ -458,11 +461,15 @@ export default function PhieuXuatKhoPage() {
       var batches: PxkBatch[] = ready.map(function(g) {
         // Ghi nhớ đơn nào nằm ở file PDF nào, trang nào (g.resolved cùng thứ tự với g.used)
         var fileNames: string[] = [];
+        var shopNames: string[] = []; // tên shop in trên nhãn của phiếu; mỗi đơn trỏ tới bằng chỉ số sn
         var stored: PxkStoredOrder[] = g.packed.map(function(r, i) {
           var src = g.used[i];
           var fi = fileNames.indexOf(src.file);
           if (fi < 0) { fileNames.push(src.file); fi = fileNames.length - 1; }
-          return { orderId: r.orderId, items: r.items, note: r.note, fi: fi, pg: src.pages };
+          var nm = shopOf(src);
+          var sn: number | undefined;
+          if (nm) { sn = shopNames.indexOf(nm); if (sn < 0) { shopNames.push(nm); sn = shopNames.length - 1; } }
+          return { orderId: r.orderId, items: r.items, note: r.note, fi: fi, pg: src.pages, sn: sn };
         });
         return {
           id: makeBatchId(), platform: g.platform, printDate: pDate, createdAt: createdAt, createdBy: by, shop: g.staff ? PXK_STAFF_SHOP : undefined, warehouse: (khoUse || undefined) as SkKho | undefined,
@@ -470,6 +477,7 @@ export default function PhieuXuatKhoPage() {
           notes: noteForOld(g).concat(noteForQty(g)),
           orders: stored,
           files: fileNames,
+          shopNames: shopNames.length > 0 ? shopNames : undefined,
         };
       });
       var race: { list: PxkRaceDup[] } = { list: [] };
@@ -671,6 +679,11 @@ export default function PhieuXuatKhoPage() {
                       <td className="px-2 py-2 text-gray-300 max-w-[320px] break-words">
                         {f.name}
                         {f.error && <div className="text-xs text-amber-300 mt-0.5">{f.error}</div>}
+                        {(function() {
+                          var c: Record<string, number> = {}; f.orders.forEach(function(o) { var n = shopOf(o); if (n) c[n] = (c[n] || 0) + 1; });
+                          var ks = Object.keys(c).sort(function(a, b) { return c[b] - c[a]; });
+                          return ks.length ? <div className="text-xs text-gray-500 mt-0.5">Shop trên nhãn: {ks.slice(0, 5).map(function(k) { return k + ' ×' + c[k]; }).join(' · ')}{ks.length > 5 ? ' …' : ''}</div> : null;
+                        })()}
                         {(function() {
                           var names: string[] = []; var cnt = 0;
                           f.orders.forEach(function(o) { var n = pxkMatchStaffShop(o.pageKey, data.shops); if (n) { cnt++; if (names.indexOf(n) < 0) names.push(n); } });
@@ -995,7 +1008,7 @@ export default function PhieuXuatKhoPage() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead><tr className="text-xs text-gray-400 border-b border-slate-700">
-                      <th className="px-3 py-1.5 text-left">Mã đơn</th><th className="px-3 py-1.5 text-left">Phiếu</th><th className="px-3 py-1.5 text-left">Sàn</th>
+                      <th className="px-3 py-1.5 text-left">Mã đơn</th><th className="px-3 py-1.5 text-left">Phiếu</th><th className="px-3 py-1.5 text-left">Shop</th><th className="px-3 py-1.5 text-left">Sàn</th>
                       <th className="px-3 py-1.5 text-left">Lập lúc</th><th className="px-3 py-1.5 text-left">Người lập</th><th className="px-3 py-1.5 text-left">File PDF (trang)</th><th className="px-3 py-1.5 text-left">Sản phẩm</th>
                     </tr></thead>
                     <tbody>
@@ -1005,6 +1018,7 @@ export default function PhieuXuatKhoPage() {
                           <tr key={h.batch.id + h.order.orderId + i} className="border-b border-slate-800 align-top">
                             <td className="px-3 py-1.5 font-mono text-gray-100">{h.order.orderId}</td>
                             <td className="px-3 py-1.5 font-mono text-gray-300">{h.batch.id}</td>
+                            <td className="px-3 py-1.5 text-gray-200">{pxkOrderShop(h.batch, h.order) || <span className="text-gray-500 text-xs">phiếu cũ chưa lưu tên shop</span>}<div className={'text-xs ' + (h.batch.shop ? 'text-amber-300' : 'text-gray-500')}>{h.batch.shop ? 'Shop nhân sự' : 'Shop công ty'}</div></td>
                             <td className="px-3 py-1.5 text-gray-300">{PXK_PLATFORM_LABELS[h.batch.platform]}{h.batch.shop ? ' · Shop nhân sự' : ''}</td>
                             <td className="px-3 py-1.5 text-gray-300 whitespace-nowrap">{fmtDateTime(h.batch)}</td>
                             <td className="px-3 py-1.5 text-gray-400">{h.batch.createdBy}</td>
@@ -1036,7 +1050,7 @@ export default function PhieuXuatKhoPage() {
                   var qty = b.orders.reduce(function(s, o) { return s + o.items.reduce(function(a, x) { return a + x.qty; }, 0); }, 0);
                   return (
                     <tr key={b.id} className="border-b border-slate-800">
-                      <td className="px-4 py-2 font-mono text-gray-300">{b.id}{b.files && b.files.length > 0 && <div className="font-sans text-xs text-gray-500 mt-0.5 max-w-xs break-words" title={b.files.join(String.fromCharCode(10))}>File: {b.files.join(', ')}</div>}</td>
+                      <td className="px-4 py-2 font-mono text-gray-300">{b.id}{b.shopNames && b.shopNames.length > 0 && <div className="font-sans text-xs text-amber-200/80 mt-0.5 max-w-xs break-words">Shop: {b.shopNames.join(', ')}</div>}{b.files && b.files.length > 0 && <div className="font-sans text-xs text-gray-500 mt-0.5 max-w-xs break-words" title={b.files.join(String.fromCharCode(10))}>File: {b.files.join(', ')}</div>}</td>
                       <td className="px-4 py-2 text-gray-300">{PXK_PLATFORM_LABELS[b.platform]}{b.shop && <div className="text-xs text-amber-300 mt-0.5">Shop nhân sự</div>}</td>
                       <td className="px-4 py-2 text-gray-300 whitespace-nowrap">{fmtDateTime(b)}</td>
                       <td className="px-4 py-2 text-right text-gray-300">{b.orders.length}</td>
