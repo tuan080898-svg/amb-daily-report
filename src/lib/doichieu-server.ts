@@ -7,6 +7,7 @@
 import { readJson, writeJson } from './storage-server';
 import { dcDefaultConfig } from './doichieu';
 import type { DcConfig, DcSession, DcBo, DcSettings } from './doichieu';
+import type { TdAdj } from './doichieu-tudong';
 
 const CONFIG_PATH = 'doichieu/config.json';
 const monthPath = (m: string) => 'doichieu/phien-' + m + '.json';
@@ -62,6 +63,31 @@ export async function dcSaveSessions(list: DcSession[]): Promise<void> {
   const cfg = await dcGetConfig();
   cfg.months = cfg.months.concat(months);
   await putConfig(cfg);
+}
+
+// ----- Nhập tay trong ngày: nhận lại hàng hủy, xuất hàng lỗi (doichieu/dieuchinh-YYYY-MM.json) -----
+const adjPath = (m: string) => 'doichieu/dieuchinh-' + m + '.json';
+
+export async function dcGetAdj(month: string): Promise<TdAdj[]> {
+  const j = await readJson<{ items?: TdAdj[] }>(adjPath(month));
+  return (j && j.items) || [];
+}
+
+export async function dcAddAdj(e: TdAdj): Promise<TdAdj[]> {
+  const m = e.ngay.slice(0, 7);
+  const cur = await dcGetAdj(m);
+  if (cur.length >= 6000) throw new Error('Quá nhiều dòng nhập tay trong tháng');
+  const next = cur.concat([e]);
+  await writeJson(adjPath(m), { month: m, items: next });
+  return next;
+}
+
+export async function dcRemoveAdj(id: string, ngay: string): Promise<TdAdj[]> {
+  const m = ngay.slice(0, 7);
+  const cur = await dcGetAdj(m);
+  const next = cur.filter(function(x) { return x.id !== id; });
+  if (next.length !== cur.length) await writeJson(adjPath(m), { month: m, items: next });
+  return next;
 }
 
 export async function dcDeleteSessions(days: string[]): Promise<number> {

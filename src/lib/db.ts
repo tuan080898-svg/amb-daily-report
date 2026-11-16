@@ -4,6 +4,7 @@ import type { InventoryData, InventoryTransaction, InventoryConfig, InventoryPus
 import { DEFAULT_CONFIG } from './utils';
 import type { PxkData, PxkBatch } from './pxk';
 import type { DcConfig, DcSession, DcSettings, DcBo } from './doichieu';
+import type { TdAdj } from './doichieu-tudong';
 import type { SkData } from './sokho';
 
 function db() {
@@ -982,6 +983,20 @@ export async function dbSaveDoiChieuSessions(list: DcSession[]): Promise<void> {
     batch.push(s); size += n;
   }
   if (batch.length > 0) await postApi('/api/doichieu', 'saveSessions', batch);
+}
+
+// Nhập tay trong ngày cho đối chiếu tự động (nhận lại hàng hủy, xuất hàng lỗi)
+export async function dbGetDoiChieuAdj(month: string): Promise<TdAdj[]> {
+  const r = await callApi<{ items: TdAdj[] }>('/api/doichieu?part=adj&month=' + encodeURIComponent(month));
+  return r.items || [];
+}
+export async function dbAddDoiChieuAdj(e: { ngay: string; loai: 'huy' | 'loi'; product: string; sl: number; ghiChu: string; by: string }): Promise<TdAdj[]> {
+  const r = await postApi('/api/doichieu', 'addAdj', e) as { items: TdAdj[] };
+  return r.items || [];
+}
+export async function dbRemoveDoiChieuAdj(id: string, ngay: string): Promise<TdAdj[]> {
+  const r = await postApi('/api/doichieu', 'removeAdj', { id: id, ngay: ngay }) as { items: TdAdj[] };
+  return r.items || [];
 }
 
 export async function dbDeleteDoiChieuSessions(days: string[]): Promise<number> {

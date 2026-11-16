@@ -11,14 +11,15 @@ import {
   type DcBo, type DcCatalog, type DcConfig, type DcSapo, type DcSession, type DcSettings,
 } from '@/lib/doichieu';
 import DayView from './DayView';
+import AutoView from './AutoView';
 import HistoryView from './HistoryView';
 import ReportView from './ReportView';
 import GuideView from './GuideView';
 import { allSessions, catalogFromConfig, inputCls, monthOf, newUiRow, type UiRow } from './shared';
 
-type Tab = 'ngay' | 'ls' | 'bc' | 'hd';
+type Tab = 'tudong' | 'ngay' | 'ls' | 'bc' | 'hd';
 var DRAFT = 'dc-nhap:';
-var TABS: Array<[Tab, string]> = [['ngay', 'Đối chiếu trong ngày'], ['ls', 'Lịch sử và cài đặt'], ['bc', 'Báo cáo'], ['hd', 'Hướng dẫn']];
+var TABS: Array<[Tab, string]> = [['tudong', 'Tự động từ phiếu xuất kho'], ['ngay', 'Đối chiếu sổ ghi tay'], ['ls', 'Lịch sử và cài đặt'], ['bc', 'Báo cáo'], ['hd', 'Hướng dẫn']];
 
 function monthBefore(m: string): string {
   var p = m.split('-').map(Number);
@@ -36,7 +37,7 @@ export default function DoiChieuPage() {
   var [byMonth, setByMonth] = useState<Record<string, DcSession[]>>({});
   var [loading, setLoading] = useState(true);
   var [loadErr, setLoadErr] = useState('');
-  var [tab, setTab] = useState<Tab>('ngay');
+  var [tab, setTab] = useState<Tab>('tudong');
   var [date, setDateState] = useState(dcToday());
   var [sapo, setSapo] = useState<DcSapo | null>(null);
   var [rows, setRows] = useState<UiRow[]>([]);
@@ -329,7 +330,7 @@ export default function DoiChieuPage() {
       <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-100">Đối chiếu sổ kho</h1>
-          <p className="text-sm text-gray-500 mt-1">Sổ ghi tay tại kho so với báo cáo xuất nhập tồn trên Sapo, theo từng ngày. Dữ liệu lưu chung trên hệ thống.</p>
+          <p className="text-sm text-gray-500 mt-1">Phiếu xuất kho cuối ngày (tự động) hoặc sổ ghi tay so với báo cáo xuất nhập tồn trên Sapo, theo từng ngày. Dữ liệu lưu chung trên hệ thống.</p>
         </div>
         <div>
           <label className="block text-xs text-gray-500 mb-1" htmlFor="dc-ngay">Ngày đối chiếu</label>
@@ -352,6 +353,7 @@ export default function DoiChieuPage() {
       {loadErr && <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-300">Không tải được dữ liệu đối chiếu: {loadErr}. Chưa nên lưu ngày nào cho đến khi hết lỗi (có thể đè dữ liệu).</div>}
       {loading && !loadErr && <div className="p-6 text-gray-400 text-sm">Đang tải dữ liệu…</div>}
 
+      {!loading && !loadErr && tab === 'tudong' && <AutoView date={date} cfg={cfg} sapo={sapo} onSapoFile={onSapoFile} toast={toast} />}
       {!loading && !loadErr && tab === 'ngay' && (
         <DayView date={date} setDate={function(d) { openDay(d); }} cfg={cfg} catalog={catalog} sapo={sapo} rows={rows} setRows={setRows}
           current={current} dirty={dirty} nguoi={nguoi} setNguoi={setNguoi} saving={saving} missing={missing}

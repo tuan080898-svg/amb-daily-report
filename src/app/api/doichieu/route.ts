@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sessionUser } from '@/lib/server-security';
-import { dcGetConfig, dcSaveConfig, dcGetMonth, dcSaveSessions, dcDeleteSessions, isMonth, isDay } from '@/lib/doichieu-server';
+import { dcGetConfig, dcSaveConfig, dcGetMonth, dcSaveSessions, dcDeleteSessions, dcGetAdj, dcAddAdj, dcRemoveAdj, isMonth, isDay } from '@/lib/doichieu-server';
+import type { TdAdj } from '@/lib/doichieu-tudong';
 import type { DcSession, DcBo, DcSettings } from '@/lib/doichieu';
 
 // Đối chiếu sổ kho: admin và nhân sự kho được xem và đối chiếu (lưu phiên, sửa danh sách nhân sự/bộ/combo); chỉ admin được xóa ngày đã lưu.
@@ -48,6 +49,11 @@ export async function GET(req: NextRequest) {
       if (!isMonth(m)) return fail(400, 'Tháng không hợp lệ');
       return ok({ month: m, sessions: await dcGetMonth(m) });
     }
+    if (part === 'adj') {
+      const m = q.get('month') || '';
+      if (!isMonth(m)) return fail(400, 'Tháng không hợp lệ');
+      return ok({ month: m, items: await dcGetAdj(m) });
+    }
     return fail(400, 'Yêu cầu không hợp lệ');
   } catch (e) {
     return fail(500, e instanceof Error ? e.message : 'Lỗi hệ thống');
@@ -80,6 +86,24 @@ export async function POST(req: NextRequest) {
       if (!Array.isArray(p) || p.length === 0 || p.length > 120 || !p.every(validSession)) return fail(400, 'Phiên đối chiếu không hợp lệ');
       await dcSaveSessions(p as DcSession[]);
       return ok({ ok: true });
+    }
+    if (action === 'addAdj') {
+      if (!p || typeof p !== 'object' || typeof p.ngay !== 'string' || !isDay(p.ngay) || (p.loai !== 'huy' && p.loai !== 'loi')) return fail(400, 'Dữ liệu không hợp lệ');
+      const product = typeof p.product === 'string' ? p.product.trim() : '';
+      const sl = Number(p.sl);
+      if (!product || product.length > 200 || !isFinite(sl) || sl <= 0 || sl > 100000) return fail(400, 'Sản phẩm hoặc số lượng không hợp lệ');
+      const e: TdAdj = {
+        id: 'T' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+        ngay: p.ngay, loai: p.loai, product: product, sl: Math.round(sl * 1000) / 1000,
+        ghiChu: typeof p.ghiChu === 'string' ? p.ghiChu.slice(0, 200) : '',
+        by: typeof p.by === 'string' ? p.by.slice(0, 60) : '',
+        at: new Date().toISOString(),
+      };
+      return ok({ items: await dcAddAdj(e) });
+    }
+    if (action === 'removeAdj') {
+      if (!p || typeof p.id !== 'string' || p.id.length > 40 || typeof p.ngay !== 'string' || !isDay(p.ngay)) return fail(400, 'Dữ liệu không hợp lệ');
+      return ok({ items: await dcRemoveAdj(p.id, p.ngay) });
     }
     if (action === 'deleteSessions') {
       if (u.role !== 'admin') return fail(403, 'Chỉ admin được xóa ngày đã lưu');
