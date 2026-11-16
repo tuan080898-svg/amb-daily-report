@@ -20,6 +20,7 @@ const CONTACT_COLS: ColSpec[] = [
   { key: 'code', names: ['Mã KOCs', 'Mã KOC'], optional: true },
   { key: 'name', names: ['Tên'], optional: true },
   { key: 'product', names: ['Sản phẩm'], optional: true },
+  { key: 'sku', names: ['Sản phẩm theo SKU'], optional: true }, // chỉ có ở một số bảng nhân sự
 ];
 const SCHEDULE_COLS: ColSpec[] = [
   { key: 'date', names: ['Ngày hẹn lên', 'Ngày hẹn', 'Ngày'], dateType: true },
@@ -130,6 +131,7 @@ interface ReadResult {
   staff: string[];
   products: string[];
   kocs: string[];
+  skus: string[];
   contacts: ContactRow[];
   schedules: ScheduleRow[];
   skippedNoDate: number;
@@ -164,8 +166,11 @@ async function readBooking(opts: { base?: BookingSnapshot; liveFrom?: string }):
   const staff: string[] = base ? base.staff.slice() : CONTACT_TABLES.map(function(t) { return t.staff; });
   const products: string[] = base ? base.products.slice() : [];
   const kocs: string[] = base ? base.kocs.slice() : [];
+  const skus: string[] = base && base.skus ? base.skus.slice() : [];
   const productIdx = new Map<string, number>();
   const kocIdx = new Map<string, number>();
+  const skuIdx = new Map<string, number>();
+  skus.forEach(function(n, i) { skuIdx.set(n, i); });
   products.forEach(function(n, i) { productIdx.set(n, i); });
   kocs.forEach(function(k, i) { kocIdx.set(k, i); });
   let skippedNoDate = 0;
@@ -176,6 +181,19 @@ async function readBooking(opts: { base?: BookingSnapshot; liveFrom?: string }):
       if (i === undefined) { i = products.length; products.push(name); productIdx.set(name, i); }
       return i;
     });
+  }
+  // Cột "Sản phẩm theo SKU" (chọn nhiều): tách thành từng mã, viết hoa, không trùng
+  function skuIds(raw: unknown): number[] {
+    const parts = Array.isArray(raw) ? (raw as unknown[]).map(flat) : [flat(raw)];
+    const out: number[] = [];
+    parts.join(',').split(/[,;\n]+/).forEach(function(t) {
+      const code = t.trim().toUpperCase();
+      if (!code) return;
+      let i = skuIdx.get(code);
+      if (i === undefined) { i = skus.length; skus.push(code); skuIdx.set(code, i); }
+      if (out.indexOf(i) < 0) out.push(i);
+    });
+    return out;
   }
   function kocId(name: string, code: string, fallback: string): number {
     const key = (name.replace(/^@/, '').trim().toLowerCase()) || code.trim().toLowerCase() || fallback;
@@ -197,7 +215,10 @@ async function readBooking(opts: { base?: BookingSnapshot; liveFrom?: string }):
       if (tooOld(date)) return;
       const pv = c.product ? f[c.product] : '';
       const rawProducts = Array.isArray(pv) ? (pv as unknown[]).map(flat) : flat(pv);
-      contacts.push([date, ti, stage, kocId(c.name ? flat(f[c.name]) : '', c.code ? flat(f[c.code]) : '', 'c-' + rec.record_id), productIds(rawProducts)]);
+      const row: ContactRow = [date, ti, stage, kocId(c.name ? flat(f[c.name]) : '', c.code ? flat(f[c.code]) : '', 'c-' + rec.record_id), productIds(rawProducts)];
+      const sk = c.sku ? skuIds(f[c.sku]) : [];
+      if (sk.length > 0) row.push(sk);
+      contacts.push(row);
     });
   });
 
@@ -220,6 +241,7 @@ async function readBooking(opts: { base?: BookingSnapshot; liveFrom?: string }):
     staff: staff,
     products: products,
     kocs: kocs,
+    skus: skus,
     contacts: contacts,
     schedules: schedules,
     skippedNoDate: skippedNoDate,
@@ -236,6 +258,7 @@ export async function buildBookingSnapshot(): Promise<BookingSnapshot> {
     staff: r.staff,
     products: r.products,
     kocs: r.kocs,
+    skus: r.skus,
     contacts: r.contacts,
     schedules: r.schedules,
     meta: { contactRows: r.contacts.length, scheduleRows: r.schedules.length, skippedNoDate: r.skippedNoDate, tables: r.tables },
@@ -245,5 +268,5 @@ export async function buildBookingSnapshot(): Promise<BookingSnapshot> {
 // Đọc trực tiếp phần mới (từ liveFrom trở đi) để ghép lên bản lưu sẵn
 export async function buildBookingLive(base: BookingSnapshot, liveFrom: string): Promise<BookingLive> {
   const r = await readBooking({ base: base, liveFrom: liveFrom });
-  return { generatedAt: new Date().toISOString(), baseGeneratedAt: base.generatedAt, liveFrom: liveFrom, staff: r.staff, products: r.products, contacts: r.contacts, schedules: r.schedules };
+  return { generatedAt: new Date().toISOString(), baseGeneratedAt: base.generatedAt, liveFrom: liveFrom, staff: r.staff, products: r.products, skus: r.skus, contacts: r.contacts, schedules: r.schedules };
 }

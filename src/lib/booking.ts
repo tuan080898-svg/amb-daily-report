@@ -7,8 +7,8 @@ export const UNKNOWN_STAFF = '(Không rõ)';
 // Giai đoạn cao nhất KOC đã đạt (suy từ cột "Trạng thái" trên Lark)
 export const STAGE = { BLACKLIST: -2, REFUSED: -1, NONE: 0, CONTACTED: 1, CONFIRMED: 2, SENT: 3, SCHEDULED: 4, ONAIR: 5 } as const;
 
-// [ngày liên hệ, nhân sự, giai đoạn, KOC, các sản phẩm]
-export type ContactRow = [string, number, number, number, number[]];
+// [ngày liên hệ, nhân sự, giai đoạn, KOC, các sản phẩm (tên người ghi), các mã SKU (chỉ có ở bảng có cột "Sản phẩm theo SKU")]
+export type ContactRow = [string, number, number, number, number[], number[]?];
 // [ngày hẹn lên video, nhân sự, đã lên video 0/1, KOC, các sản phẩm]
 export type ScheduleRow = [string, number, number, number, number[]];
 
@@ -18,6 +18,7 @@ export interface BookingSnapshot {
   staff: string[];
   products: string[];
   kocs: string[];
+  skus?: string[]; // từ điển mã SKU (đánh số theo thứ tự xuất hiện); bản cũ chưa có
   contacts: ContactRow[];
   schedules: ScheduleRow[];
   meta: { contactRows: number; scheduleRows: number; skippedNoDate: number; tables: Array<{ name: string; rows: number }> };
@@ -30,6 +31,7 @@ export interface BookingLive {
   liveFrom: string;
   staff: string[];
   products: string[];
+  skus?: string[];
   contacts: ContactRow[];
   schedules: ScheduleRow[];
 }
@@ -45,6 +47,7 @@ export function mergeLive(base: BookingSnapshot, live: BookingLive | null): Book
     staff: live.staff,
     products: live.products,
     kocs: base.kocs,
+    skus: live.skus || base.skus,
     contacts: contacts,
     schedules: schedules,
     meta: { contactRows: contacts.length, scheduleRows: schedules.length, skippedNoDate: base.meta.skippedNoDate, tables: base.meta.tables },
@@ -315,4 +318,102 @@ export function buildBookingReport(snap: BookingSnapshot, f: BookingFilter, gran
     overdueOld: overdueOld,
     overdueByStaff: Array.from(overdueStaff.entries()).map(function(e) { return { name: e[0], count: e[1] }; }).sort(function(a, b) { return b.count - a.count; }),
   };
+}
+
+// ==================== Báo cáo theo ngày (theo nhân sự và loại hàng) ====================
+
+// Mã SKU -> loại hàng (null nếu mã chưa có trong bảng SKU của app)
+export type SkuCategoryFn = (code: string) => string | null;
+export const CAT_UNKNOWN_SKU = '(Mã SKU chưa có trong bảng SKU)';
+
+export interface DayCat { name: string; confirmed: number; sent: number; skus: Record<string, number> }
+export interface DayStaff {
+  name: string;
+  contacted: number; // KOC khác nhau nhân sự liên hệ trong ngày
+  confirmed: number; // trong số đó, đã xác nhận hợp tác trở lên
+  sent: number; // trong số đó, đã gửi sản phẩm (gồm các trạng thái sau gửi: hẹn lịch, on air, hoàn, bùng, không hiệu quả)
+  confirmedSp: number; // số phần sản phẩm của KOC đã xác nhận
+  sentSp: number; // số phần sản phẩm đã gửi
+  cats: Record<string, DayCat>;
+}
+export interface DayReport {
+  date: string;
+  staff: DayStaff[];
+  total: DayStaff;
+  cats: DayCat[]; // loại hàng, gộp mọi nhân sự (đã gửi nhiều nhất trước)
+  confirmedWithSku: number; // số KOC xác nhận có ghi mã SKU
+  confirmedNoProduct: number; // số KOC xác nhận chưa ghi sản phẩm nào
+  unknownSku: Record<string, number>; // mã SKU chưa có trong bảng SKU của app
+}
+
+function newDayStaff(name: string): DayStaff {
+  return { name: name, contacted: 0, confirmed: 0, sent: 0, confirmedSp: 0, sentSp: 0, cats: {} };
+}
+
+// Mỗi KOC chỉ tính 1 lần trong cùng ngày và cùng nhân sự (lấy giai đoạn cao nhất, gộp sản phẩm các dòng trùng).
+// Sản phẩm: ưu tiên mã SKU (quy ra loại hàng bằng bảng SKU của app); bảng không có cột SKU thì dùng tên sản phẩm nhân sự ghi.
+// Mỗi mã SKU / mỗi tên sản phẩm là 1 "phần" sản phẩm gửi cho KOC.
+export function buildDayReport(snap: BookingSnapshot, date: string, staffIdx: number[], catOf: SkuCategoryFn): DayReport {
+  interface K { stage: number; skus: Set<number>; prods: Set<number> }
+  const per = new Map<number, Map<number, K>>();
+  snap.contacts.forEach(function(r) {
+    if (r[0] !== date || !isContacted(r[2])) return;
+    let m = per.get(r[1]);
+    if (!m) { m = new Map<number, K>(); per.set(r[1], m); }
+    let k = m.get(r[3]);
+    if (!k) { k = { stage: r[2], skus: new Set<number>(), prods: new Set<number>() }; m.set(r[3], k); }
+    else if (r[2] > k.stage) k.stage = r[2];
+    r[4].forEach(function(p) { k!.prods.add(p); });
+    (r[5] || []).forEach(function(s) { k!.skus.add(s); });
+  });
+
+  const total = newDayStaff('Tổng');
+  const unknownSku: Record<string, number> = {};
+  let confirmedWithSku = 0, confirmedNoProduct = 0;
+  const byIdx = new Map<number, DayStaff>();
+  const idxList = staffIdx.slice();
+  Array.from(per.keys()).forEach(function(i) { if (idxList.indexOf(i) < 0) idxList.push(i); });
+  idxList.forEach(function(i) { byIdx.set(i, newDayStaff(snap.staff[i] || UNKNOWN_STAFF)); });
+
+  function addCat(st: DayStaff, name: string, sku: string | null, sent: boolean) {
+    const c = st.cats[name] || (st.cats[name] = { name: name, confirmed: 0, sent: 0, skus: {} });
+    c.confirmed++;
+    if (sent) { c.sent++; if (sku) c.skus[sku] = (c.skus[sku] || 0) + 1; }
+  }
+
+  per.forEach(function(kocs, si) {
+    const st = byIdx.get(si)!;
+    kocs.forEach(function(k) {
+      st.contacted++; total.contacted++;
+      if (!isBooked(k.stage)) return;
+      const sent = k.stage >= STAGE.SENT;
+      const portions: Array<{ cat: string; sku: string | null }> = [];
+      if (k.skus.size > 0) {
+        confirmedWithSku++;
+        k.skus.forEach(function(idx) {
+          const code = (snap.skus || [])[idx];
+          if (!code) return;
+          const c = catOf(code);
+          if (c) portions.push({ cat: c, sku: code });
+          else { unknownSku[code] = (unknownSku[code] || 0) + 1; portions.push({ cat: CAT_UNKNOWN_SKU, sku: code }); }
+        });
+      } else {
+        k.prods.forEach(function(pi) {
+          const name = snap.products[pi] || NO_PRODUCT;
+          if (name === NO_PRODUCT && k.prods.size > 1) return; // dòng trùng có ghi sản phẩm thì bỏ dòng để trống
+          portions.push({ cat: name, sku: null });
+        });
+      }
+      if (portions.length === 0 || (portions.length === 1 && portions[0].cat === NO_PRODUCT)) confirmedNoProduct++;
+      st.confirmed++; total.confirmed++;
+      st.confirmedSp += portions.length; total.confirmedSp += portions.length;
+      if (sent) { st.sent++; total.sent++; st.sentSp += portions.length; total.sentSp += portions.length; }
+      portions.forEach(function(p) { addCat(st, p.cat, p.sku, sent); addCat(total, p.cat, p.sku, sent); });
+    });
+  });
+
+  const staff = idxList.map(function(i) { return byIdx.get(i)!; });
+  const cats = Object.keys(total.cats).map(function(n) { return total.cats[n]; })
+    .sort(function(a, b) { return b.sent - a.sent || b.confirmed - a.confirmed || a.name.localeCompare(b.name, 'vi'); });
+  return { date: date, staff: staff, total: total, cats: cats, confirmedWithSku: confirmedWithSku, confirmedNoProduct: confirmedNoProduct, unknownSku: unknownSku };
 }

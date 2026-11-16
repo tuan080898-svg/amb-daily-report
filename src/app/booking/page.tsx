@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { BookingSnapshot, BookingLive, Granularity, NO_PRODUCT, buildBookingReport, mergeLive, todayVn, addDays } from '@/lib/booking';
+import DayReport from './DayReport';
 
 type Preset = 'today' | '7d' | '30d' | 'month' | '90d' | 'all';
 
@@ -236,6 +237,8 @@ export default function BookingPage() {
         </div>
       </div>
       {error && <p className="text-sm text-rose-400">Lỗi cập nhật: {error}</p>}
+
+      <DayReport snap={snap} />
 
       {/* Bộ lọc */}
       <div className="flex flex-wrap gap-2 items-center">
