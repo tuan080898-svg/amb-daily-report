@@ -4,7 +4,7 @@ import type { InventoryData, InventoryTransaction, InventoryConfig, InventoryPus
 import { DEFAULT_CONFIG } from './utils';
 import type { PxkData, PxkBatch } from './pxk';
 import type { DcConfig, DcSession, DcSettings, DcBo } from './doichieu';
-import type { TdAdj } from './doichieu-tudong';
+import type { TdAdj, TdSnap } from './doichieu-tudong';
 import type { SkData } from './sokho';
 
 function db() {
@@ -983,6 +983,16 @@ export async function dbSaveDoiChieuSessions(list: DcSession[]): Promise<void> {
     batch.push(s); size += n;
   }
   if (batch.length > 0) await postApi('/api/doichieu', 'saveSessions', batch);
+}
+
+// Bản chốt kết quả đối chiếu tự động theo ngày
+export async function dbGetDoiChieuSnaps(month: string): Promise<TdSnap[]> {
+  const r = await callApi<{ items: TdSnap[] }>('/api/doichieu?part=snap&month=' + encodeURIComponent(month));
+  return r.items || [];
+}
+export async function dbSaveDoiChieuSnap(s: TdSnap): Promise<TdSnap[]> {
+  const r = await postApi('/api/doichieu', 'saveSnap', s) as { items: TdSnap[] };
+  return r.items || [];
 }
 
 // Nhập tay trong ngày cho đối chiếu tự động (nhận lại hàng hủy, xuất hàng lỗi)

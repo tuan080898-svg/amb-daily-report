@@ -353,7 +353,7 @@ export default function DoiChieuPage() {
       {loadErr && <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-300">Không tải được dữ liệu đối chiếu: {loadErr}. Chưa nên lưu ngày nào cho đến khi hết lỗi (có thể đè dữ liệu).</div>}
       {loading && !loadErr && <div className="p-6 text-gray-400 text-sm">Đang tải dữ liệu…</div>}
 
-      {!loading && !loadErr && tab === 'tudong' && <AutoView date={date} cfg={cfg} sapo={sapo} onSapoFile={onSapoFile} toast={toast} />}
+      {!loading && !loadErr && tab === 'tudong' && <AutoView date={date} setDate={function(d) { openDay(d); }} cfg={cfg} sapo={sapo} onSapoFile={onSapoFile} toast={toast} />}
       {!loading && !loadErr && tab === 'ngay' && (
         <DayView date={date} setDate={function(d) { openDay(d); }} cfg={cfg} catalog={catalog} sapo={sapo} rows={rows} setRows={setRows}
           current={current} dirty={dirty} nguoi={nguoi} setNguoi={setNguoi} saving={saving} missing={missing}

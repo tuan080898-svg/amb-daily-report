@@ -3,16 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { useAppState } from '@/lib/store';
-import { dbAddDoiChieuAdj, dbGetDoiChieuAdj, dbGetPxk, dbGetPxkArchive, dbRemoveDoiChieuAdj } from '@/lib/db';
+import { dbAddDoiChieuAdj, dbGetDoiChieuAdj, dbGetDoiChieuSnaps, dbGetPxk, dbGetPxkArchive, dbRemoveDoiChieuAdj, dbSaveDoiChieuSnap } from '@/lib/db';
 import { getAllProducts, getAllSkuCodes, getProductSkuCodes, getSkuProducts, subscribeSkuMap } from '@/lib/sku';
-import { dcFmt, dcFmtD, dcNorm, dcVnDate, type DcConfig, type DcSapo } from '@/lib/doichieu';
-import { TD_LOAI_TEN, tdCompare, tdPxkDay, tdSapoDay, type TdAdj, type TdLoai, type TdOptions, type TdStatus, type TdUnit } from '@/lib/doichieu-tudong';
+import { dcAddDays, dcFmt, dcFmtD, dcNorm, dcToday, dcVnDate, type DcConfig, type DcSapo } from '@/lib/doichieu';
+import { TD_LOAI_TEN, tdCompare, tdPxkDay, tdSapoDay, type TdAdj, type TdLoai, type TdOptions, type TdRow, type TdSnap, type TdStatus, type TdUnit } from '@/lib/doichieu-tudong';
 import type { PxkBatch } from '@/lib/pxk';
 import ProductPicker, { pickMatch } from '@/components/ProductPicker';
 import { btnCls, btnPrimaryCls, cardCls, inputCls } from './shared';
 
 export interface AutoProps {
   date: string;
+  setDate: (d: string) => void;
   cfg: DcConfig;
   sapo: DcSapo | null;
   onSapoFile: (f: File) => Promise<void>;
@@ -44,6 +45,9 @@ export default function AutoView(p: AutoProps) {
   var [sl, setSl] = useState('');
   var [ghiChu, setGhiChu] = useState('');
   var [busy, setBusy] = useState(false);
+  var [snapMonth, setSnapMonth] = useState<Record<string, TdSnap[]>>({});
+  var [saving, setSaving] = useState(false);
+  var [nguoi, setNguoi] = useState('');
   var [filter, setFilter] = useState<'van-de' | TdStatus | 'tat-ca'>('van-de');
   var fileRef = useRef<HTMLInputElement>(null);
   var archiveRef = useRef<Record<string, PxkBatch[]>>({});
@@ -78,6 +82,18 @@ export default function AutoView(p: AutoProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.date]);
 
+  // Bản chốt kết quả các ngày gần đây (tháng đang xem + tháng hiện tại + tháng của 10 ngày trước) để biết ngày nào đã / chưa đối chiếu
+  useEffect(function() {
+    var months = Array.from(new Set([p.date.slice(0, 7), dcToday().slice(0, 7), dcAddDays(dcToday(), -10).slice(0, 7)]));
+    var alive = true;
+    months.forEach(function(m) {
+      dbGetDoiChieuSnaps(m).then(function(items) { if (alive) setSnapMonth(function(o) { return Object.assign({}, o, { [m]: items }); }); }).catch(function() { /* không tải được: bỏ qua, vẫn đối chiếu được */ });
+    });
+    return function() { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.date]);
+  useEffect(function() { if (!nguoi && currentUser) setNguoi(currentUser.name); }, [currentUser]); // eslint-disable-line react-hooks/exhaustive-deps
+
   var allProducts = useMemo(function() { return getAllProducts(); }, [skuVer]);
   var skuOf = useMemo(function() { return getProductSkuCodes(); }, [skuVer]);
   // Tra mã SKU -> sản phẩm gốc, không phân biệt hoa thường / khoảng trắng (mã Sapo hay lệch kiểu chữ)
@@ -94,10 +110,14 @@ export default function AutoView(p: AutoProps) {
   var sapoRes = useMemo(function() { return p.sapo ? tdSapoDay(p.sapo.rows, unitsOf) : null; }, [p.sapo, index]); // eslint-disable-line react-hooks/exhaustive-deps
   var res = useMemo(function() { return pxk && sapoRes ? tdCompare(pxk, sapoRes, adj, opt) : []; }, [pxk, sapoRes, adj, kho, staff, xuatKhac]); // eslint-disable-line react-hooks/exhaustive-deps
   var ready = !!pxk && !!sapoRes;
-  var cnt = function(st: TdStatus) { return res.filter(function(r) { return r.st === st; }).length; };
+  var snap: TdSnap | null = (snapMonth[p.date.slice(0, 7)] || []).find(function(s) { return s.ngay === p.date; }) || null;
+  var fromSnap = !ready && !!snap; // chưa tải Sapo trong phiên này nhưng ngày này đã có bản chốt: hiện lại bản đã lưu
+  var view: TdRow[] = ready ? res : (snap ? snap.rows : []);
+  var viewReady = ready || !!snap;
+  var cnt = function(st: TdStatus) { return view.filter(function(r) { return r.st === st; }).length; };
   var problems = cnt('lech') + cnt('chiPhieu') + cnt('chiSapo');
   var unknownPxk = pxk ? Object.keys(pxk.unknown) : [];
-  var shown = res.filter(function(r) { return filter === 'tat-ca' ? true : filter === 'van-de' ? r.st !== 'khop' : r.st === filter; });
+  var shown = view.filter(function(r) { return filter === 'tat-ca' ? true : filter === 'van-de' ? r.st !== 'khop' : r.st === filter; });
   var sapoBanner = p.sapo && p.sapo.to && p.sapo.to !== p.date ? 'File Sapo là ngày ' + dcVnDate(p.sapo.from) + (p.sapo.from !== p.sapo.to ? ' – ' + dcVnDate(p.sapo.to) : '') + ', khác ngày đang đối chiếu ' + dcVnDate(p.date) + '.' : '';
 
   async function addAdj() {
@@ -126,10 +146,45 @@ export default function AutoView(p: AutoProps) {
     setBusy(false);
   }
 
+  async function saveSnap() {
+    if (!ready || !pxk || !sapoRes || !p.sapo) return;
+    setSaving(true);
+    try {
+      var pp = pxk.products;
+      var qty = Object.keys(pp).reduce(function(s, k) { return s + pp[k].qty; }, 0);
+      var unk: Record<string, number> = {};
+      Object.keys(pxk.unknown).slice(0, 100).forEach(function(k) { unk[k] = (pxk as { unknown: Record<string, number> }).unknown[k]; });
+      var sapoRows = p.sapo.rows;
+      var items = await dbSaveDoiChieuSnap({
+        ngay: p.date, kho: kho, staff: staff, xuatKhac: xuatKhac, nguoiLuu: nguoi.trim(), luuLuc: new Date().toISOString(),
+        pxk: { batches: pxk.batches, orders: pxk.orders, skipKho: pxk.skipKho, skipStaff: pxk.skipStaff, qty: qty },
+        sapo: { from: p.sapo.from, to: p.sapo.to, ma: sapoRows.length, banRa: sapoRows.reduce(function(a, r) { return a + (Number(r.f.banRa) || 0); }, 0) },
+        counts: { khop: cnt('khop'), lech: cnt('lech'), chiPhieu: cnt('chiPhieu'), chiSapo: cnt('chiSapo') },
+        rows: res, unknownPxk: unk,
+        unknownSapo: sapoRes.unknown.slice(0, 200).map(function(u) { return { ma: u.ma, ten: u.ten, xuat: u.xuat }; }),
+        adj: adj,
+      });
+      setSnapMonth(function(o) { return Object.assign({}, o, { [p.date.slice(0, 7)]: items }); });
+      p.toast('Đã lưu kết quả đối chiếu ngày ' + dcVnDate(p.date) + '.');
+    } catch (e) { p.toast(e instanceof Error ? 'Lưu không thành công: ' + e.message : 'Lưu không thành công.'); }
+    setSaving(false);
+  }
+
+  // Các ngày gần đây (bỏ Chủ nhật): đã chốt đối chiếu chưa
+  var recent = (function() {
+    var out: Array<{ d: string; snap: TdSnap | null }> = [];
+    for (var i = 0; i <= 10; i++) {
+      var d = dcAddDays(dcToday(), -i);
+      if (new Date(d + 'T12:00:00').getDay() === 0) continue;
+      out.push({ d: d, snap: (snapMonth[d.slice(0, 7)] || []).find(function(s) { return s.ngay === d; }) || null });
+    }
+    return out;
+  })();
+
   function exportExcel() {
     var aoa: Array<Array<string | number>> = [['Đối chiếu tự động ngày', dcVnDate(p.date)], ['Phiếu xuất kho', (kho || 'Mọi kho') + (staff ? ', gồm shop nhân sự' : ', chỉ shop công ty'), 'Cách tính xuất', xuatKhac ? 'Gồm xuất khác Sapo và hàng lỗi xuất tay' : 'Chỉ bán ra'], [],
       ['Kết quả', 'Sản phẩm gốc', 'Mã SKU', 'Phiếu xuất', 'Trong đó hàng lỗi', 'Sapo xuất', 'Lệch xuất', 'Nhận lại hàng hủy (nhập tay)', 'Sapo nhận lại', 'Lệch nhận lại', 'Ghi chú']];
-    res.forEach(function(r) { aoa.push([STL[r.st], r.product, r.skus.join(' / '), r.pXuat, r.loi, r.sXuat, r.dXuat, r.huy, r.sNhan, r.dNhan, r.why]); });
+    view.forEach(function(r) { aoa.push([STL[r.st], r.product, r.skus.join(' / '), r.pXuat, r.loi, r.sXuat, r.dXuat, r.huy, r.sNhan, r.dNhan, r.why]); });
     var wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Doi chieu tu dong');
     var nh: Array<Array<string | number>> = [['Loại', 'Sản phẩm', 'Số lượng', 'Ghi chú', 'Người nhập', 'Lúc']];
@@ -229,14 +284,15 @@ export default function AutoView(p: AutoProps) {
       <div className={cardCls + ' mt-4'}>
         <h2 className="text-sm font-semibold text-gray-200 mb-1"><span className="inline-flex w-5 h-5 mr-2 rounded-full bg-blue-600 text-white text-xs items-center justify-center">4</span>Kết quả đối chiếu</h2>
         <p className="text-xs text-gray-400 mb-3">
-          {!ready ? (!p.sapo ? 'Còn thiếu báo cáo Sapo ở bước 2.' : 'Đang chờ phiếu xuất kho.')
+          {fromSnap && snap ? 'Đang xem bản đã lưu lúc ' + new Date(snap.luuLuc).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) + (snap.nguoiLuu ? ' bởi ' + snap.nguoiLuu : '') + ' (' + snap.counts.lech + ' lệch, ' + (snap.counts.chiPhieu + snap.counts.chiSapo) + ' chỉ có một bên, ' + snap.counts.khop + ' khớp). Tải lại file Sapo ở bước 2 nếu muốn tính lại.'
+            : !ready ? (!p.sapo ? 'Còn thiếu báo cáo Sapo ở bước 2.' : 'Đang chờ phiếu xuất kho.')
             : problems === 0 && unknownPxk.length === 0 && sapoRes && sapoRes.unknown.length === 0 ? '✅ Xuất đúng: phiếu xuất kho khớp Sapo ở mọi sản phẩm.'
             : problems + ' sản phẩm cần xem lại' + (unknownPxk.length || (sapoRes && sapoRes.unknown.length) ? ', và có mã chưa quy được ra sản phẩm (xem bên dưới).' : '.')}
         </p>
-        {ready && (
+        {viewReady && (
           <>
             <div className="flex flex-wrap gap-2 mb-3">
-              {([['van-de', 'Cần xem lại', problems], ['lech', 'Lệch số', cnt('lech')], ['chiPhieu', 'Chỉ có ở phiếu / nhập tay', cnt('chiPhieu')], ['chiSapo', 'Chỉ có ở Sapo', cnt('chiSapo')], ['khop', 'Khớp', cnt('khop')], ['tat-ca', 'Tất cả', res.length]] as Array<[typeof filter, string, number]>).map(function(c) {
+              {([['van-de', 'Cần xem lại', problems], ['lech', 'Lệch số', cnt('lech')], ['chiPhieu', 'Chỉ có ở phiếu / nhập tay', cnt('chiPhieu')], ['chiSapo', 'Chỉ có ở Sapo', cnt('chiSapo')], ['khop', 'Khớp', cnt('khop')], ['tat-ca', 'Tất cả', view.length]] as Array<[typeof filter, string, number]>).map(function(c) {
                 return <button key={c[0]} onClick={function() { setFilter(c[0]); }} aria-pressed={filter === c[0]}
                   className={'px-3 py-1 rounded-full text-xs border ' + (filter === c[0] ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-800 border-slate-600 text-gray-300 hover:bg-slate-700')}>{c[1]} <b>{c[2]}</b></button>;
               })}
@@ -272,9 +328,31 @@ export default function AutoView(p: AutoProps) {
                 Mã Sapo chưa có trong bảng quy đổi SKU của app (không so được): {sapoRes.unknown.slice(0, 15).map(function(u) { return u.ma + ' (bán ' + dcFmt(u.xuat) + ')'; }).join(', ')}{sapoRes.unknown.length > 15 ? '…' : ''}.
               </div>
             )}
-            <div className="flex justify-end mt-4 pt-3 border-t border-slate-700"><button className={btnCls} onClick={exportExcel}>Tải Excel kết quả</button></div>
+            <div className="flex flex-wrap items-center justify-end gap-2 mt-4 pt-3 border-t border-slate-700">
+              <span className="text-xs text-gray-400 mr-auto">
+                {snap ? 'Đã lưu kết quả' + (snap.nguoiLuu ? ' bởi ' + snap.nguoiLuu : '') + ' lúc ' + new Date(snap.luuLuc).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) + '.' : 'Ngày này chưa lưu kết quả.'}
+                {ready && snap && (snap.counts.lech !== cnt('lech') || snap.counts.khop !== cnt('khop') || snap.counts.chiPhieu !== cnt('chiPhieu') || snap.counts.chiSapo !== cnt('chiSapo') || snap.adj.length !== adj.length) ? ' Có thay đổi so với bản đã lưu.' : ''}
+              </span>
+              {ready && <input value={nguoi} onChange={function(e) { setNguoi(e.target.value); }} placeholder="Tên người lưu" className={inputCls + ' w-40'} />}
+              <button className={btnCls} onClick={exportExcel}>Tải Excel kết quả</button>
+              {ready && <button className={btnPrimaryCls} disabled={saving} onClick={saveSnap}>{saving ? 'Đang lưu…' : snap ? 'Lưu lại kết quả ngày này' : 'Lưu kết quả ngày này'}</button>}
+            </div>
           </>
         )}
+      </div>
+
+      <div className={cardCls}>
+        <h2 className="text-sm font-semibold text-gray-200 mb-2">Các ngày gần đây</h2>
+        <div className="flex flex-wrap gap-2">
+          {recent.map(function(x) {
+            var bad = x.snap ? x.snap.counts.lech + x.snap.counts.chiPhieu + x.snap.counts.chiSapo : 0;
+            var cls = !x.snap ? 'bg-amber-500/10 border-amber-500/30 text-amber-200' : bad === 0 ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200' : 'bg-red-500/10 border-red-500/30 text-red-200';
+            return <button key={x.d} onClick={function() { p.setDate(x.d); }} aria-pressed={x.d === p.date} className={'px-3 py-1.5 rounded-lg border text-xs ' + cls + (x.d === p.date ? ' ring-2 ring-blue-500' : '')}>
+              <b>{dcVnDate(x.d).slice(0, 5)}</b> · {!x.snap ? 'chưa đối chiếu' : bad === 0 ? 'khớp' : bad + ' cần xem'}
+            </button>;
+          })}
+        </div>
+        <p className="text-xs text-gray-500 mt-2">Bấm một ngày để mở. Ngày có chữ “chưa đối chiếu” là chưa bấm “Lưu kết quả ngày này”.</p>
       </div>
     </div>
   );

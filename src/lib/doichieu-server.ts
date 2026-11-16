@@ -7,7 +7,7 @@
 import { readJson, writeJson } from './storage-server';
 import { dcDefaultConfig } from './doichieu';
 import type { DcConfig, DcSession, DcBo, DcSettings } from './doichieu';
-import type { TdAdj } from './doichieu-tudong';
+import type { TdAdj, TdSnap } from './doichieu-tudong';
 
 const CONFIG_PATH = 'doichieu/config.json';
 const monthPath = (m: string) => 'doichieu/phien-' + m + '.json';
@@ -87,6 +87,30 @@ export async function dcRemoveAdj(id: string, ngay: string): Promise<TdAdj[]> {
   const cur = await dcGetAdj(m);
   const next = cur.filter(function(x) { return x.id !== id; });
   if (next.length !== cur.length) await writeJson(adjPath(m), { month: m, items: next });
+  return next;
+}
+
+// ----- Bản chốt kết quả đối chiếu tự động theo ngày (doichieu/tudong-YYYY-MM.json) -----
+const snapPath = (m: string) => 'doichieu/tudong-' + m + '.json';
+
+export async function dcGetSnaps(month: string): Promise<TdSnap[]> {
+  const j = await readJson<{ items?: TdSnap[] }>(snapPath(month));
+  return (j && j.items) || [];
+}
+
+export async function dcSaveSnap(s: TdSnap): Promise<TdSnap[]> {
+  const m = s.ngay.slice(0, 7);
+  const cur = await dcGetSnaps(m);
+  const next = cur.filter(function(x) { return x.ngay !== s.ngay; }).concat([s]).sort(function(a, b) { return b.ngay.localeCompare(a.ngay); });
+  await writeJson(snapPath(m), { month: m, items: next });
+  return next;
+}
+
+export async function dcDeleteSnap(ngay: string): Promise<TdSnap[]> {
+  const m = ngay.slice(0, 7);
+  const cur = await dcGetSnaps(m);
+  const next = cur.filter(function(x) { return x.ngay !== ngay; });
+  if (next.length !== cur.length) await writeJson(snapPath(m), { month: m, items: next });
   return next;
 }
 

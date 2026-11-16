@@ -91,6 +91,23 @@ export interface TdRow {
   huy: number; sNhan: number; dNhan: number; // nhận lại hàng hủy nhập tay, Sapo nhận lại, lệch
 }
 
+// Bản chốt kết quả đối chiếu của một ngày (lưu để xem lại, không phải tải lại file Sapo)
+export interface TdSnap {
+  ngay: string;
+  kho: '' | 'HCM' | 'HN';
+  staff: boolean;
+  xuatKhac: boolean;
+  nguoiLuu: string;
+  luuLuc: string;
+  pxk: { batches: number; orders: number; skipKho: number; skipStaff: number; qty: number };
+  sapo: { from: string | null; to: string | null; ma: number; banRa: number };
+  counts: { khop: number; lech: number; chiPhieu: number; chiSapo: number };
+  rows: TdRow[];
+  unknownPxk: Record<string, number>;
+  unknownSapo: Array<{ ma: string; ten: string; xuat: number }>;
+  adj: TdAdj[];
+}
+
 // So phiếu + nhập tay với Sapo theo sản phẩm gốc
 export function tdCompare(pxk: TdPxk, sapo: TdSapo, adj: TdAdj[], opt: TdOptions): TdRow[] {
   var loi: Record<string, number> = {};
