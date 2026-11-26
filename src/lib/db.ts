@@ -7,6 +7,7 @@ import type { DcConfig, DcSession, DcSettings, DcBo } from './doichieu';
 import type { TdAdj, TdSnap } from './doichieu-tudong';
 import type { KhPlan } from './ke-hoach-tiktok';
 import type { SkData } from './sokho';
+import type { CbReport } from './canhbao';
 
 function db() {
   if (!supabase) throw new Error('Supabase not configured');
@@ -1033,4 +1034,18 @@ export async function dbGetSoKho(): Promise<SkData> {
 
 export async function dbSoKhoAction(action: 'addCount' | 'addMove' | 'setKhoUser' | 'removeEntries' | 'hideProduct' | 'addExtra' | 'removeExtra' | 'bulkProducts' | 'setDeduct', payload: Record<string, unknown>): Promise<SkData> {
   return postApi('/api/sokho', action, payload) as Promise<SkData>;
+}
+
+// ==================== Cảnh báo nhập hàng (qua /api/canhbao) ====================
+
+export async function dbGetCanhBao(): Promise<CbReport> {
+  return callApi<CbReport>('/api/canhbao');
+}
+
+export async function dbCanhBaoAction(action: 'settings' | 'product' | 'addIncoming' | 'doneIncoming', payload: Record<string, unknown>): Promise<CbReport> {
+  return postApi('/api/canhbao', action, payload) as Promise<CbReport>;
+}
+
+export async function dbCanhBaoLark(send: boolean): Promise<{ text: string; sent: boolean }> {
+  return callApi<{ text: string; sent: boolean }>('/api/canhbao/lark', { method: 'POST', body: JSON.stringify({ send: send }) });
 }

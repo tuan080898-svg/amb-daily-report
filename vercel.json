@@ -1,5 +1,12 @@
 {
   "crons": [
-    { "path": "/api/lark-booking/sync", "schedule": "30 0 * * *" }
+    {
+      "path": "/api/lark-booking/sync",
+      "schedule": "30 0 * * *"
+    },
+    {
+      "path": "/api/canhbao/lark",
+      "schedule": "30 1 * * *"
+    }
   ]
 }
