@@ -57,6 +57,7 @@ function getPageTitle(pathname: string): string {
     '/booking': 'Báo cáo Booking KOC',
     '/kho/phieu-xuat': 'Phiếu xuất kho',
     '/checklist': 'Checklist',
+    '/admin/ke-hoach-tiktok': 'Kế hoạch TikTok',
     '/admin/pnl': 'Lãi lỗ (PnL)',
     '/admin/sku': 'Quản lý SKU',
     '/admin/inventory': 'Kho',

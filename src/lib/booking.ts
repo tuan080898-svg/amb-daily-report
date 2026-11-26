@@ -100,6 +100,9 @@ const PRODUCT_RULES: Array<[RegExp, string]> = [
   [/CAY LAU|CHOI LAU|LAU KEP|LAU BEP/, 'Cây / chổi lau'],
 ];
 
+// Danh sách loại hàng chuẩn (dùng cho kế hoạch TikTok và báo cáo)
+export const PRODUCT_CATEGORIES: string[] = PRODUCT_RULES.map(function(r) { return r[1]; });
+
 export function canonicalProduct(token: string): string {
   const t = stripAccents(token).toUpperCase().replace(/\s+/g, ' ').trim();
   if (!t) return '';

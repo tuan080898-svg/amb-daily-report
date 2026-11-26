@@ -73,6 +73,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Quản trị',
     icon: '⚙️',
     items: [
+      { href: '/admin/ke-hoach-tiktok', label: 'Kế hoạch TikTok', icon: '🎯', roles: ['admin'] },
       { href: '/admin/pnl', label: 'Lãi lỗ (PnL)', icon: '💹', roles: ['admin'] },
       { href: '/admin/sku', label: 'Quản lý SKU', icon: '🏷️', roles: ['admin'] },
       { href: '/admin/inventory', label: 'Kho', icon: '📦', roles: ['admin'] },

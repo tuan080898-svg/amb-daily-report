@@ -5,6 +5,7 @@ import { DEFAULT_CONFIG } from './utils';
 import type { PxkData, PxkBatch } from './pxk';
 import type { DcConfig, DcSession, DcSettings, DcBo } from './doichieu';
 import type { TdAdj, TdSnap } from './doichieu-tudong';
+import type { KhPlan } from './ke-hoach-tiktok';
 import type { SkData } from './sokho';
 
 function db() {
@@ -983,6 +984,16 @@ export async function dbSaveDoiChieuSessions(list: DcSession[]): Promise<void> {
     batch.push(s); size += n;
   }
   if (batch.length > 0) await postApi('/api/doichieu', 'saveSessions', batch);
+}
+
+// Kế hoạch doanh số TikTok theo tháng (chỉ admin)
+export async function dbGetKhTiktok(month: string): Promise<KhPlan | null> {
+  const r = await callApi<{ plan: KhPlan | null }>('/api/ke-hoach-tiktok?month=' + encodeURIComponent(month));
+  return r.plan || null;
+}
+export async function dbSaveKhTiktok(plan: KhPlan): Promise<KhPlan> {
+  const r = await postApi('/api/ke-hoach-tiktok', 'save', plan) as { plan: KhPlan };
+  return r.plan;
 }
 
 // Bản chốt kết quả đối chiếu tự động theo ngày
