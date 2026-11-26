@@ -12,12 +12,12 @@ var btnCls = 'px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-60
 var btnPrimaryCls = 'px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg disabled:opacity-50';
 
 var BADGE: Record<CbStatus, string> = {
-  'het': 'bg-red-600 text-white', 'gap': 'bg-red-500/25 text-red-300', 'dat': 'bg-orange-500/25 text-orange-300', 'sap': 'bg-yellow-500/20 text-yellow-200',
+  'het': 'bg-red-600 text-white', 'duoi': 'bg-red-500/25 text-red-300', 'chua-dm': 'bg-slate-700 text-gray-400', 'gap': 'bg-red-500/25 text-red-300', 'dat': 'bg-orange-500/25 text-orange-300', 'sap': 'bg-yellow-500/20 text-yellow-200',
   'cho': 'bg-blue-500/20 text-blue-300', 'chua-ton': 'bg-fuchsia-500/20 text-fuchsia-300', 'du': 'bg-green-500/20 text-green-300', 'khong-ban': 'bg-slate-700 text-gray-300', 'ngung': 'bg-slate-700 text-gray-400',
 };
 
 type Filter = 'can-nhap' | CbStatus | 'tat-ca';
-var NEED: CbStatus[] = ['het', 'gap', 'dat'];
+var NEED: CbStatus[] = ['het', 'duoi', 'gap', 'dat'];
 
 var fmt = function(n: number, d = 0) { return n.toLocaleString('vi-VN', { maximumFractionDigits: d }); };
 var dm = function(d: string) { return d.slice(8, 10) + '/' + d.slice(5, 7); };
@@ -84,14 +84,64 @@ export default function CanhBaoPage() {
         return {
           'Trạng thái': CB_STATUS_LABEL[x.status], 'Sản phẩm': x.product, 'Tồn có thể bán': x.stock === null ? '' : Math.round(x.stock),
           'Bán 7 ngày': x.sold7, 'Bán 30 ngày': x.sold30, 'Bán/ngày': Math.round(x.daily * 10) / 10, 'Còn đủ (ngày)': x.daysLeft === null ? '' : Math.floor(x.daysLeft),
-          'Đang về': x.incoming, 'Ngày về': x.nextEta || '', 'Thời gian hàng về (ngày)': x.leadDays, 'Đề xuất nhập': x.status === 'chua-ton' ? '' : x.suggest,
+          'Định mức': x.min === null ? '' : x.min, 'Đang về': x.incoming, 'Ngày về': x.nextEta || '', 'Thời gian hàng về (ngày)': x.leadDays, 'Đề xuất nhập': x.status === 'chua-ton' ? '' : x.suggest,
         };
       });
       var ws = XLSX.utils.json_to_sheet(data.length ? data : [{ 'Sản phẩm': 'Không có mã nào cần nhập' }]);
-      ws['!cols'] = [{ wch: 16 }, { wch: 44 }].concat(Array(9).fill({ wch: 14 }));
+      ws['!cols'] = [{ wch: 16 }, { wch: 44 }].concat(Array(10).fill({ wch: 14 }));
       XLSX.utils.book_append_sheet(wb, ws, CB_KHO_LABEL[k]);
     });
     XLSX.writeFile(wb, 'De-xuat-nhap-hang-' + r.today + (r.stockStale ? '-TON-CU' : '') + '.xlsx');
+  }
+
+  // File mẫu liệt kê mọi sản phẩm, điền sẵn định mức đang dùng
+  function downloadMins() {
+    if (!r) return;
+    var by: Record<string, Partial<Record<CbKho, CbRow>>> = {};
+    r.rows.forEach(function(x) { (by[x.product] = by[x.product] || {})[x.kho] = x; });
+    var data = Object.keys(by).sort(function(a, b) { return a.localeCompare(b, 'vi'); }).map(function(p) {
+      var hn = by[p].HN, hcm = by[p].HCM;
+      return {
+        'Sản phẩm': p, 'Định mức Hà Nội': hn && hn.min !== null ? hn.min : '', 'Định mức HCM': hcm && hcm.min !== null ? hcm.min : '',
+        'Tồn Hà Nội': hn && hn.stock !== null ? Math.round(hn.stock) : '', 'Tồn HCM': hcm && hcm.stock !== null ? Math.round(hcm.stock) : '',
+        'Bán/ngày Hà Nội': hn ? Math.round(hn.daily * 10) / 10 : 0, 'Bán/ngày HCM': hcm ? Math.round(hcm.daily * 10) / 10 : 0,
+      };
+    });
+    var ws = XLSX.utils.json_to_sheet(data);
+    ws['!cols'] = [{ wch: 52 }].concat(Array(6).fill({ wch: 17 }));
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Định mức');
+    XLSX.writeFile(wb, 'Dinh-muc-ton-kho.xlsx');
+  }
+
+  async function uploadMins(file: File) {
+    if (!r) return;
+    try {
+      var wb = XLSX.read(await file.arrayBuffer());
+      var lines = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+      var known: Record<string, string> = {};
+      var key = function(s: string) { return s.normalize('NFC').trim().toLowerCase(); };
+      r.rows.forEach(function(x) { known[key(x.product)] = x.product; });
+      var items: Array<{ product: string; kho: CbKho; min: number }> = [];
+      var bad: string[] = [];
+      lines.forEach(function(line, n) {
+        var name = String(line['Sản phẩm'] || '').trim();
+        if (!name) return;
+        ([['HN', 'Định mức Hà Nội'], ['HCM', 'Định mức HCM']] as const).forEach(function(c) {
+          var raw = line[c[1]];
+          if (raw === '' || raw === undefined || raw === 0) return;
+          var product = known[key(name)];
+          if (!product) bad.push('Dòng ' + (n + 2) + ': không có sản phẩm "' + name + '"');
+          else if (typeof raw !== 'number' || !(raw > 0)) bad.push('Dòng ' + (n + 2) + ': ' + c[1] + ' phải là số');
+          else items.push({ product: product, kho: c[0], min: raw });
+        });
+      });
+      // Có dòng sai thì không lưu gì, để không mất định mức mà không biết
+      if (bad.length) { alert('Chưa lưu. Sửa các dòng sau rồi tải lại:\n' + bad.slice(0, 15).join('\n')); return; }
+      if (!items.length) { alert('File không có định mức nào. Cần các cột "Sản phẩm", "Định mức Hà Nội", "Định mức HCM".'); return; }
+      if (!confirm('Thay toàn bộ danh sách định mức bằng ' + items.length + ' định mức trong file?')) return;
+      await run(function() { return dbCanhBaoAction('setMins', { items: items }); }, 'Đã lưu ' + items.length + ' định mức');
+    } catch (e) { say(e instanceof Error ? e.message : String(e)); }
   }
 
   async function lark(send: boolean) {
@@ -109,7 +159,8 @@ export default function CanhBaoPage() {
   if (err) return <div className="bg-red-500/10 border border-red-500/40 text-red-300 rounded-xl p-4">Không tải được cảnh báo: {err}</div>;
   if (!r) return <p className="text-gray-400">Đang tính cảnh báo tồn kho…</p>;
 
-  var cards: Array<{ key: Filter; label: string; n: number; color: string }> = [
+  var allCards: Array<{ key: Filter; label: string; n: number; color: string }> = [
+    { key: 'duoi', label: 'Dưới định mức', n: count('duoi'), color: 'text-red-300' },
     { key: 'het', label: 'Hết hàng', n: count('het'), color: 'text-red-400' },
     { key: 'gap', label: 'Khẩn: hết trước khi hàng mới về', n: count('gap'), color: 'text-red-300' },
     { key: 'dat', label: 'Đặt ngay', n: count('dat'), color: 'text-orange-300' },
@@ -117,6 +168,7 @@ export default function CanhBaoPage() {
     { key: 'cho', label: 'Chờ hàng về', n: count('cho'), color: 'text-blue-300' },
     { key: 'chua-ton', label: 'Chưa có số tồn', n: count('chua-ton'), color: 'text-fuchsia-300' },
   ];
+  var cards = allCards.filter(function(c) { return r!.normMode ? ['gap', 'dat', 'sap'].indexOf(c.key) < 0 : c.key !== 'duoi'; });
 
   return (
     <div className="pb-8">
@@ -129,6 +181,12 @@ export default function CanhBaoPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button className={btnCls} onClick={exportExcel}>Tải Excel đề xuất nhập</button>
+          {isAdmin && <button className={btnCls} onClick={downloadMins}>Tải file định mức</button>}
+          {isAdmin && (
+            <label className={btnCls + ' cursor-pointer'}>Nạp định mức
+              <input type="file" accept=".xlsx,.xls" className="hidden" disabled={busy} onChange={function(e) { var f = e.target.files && e.target.files[0]; e.target.value = ''; if (f) uploadMins(f); }} />
+            </label>
+          )}
           {isAdmin && <button className={btnCls} disabled={busy} onClick={function() { lark(false); }}>Xem tin Lark</button>}
           {isAdmin && <button className={btnCls} onClick={function() { setCfg(cfg ? null : { leadDays: String(r!.settings.leadDays), safetyDays: String(r!.settings.safetyDays), cycleDays: String(r!.settings.cycleDays) }); }}>Cài đặt</button>}
         </div>
@@ -204,10 +262,11 @@ export default function CanhBaoPage() {
             <tr className="text-gray-400 text-xs border-b border-slate-700">
               <th className="text-left px-3 py-2">Sản phẩm</th>
               <th className="text-right px-3 py-2">Tồn</th>
+              <th className="text-right px-3 py-2">Định mức</th>
               <th className="text-right px-3 py-2">Bán/ngày</th>
               <th className="text-right px-3 py-2">Còn đủ</th>
               <th className="text-right px-3 py-2">Đang về</th>
-              <th className="text-right px-3 py-2">Đề xuất nhập</th>
+              <th className="text-right px-3 py-2">{r.normMode ? 'Thiếu' : 'Đề xuất nhập'}</th>
             </tr>
           </thead>
           {rows.map(function(x) {
@@ -222,6 +281,7 @@ export default function CanhBaoPage() {
                     {x.gapBeforeEta && <span className="ml-2 text-[11px] text-red-300">hết trước khi lô đang về tới</span>}
                   </td>
                   <td className="px-3 py-2 text-right text-gray-100">{x.stock === null ? '?' : fmt(x.stock)}</td>
+                  <td className="px-3 py-2 text-right text-gray-300">{x.min === null ? '—' : fmt(x.min)}</td>
                   <td className="px-3 py-2 text-right text-gray-300">{fmt(x.daily, 1)}</td>
                   <td className="px-3 py-2 text-right text-gray-300 whitespace-nowrap">{x.daysLeft === null ? '—' : fmt(Math.floor(x.daysLeft)) + ' ngày'}</td>
                   <td className="px-3 py-2 text-right text-blue-300 whitespace-nowrap">{x.incoming ? fmt(x.incoming) + (x.nextEta ? ' (' + dm(x.nextEta) + ')' : '') : '—'}</td>
@@ -229,7 +289,7 @@ export default function CanhBaoPage() {
                 </tr>
                 {open === k && (
                   <tr className="bg-slate-950/60">
-                    <td colSpan={6} className="px-3 py-3">
+                    <td colSpan={7} className="px-3 py-3">
                       <p className="text-xs text-gray-400 mb-2">
                         Bán 7 ngày: {fmt(x.sold7)} · 30 ngày: {fmt(x.sold30)} · Hàng về sau {x.leadDays} ngày · Điểm đặt hàng: {fmt(x.reorderPoint)}
                       </p>
@@ -270,7 +330,8 @@ export default function CanhBaoPage() {
       </div>
 
       <p className="text-xs text-gray-500">
-        Đặt hàng khi tồn + hàng đang về đủ bán không quá {r.settings.leadDays} + {r.settings.safetyDays} ngày (hoặc số ngày riêng của mã). Đề xuất nhập = đủ bán thêm {r.settings.cycleDays} ngày sau đó. Bán/ngày = trung bình giữa mức 30 ngày và 7 ngày gần nhất, tính theo khu vực của shop.
+        {r.normMode ? 'Đang cảnh báo theo định mức: tồn có thể bán thấp hơn định mức và hàng đang về chưa bù đủ. ' : ''}
+        {!r.normMode && <span>Đặt hàng khi tồn + hàng đang về đủ bán không quá {r.settings.leadDays} + {r.settings.safetyDays} ngày (hoặc số ngày riêng của mã). Đề xuất nhập = đủ bán thêm {r.settings.cycleDays} ngày sau đó. Bán/ngày = trung bình giữa mức 30 ngày và 7 ngày gần nhất, tính theo khu vực của shop.</span>}
         {r.unmapped.length > 0 && ' Mã chưa quy đổi (không được tính): ' + r.unmapped.slice(0, 8).map(function(u) { return u.code + ' (' + u.qty + ')'; }).join(', ') + '.'}
       </p>
 

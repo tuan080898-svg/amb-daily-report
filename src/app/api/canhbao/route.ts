@@ -64,6 +64,13 @@ export async function POST(req: NextRequest) {
       // Hàng đã về hoặc hủy đặt: chỉ đánh dấu, không xóa. Tồn kho cập nhật qua đồng bộ Sapo.
       if (!okName(p.id)) return fail(400, 'Dữ liệu không hợp lệ');
       await cbMutate(function(d) { d.incoming = d.incoming.map(function(i) { return i.id === p.id ? { ...i, doneAt: now } : i; }); return d; });
+    } else if (action === 'setMins') {
+      // Thay toàn bộ danh sách định mức bằng danh sách mới
+      if (!Array.isArray(p.items) || p.items.length > 2000) return fail(400, 'Danh sách định mức không hợp lệ');
+      if (!p.items.every(function(i: { product: unknown; kho: unknown; min: unknown }) { return !!i && okName(i.product) && isKho(i.kho) && typeof i.min === 'number' && i.min > 0 && i.min <= 100000000; })) return fail(400, 'Có dòng định mức không hợp lệ');
+      const mins: Record<string, number> = {};
+      p.items.forEach(function(i: { product: string; kho: CbKho; min: number }) { mins[i.product + '|' + i.kho] = i.min; });
+      await cbMutate(function(d) { d.mins = mins; return d; });
     } else {
       return fail(400, 'Thao tác không hợp lệ');
     }

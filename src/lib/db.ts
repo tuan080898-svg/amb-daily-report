@@ -1042,7 +1042,7 @@ export async function dbGetCanhBao(): Promise<CbReport> {
   return callApi<CbReport>('/api/canhbao');
 }
 
-export async function dbCanhBaoAction(action: 'settings' | 'product' | 'addIncoming' | 'doneIncoming', payload: Record<string, unknown>): Promise<CbReport> {
+export async function dbCanhBaoAction(action: 'settings' | 'product' | 'addIncoming' | 'doneIncoming' | 'setMins', payload: Record<string, unknown>): Promise<CbReport> {
   return postApi('/api/canhbao', action, payload) as Promise<CbReport>;
 }
 

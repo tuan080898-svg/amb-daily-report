@@ -2,6 +2,8 @@
 //  - Tốc độ bán: số lượng trong file đơn đã tải ở trang Nhập báo cáo (bỏ đơn hủy), quy ra sản phẩm gốc theo bảng quy đổi SKU,
 //    chia kho theo khu vực của shop. Trung bình = 1/2 mức 30 ngày + 1/2 mức 7 ngày gần nhất.
 //  - Tồn: tồn kho của app (đồng bộ từ cột "Có thể bán" trên Sapo).
+//  - Khi đã nạp danh sách ĐỊNH MỨC: chỉ cảnh báo theo định mức (tồn có thể bán < định mức của sản phẩm ở kho đó).
+//    Các quy tắc theo tốc độ bán bên dưới chỉ dùng khi chưa có định mức nào.
 //  - Điểm đặt hàng = tốc độ bán × (số ngày hàng về + dự phòng). Tồn + hàng đang về xuống tới mức này là phải đặt.
 //  - Gợi ý nhập = tốc độ bán × (hàng về + dự phòng + chu kỳ đặt) − tồn − hàng đang về.
 
@@ -16,18 +18,19 @@ export const CB_STALE_DAYS = 3;      // số tồn cũ hơn chừng này ngày t
 
 export interface CbProductSetting { leadDays?: number; stop?: boolean }
 export interface CbIncoming { id: string; product: string; kho: CbKho; qty: number; eta: string; createdAt: string; by: string; note: string; doneAt?: string }
-export interface CbData { settings: CbSettings; products: Record<string, CbProductSetting>; incoming: CbIncoming[] }
+// mins: định mức tồn tối thiểu, khóa "sản phẩm|kho"
+export interface CbData { settings: CbSettings; products: Record<string, CbProductSetting>; incoming: CbIncoming[]; mins: Record<string, number> }
 
 export function cbEmptyData(): CbData {
-  return { settings: { ...CB_DEFAULT_SETTINGS }, products: {}, incoming: [] };
+  return { settings: { ...CB_DEFAULT_SETTINGS }, products: {}, incoming: [], mins: {} };
 }
 
-export type CbStatus = 'het' | 'gap' | 'dat' | 'sap' | 'cho' | 'chua-ton' | 'du' | 'khong-ban' | 'ngung';
+export type CbStatus = 'het' | 'duoi' | 'chua-dm' | 'gap' | 'dat' | 'sap' | 'cho' | 'chua-ton' | 'du' | 'khong-ban' | 'ngung';
 export const CB_STATUS_LABEL: Record<CbStatus, string> = {
-  'het': 'Hết hàng', 'gap': 'Khẩn', 'dat': 'Đặt ngay', 'sap': 'Sắp đến hạn', 'cho': 'Chờ hàng về',
+  'het': 'Hết hàng', 'duoi': 'Dưới định mức', 'chua-dm': 'Chưa có định mức', 'gap': 'Khẩn', 'dat': 'Đặt ngay', 'sap': 'Sắp đến hạn', 'cho': 'Chờ hàng về',
   'chua-ton': 'Chưa có số tồn', 'du': 'Đủ hàng', 'khong-ban': 'Không bán 30 ngày', 'ngung': 'Ngừng nhập',
 };
-const ORDER: CbStatus[] = ['het', 'gap', 'dat', 'sap', 'cho', 'chua-ton', 'du', 'khong-ban', 'ngung'];
+const ORDER: CbStatus[] = ['het', 'duoi', 'gap', 'dat', 'sap', 'cho', 'chua-ton', 'du', 'chua-dm', 'khong-ban', 'ngung'];
 
 export interface CbRow {
   product: string;
@@ -43,6 +46,7 @@ export interface CbRow {
   leadDays: number;
   reorderPoint: number;
   suggest: number;
+  min: number | null;       // định mức của sản phẩm ở kho này
   status: CbStatus;
 }
 
@@ -65,6 +69,7 @@ export interface CbReport {
   stockAt: string | null;          // ngày đồng bộ Sapo gần nhất
   stockAgeDays: number | null;
   stockStale: boolean;
+  normMode: boolean;               // đang cảnh báo theo danh sách định mức
   lateShops: Array<{ name: string; last: string | null }>;
   unmapped: Array<{ code: string; qty: number }>;
   rows: CbRow[];
@@ -159,6 +164,9 @@ export function cbBuildReport(input: CbInput): CbReport {
   sold30.forEach(function(_, k) { keys.add(k); });
   stock.forEach(function(_, k) { keys.add(k); });
   open.forEach(function(i) { keys.add(i.product + '|' + i.kho); });
+  const mins = data.mins || {};
+  const normMode = Object.keys(mins).length > 0;
+  Object.keys(mins).forEach(function(k) { keys.add(k); });
 
   const rows: CbRow[] = [];
   keys.forEach(function(k) {
@@ -180,7 +188,16 @@ export function cbBuildReport(input: CbInput): CbReport {
     const position = (cur || 0) + inc;
     let suggest = 0;
     let status: CbStatus;
+    const min = Object.prototype.hasOwnProperty.call(mins, k) ? mins[k] : null;
     if (ps.stop) status = 'ngung';
+    else if (normMode) {
+      if (min === null) status = 'chua-dm';
+      else if (cur === null) status = 'chua-ton';
+      else if (cur < min) {
+        suggest = Math.max(0, Math.ceil(min - position));
+        status = position >= min ? 'cho' : cur <= 0 ? 'het' : 'duoi';
+      } else status = 'du';
+    }
     else if (daily <= 0) status = 'khong-ban';
     else if (cur === null) status = 'chua-ton';
     else {
@@ -192,7 +209,7 @@ export function cbBuildReport(input: CbInput): CbReport {
       else status = 'du';
     }
     const gapBeforeEta = !ps.stop && !!nextEta && daysLeft !== null && cbAddDays(today, Math.floor(daysLeft)) < nextEta;
-    rows.push({ product: product, kho: kho, stock: cur, sold7: q7, sold30: q30, daily: daily, daysLeft: daysLeft, incoming: inc, nextEta: nextEta, gapBeforeEta: gapBeforeEta, leadDays: lead, reorderPoint: rop, suggest: suggest, status: status });
+    rows.push({ product: product, kho: kho, stock: cur, sold7: q7, sold30: q30, daily: daily, daysLeft: daysLeft, incoming: inc, nextEta: nextEta, gapBeforeEta: gapBeforeEta, leadDays: lead, reorderPoint: rop, suggest: suggest, min: min, status: status });
   });
   rows.sort(function(a, b) {
     return ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || b.daily - a.daily || a.product.localeCompare(b.product, 'vi');
@@ -204,7 +221,8 @@ export function cbBuildReport(input: CbInput): CbReport {
 
   return {
     today: today, salesTo: salesTo, salesFrom: salesTo ? salesFrom : null, salesDays: salesTo ? days30 : 0,
-    stockAt: stockAt, stockAgeDays: stockAgeDays, stockStale: stockAgeDays === null || stockAgeDays > CB_STALE_DAYS,
+    stockAt: stockAt, stockAgeDays: stockAgeDays, // Theo định mức thì phải là số tồn đồng bộ trong ngày
+    stockStale: stockAgeDays === null || stockAgeDays > (normMode ? 0 : CB_STALE_DAYS), normMode: normMode,
     lateShops: lateShops,
     unmapped: Array.from(unmapped.entries()).map(function(e) { return { code: e[0], qty: e[1] }; }).sort(function(a, b) { return b.qty - a.qty; }),
     rows: rows, settings: s, incoming: open, productSettings: data.products,
@@ -224,6 +242,24 @@ export function cbLarkText(r: CbReport, link: string, perKho = 12): string {
     return out.join('\n');
   }
   out.push('Tồn Sapo ngày ' + dm(r.stockAt as string) + (r.salesTo ? ' · bán đến ' + dm(r.salesTo) : ''));
+  if (r.normMode) {
+    CB_KHO.forEach(function(kho) {
+      const mine = r.rows.filter(function(x) { return x.kho === kho; });
+      // Mã còn ít nhất so với định mức đứng trước
+      const low = mine.filter(function(x) { return x.status === 'het' || x.status === 'duoi'; })
+        .sort(function(a, b) { return (a.stock as number) / (a.min as number) - (b.stock as number) / (b.min as number); });
+      const noStock = mine.filter(function(x) { return x.status === 'chua-ton'; });
+      const waiting = mine.filter(function(x) { return x.status === 'cho'; }).length;
+      out.push('');
+      out.push('▶ ' + CB_KHO_LABEL[kho] + ': ' + (low.length ? low.length + ' mã DƯỚI ĐỊNH MỨC, cần nhập ngay' : '✅ không mã nào cần nhập thêm') + (waiting ? ' (' + waiting + ' mã đang chờ hàng về)' : ''));
+      low.forEach(function(x) {
+        out.push('• ' + x.product + ': tồn ' + num(x.stock || 0) + ' / định mức ' + num(x.min || 0) + (x.incoming ? ', đang về ' + num(x.incoming) : '') + ' → thiếu ' + num(x.suggest));
+      });
+      if (noStock.length) out.push('• Chưa có số tồn, cần kiểm tra trên Sapo: ' + noStock.map(function(x) { return x.product; }).join(', '));
+    });
+    out.push('', 'Chi tiết: ' + link);
+    return out.join('\n');
+  }
   CB_KHO.forEach(function(kho) {
     const mine = r.rows.filter(function(x) { return x.kho === kho; });
     const urgent = mine.filter(function(x) { return x.status === 'het' || x.status === 'gap' || x.status === 'dat'; });

@@ -11,7 +11,7 @@ export async function cbGetData(): Promise<CbData> {
   const j = await readJson<Partial<CbData>>(PATH);
   const e = cbEmptyData();
   if (!j) return e;
-  return { settings: Object.assign(e.settings, j.settings || {}), products: j.products || {}, incoming: j.incoming || [] };
+  return { settings: Object.assign(e.settings, j.settings || {}), products: j.products || {}, incoming: j.incoming || [], mins: j.mins || {} };
 }
 
 // Đọc bản mới nhất -> áp thay đổi -> ghi lại, để không đè thay đổi của người khác vừa lưu
