@@ -211,7 +211,7 @@ export default function IntegrityPage() {
                 <details className={cardCls + ' mt-4'}>
                   <summary className="cursor-pointer text-sm font-medium text-gray-200">Nhắc hạn qua Lark (admin) · {data.larkReady ? 'đã nối' : 'chưa nối'}</summary>
                   <p className="text-xs text-gray-500 mt-2">
-                    Tự gửi khoảng 8h mỗi sáng: lời quá hạn, đến hạn hôm nay, ngày mai và chờ nghiệm thu.{data.larkReady ? '' : ' Cần đặt LARK_INTEGRITY_WEBHOOK và CRON_SECRET trên Vercel.'}
+                    Tin tổng hợp tự gửi khoảng 8h mỗi sáng: lời quá hạn, đến hạn hôm nay, ngày mai và chờ nghiệm thu. Tin báo ngay khi có lời quá hạn chạy theo lịch đặt trên Supabase.{data.larkReady ? '' : ' Cần đặt LARK_INTEGRITY_WEBHOOK và CRON_SECRET trên Vercel.'}
                   </p>
                   <div className="flex gap-2 mt-3">
                     <button className={btnCls} disabled={busy} onClick={function() { remind(false); }}>Xem trước tin</button>

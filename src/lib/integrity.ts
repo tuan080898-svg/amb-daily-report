@@ -38,6 +38,7 @@ export interface IgCommit {
   restore: IgRestore;
   acks: Array<{ userId: string; at: string }>; // người liên quan đã nhận tin
   voided?: { at: string; by: string; reason: string };
+  overdueNoticeAt?: string; // đã tự báo quá hạn vào nhóm Lark (mỗi lời chỉ báo một lần)
 }
 
 export interface IgInput {
@@ -273,4 +274,26 @@ export function igReminderText(items: IgCommit[], users: IgUser[], nowMs: number
   block('🔵 CHỜ NGHIỆM THU', waiting, function(c) { return '• ' + nameOf(users, c.verifierId) + ' nghiệm thu cho ' + nameOf(users, c.ownerId) + ': ' + c.title; });
   if (!out.length) return '';
   return ['🤝 INTEGRITY – Trân trọng lời nói của mình (' + today.slice(8, 10) + '/' + today.slice(5, 7) + ')'].concat(out, ['', 'Làm đúng, đủ điều đã nói. Thấy nguy cơ thì báo ngay: ' + link]).join('\n');
+}
+
+// ==================== Báo ngay khi quá hạn ====================
+
+export const IG_NOTICE_MAX = 20; // số lời tối đa trong một tin; phần còn lại gửi ở lượt chạy sau
+
+// Lời vừa quá hạn, còn phải khôi phục và chưa được báo lần nào
+export function igNewOverdue(items: IgCommit[], nowMs: number): IgCommit[] {
+  return items.filter(function(c) { return !c.overdueNoticeAt && nowMs > Date.parse(c.due) && igNeedsRestore(c, nowMs); })
+    .sort(function(a, b) { return a.due.localeCompare(b.due); })
+    .slice(0, IG_NOTICE_MAX);
+}
+
+export function igOverdueText(list: IgCommit[], users: IgUser[], link: string): string {
+  const out = ['🔴 INTEGRITY – VỪA QUÁ HẠN (' + list.length + ')'];
+  list.forEach(function(c) {
+    const step = !c.restore.step1 ? 'chưa báo tin' : !c.restore.step2 ? 'đã báo tin, còn bước 2 và 3' : 'còn bước 3';
+    out.push('', '• ' + nameOf(users, c.ownerId) + ': ' + c.title, '  Hạn ' + igFmt(c.due) + ' · ' + step,
+      '  Liên quan: ' + c.relatedIds.map(function(id) { return nameOf(users, id); }).join(', ') + ' · Nghiệm thu: ' + nameOf(users, c.verifierId));
+  });
+  out.push('', 'Làm đủ 3 bước khôi phục: báo cho người liên quan → tác động và khắc phục → hứa lại (nếu có).', link);
+  return out.join('\n');
 }

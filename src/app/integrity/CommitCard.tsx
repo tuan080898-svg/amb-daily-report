@@ -60,6 +60,7 @@ export default function CommitCard(props: { c: IgCommit; users: IgUser[]; meId: 
             <dt className="text-gray-500">Xong khi</dt><dd>{c.criteria}</dd>
             <dt className="text-gray-500">Vì sao</dt><dd>{c.why}</dd>
             <dt className="text-gray-500">Hạn</dt><dd>{igFmt(c.due)}</dd>
+            {c.overdueNoticeAt && <><dt className="text-gray-500">Báo quá hạn</dt><dd>Đã gửi Lark lúc {igFmt(c.overdueNoticeAt)}</dd></>}
             <dt className="text-gray-500">Ghi lúc</dt><dd>{igFmt(c.createdAt)}{c.fromId ? ' (hứa lại sau khi khôi phục)' : ''}</dd>
           </dl>
           {c.voided && <p className="text-gray-400">Đã hủy bởi {nameOf(users, c.voided.by)} lúc {igFmt(c.voided.at)}: {c.voided.reason}</p>}
