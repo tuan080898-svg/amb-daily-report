@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sessionUser } from '@/lib/server-security';
-import { igAll, igItemsOf, igLarkReady, igMutate, igSendLark, igUsers } from '@/lib/integrity-server';
-import { IG_CANCEL_MINUTES, igCheckSmart, igDueIso, igLastReport, igNewsText, igState, igSummary } from '@/lib/integrity';
+import { igAll, igItemsOf, igLarkIds, igLarkReady, igMutate, igSaveLarkIds, igSendLark, igUsers, igWithLark } from '@/lib/integrity-server';
+import { IG_CANCEL_MINUTES, igCheckSmart, igDueIso, igLastReport, igNewsText, igState, igSummary, igTag, igValidLarkId } from '@/lib/integrity';
 import type { IgCommit, IgInput, IgUser } from '@/lib/integrity';
 
 // Integrity: mọi tài khoản đều xem được lời của cả tổ chức (minh bạch). Mỗi thao tác chỉ đúng người mới làm được,
@@ -23,16 +23,16 @@ const str = (s: unknown, max: number) => (typeof s === 'string' ? s.trim().slice
 const ids = (a: unknown, users: IgUser[]) => (Array.isArray(a) ? Array.from(new Set(a.map(String))).filter(function(id) { return users.some(function(u) { return u.id === id; }); }) : []);
 const newId = () => 'L' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 
-async function data() {
+async function data(isAdmin: boolean) {
   const users = await igUsers();
-  return { now: new Date().toISOString(), users: users, items: await igAll(users), larkReady: igLarkReady() };
+  return { now: new Date().toISOString(), users: users, items: await igAll(users), larkReady: igLarkReady(), larkIds: isAdmin ? await igLarkIds() : undefined };
 }
 
 export async function GET(req: NextRequest) {
   try {
     const u = await sessionUser(req);
     if (!u) return fail(401, 'Chưa đăng nhập hoặc phiên đã hết hạn');
-    const d = await data();
+    const d = await data(u.role === 'admin');
     if (req.nextUrl.searchParams.get('summary') === '1') return ok(igSummary(d.items, u.id, Date.now()));
     return ok(d);
   } catch (e) {
@@ -69,7 +69,28 @@ export async function POST(req: NextRequest) {
     const nowMs = Date.parse(nowIso);
     let warning = '';
 
-    if (action === 'create') {
+    if (action === 'setLarkIds') {
+      if (u.role !== 'admin') return fail(403, 'Chỉ admin được khai mã Lark');
+      const raw = (p.ids && typeof p.ids === 'object' ? p.ids : {}) as Record<string, unknown>;
+      const next: Record<string, string> = {};
+      for (const user of users) {
+        const v = str(raw[user.id], 80);
+        if (!v) continue;
+        if (!igValidLarkId(v)) return fail(400, 'Mã Lark của ' + user.name + ' không hợp lệ (chỉ gồm chữ, số, gạch dưới, gạch ngang)');
+        next[user.id] = v;
+      }
+      await igSaveLarkIds(next);
+    } else if (action === 'testTag') {
+      if (u.role !== 'admin') return fail(403, 'Chỉ admin được gửi tin thử');
+      const target = ids([p.userId], users)[0];
+      const tagged = await igWithLark(users);
+      if (!target || !tagged.some(function(x) { return x.id === target && !!x.larkId; })) return fail(400, 'Lưu mã Lark của người này trước khi thử');
+      try {
+        await igSendLark('🔔 Integrity – tin thử gắn tên: ' + igTag(tagged, target));
+      } catch (e) {
+        throw new Bad(e instanceof Error ? e.message : 'Không gửi được tin Lark');
+      }
+    } else if (action === 'create') {
       const c = build(p, u.id, users, nowIso);
       await igMutate(u.id, function(list) {
         if (list.length >= 5000) throw new Bad('Số lời đã lưu quá lớn');
@@ -147,7 +168,7 @@ export async function POST(req: NextRequest) {
         try {
           const c = (await igItemsOf(ownerId)).find(function(x) { return x.id === id; })!;
           const host = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-          await igSendLark(igNewsText(c, users, (host ? 'https://' + host : req.nextUrl.origin) + '/integrity'));
+          await igSendLark(igNewsText(c, await igWithLark(users), (host ? 'https://' + host : req.nextUrl.origin) + '/integrity'));
           await edit(function(x) { if (x.restore.step1) x.restore.step1.larkSent = true; });
         } catch (e) {
           warning = 'Đã ghi bước 1 nhưng chưa gửi được tin Lark (' + (e instanceof Error ? e.message : 'lỗi') + '). Hãy nhắn trực tiếp cho người liên quan.';
@@ -183,7 +204,7 @@ export async function POST(req: NextRequest) {
         return fail(400, 'Thao tác không hợp lệ');
       }
     }
-    return ok(Object.assign(await data(), { warning: warning }));
+    return ok(Object.assign(await data(u.role === 'admin'), { warning: warning }));
   } catch (e) {
     if (e instanceof Bad) return fail(400, e.message);
     return fail(500, e instanceof Error ? e.message : 'Lỗi hệ thống');

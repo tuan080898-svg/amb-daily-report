@@ -6,7 +6,7 @@
 //  2. Tìm hiểu tác động của việc không giữ được lời và khắc phục
 //  3. Đưa ra lời nói mới (nếu có)
 
-export interface IgUser { id: string; name: string; role: string }
+export interface IgUser { id: string; name: string; role: string; larkId?: string }
 
 export interface IgReport {
   at: string; // lúc báo đã hoàn thành: mốc để xét đúng hạn
@@ -53,7 +53,7 @@ export interface IgInput {
   dueTime: string; // HH:mm
 }
 
-export interface IgData { now: string; users: IgUser[]; items: IgCommit[]; larkReady: boolean }
+export interface IgData { now: string; users: IgUser[]; items: IgCommit[]; larkReady: boolean; larkIds?: Record<string, string> } // larkIds: chỉ gửi cho admin
 export interface IgSummary { overdue: number; dueToday: number; toVerify: number; news: number }
 
 export const IG_CANCEL_MINUTES = 15;
@@ -235,18 +235,40 @@ export function igStats(items: IgCommit[], from: string, to: string, nowMs: numb
 
 // ==================== Tin Lark ====================
 
+// Mã người dùng Lark (User ID hoặc Open ID) dùng để gắn tên trong tin. Không nhận "all" để tránh nhắc cả nhóm.
+export function igValidLarkId(s: string): boolean {
+  return /^[A-Za-z0-9_-]{2,64}$/.test(s) && s.toLowerCase() !== 'all';
+}
+
+// Chữ do người dùng gõ không được tạo thành thẻ gắn tên (ví dụ nhắc cả nhóm) trong tin Lark
+function plain(s: string): string {
+  return String(s).replace(/</g, '‹').replace(/>/g, '›');
+}
+
 function nameOf(users: IgUser[], id: string): string {
   const u = users.find(function(x) { return x.id === id; });
-  return u ? u.name : '(đã nghỉ)';
+  return u ? plain(u.name) : '(đã nghỉ)';
+}
+
+// Tên kèm gắn thẻ nếu người đó đã khai mã Lark; chưa khai thì chỉ ghi tên
+export function igTag(users: IgUser[], id: string): string {
+  const u = users.find(function(x) { return x.id === id; });
+  if (!u || !u.larkId || !igValidLarkId(u.larkId)) return nameOf(users, id);
+  return '<at user_id="' + u.larkId + '">' + plain(u.name) + '</at>';
+}
+
+// Bản xem trước trên app: đổi thẻ gắn tên thành @Tên cho dễ đọc
+export function igReadable(text: string): string {
+  return text.replace(/<at user_id="[^"]*">([^<]*)<\/at>/g, '@$1');
 }
 
 export function igNewsText(c: IgCommit, users: IgUser[], link: string): string {
   const s = c.restore.step1!;
   return [
     '📣 LOAN TIN – ' + nameOf(users, c.ownerId),
-    'Lời đã nói: ' + c.title + ' (' + c.target + ' ' + c.unit + ', hạn ' + igFmt(c.due) + ')',
-    (Date.parse(s.at) <= Date.parse(c.due) ? 'Báo trước hạn: ' : 'Đã không giữ được đúng hạn: ') + s.message,
-    'Người liên quan: ' + s.toIds.map(function(id) { return nameOf(users, id); }).join(', '),
+    'Lời đã nói: ' + plain(c.title) + ' (' + c.target + ' ' + plain(c.unit) + ', hạn ' + igFmt(c.due) + ')',
+    (Date.parse(s.at) <= Date.parse(c.due) ? 'Báo trước hạn: ' : 'Đã không giữ được đúng hạn: ') + plain(s.message),
+    'Người liên quan: ' + s.toIds.map(function(id) { return igTag(users, id); }).join(', '),
     'Mở app để xác nhận đã nhận tin: ' + link,
   ].join('\n');
 }
@@ -255,7 +277,7 @@ export function igNewsText(c: IgCommit, users: IgUser[], link: string): string {
 export function igReminderText(items: IgCommit[], users: IgUser[], nowMs: number, link: string): string {
   const today = igDay(new Date(nowMs).toISOString());
   const tomorrow = igAddDays(today, 1);
-  const line = function(c: IgCommit) { return '• ' + nameOf(users, c.ownerId) + ': ' + c.title + ' (hạn ' + igFmt(c.due) + ')'; };
+  const line = function(c: IgCommit) { return '• ' + igTag(users, c.ownerId) + ': ' + plain(c.title) + ' (hạn ' + igFmt(c.due) + ')'; };
   const sorted = items.filter(function(c) { return !c.voided; }).sort(function(a, b) { return a.due.localeCompare(b.due); });
   const overdue = sorted.filter(function(c) { return igNeedsRestore(c, nowMs) && nowMs > Date.parse(c.due); });
   const dueToday = sorted.filter(function(c) { return igState(c, nowMs) === 'open' && igDay(c.due) === today; });
@@ -271,7 +293,7 @@ export function igReminderText(items: IgCommit[], users: IgUser[], nowMs: number
   block('🔴 QUÁ HẠN – cần làm đủ 3 bước khôi phục', overdue, line);
   block('🟠 ĐẾN HẠN HÔM NAY', dueToday, line);
   block('🟡 ĐẾN HẠN NGÀY MAI', dueNext, line);
-  block('🔵 CHỜ NGHIỆM THU', waiting, function(c) { return '• ' + nameOf(users, c.verifierId) + ' nghiệm thu cho ' + nameOf(users, c.ownerId) + ': ' + c.title; });
+  block('🔵 CHỜ NGHIỆM THU', waiting, function(c) { return '• ' + igTag(users, c.verifierId) + ' nghiệm thu cho ' + nameOf(users, c.ownerId) + ': ' + plain(c.title); });
   if (!out.length) return '';
   return ['🤝 INTEGRITY – Trân trọng lời nói của mình (' + today.slice(8, 10) + '/' + today.slice(5, 7) + ')'].concat(out, ['', 'Làm đúng, đủ điều đã nói. Thấy nguy cơ thì báo ngay: ' + link]).join('\n');
 }
@@ -291,8 +313,8 @@ export function igOverdueText(list: IgCommit[], users: IgUser[], link: string): 
   const out = ['🔴 INTEGRITY – VỪA QUÁ HẠN (' + list.length + ')'];
   list.forEach(function(c) {
     const step = !c.restore.step1 ? 'chưa báo tin' : !c.restore.step2 ? 'đã báo tin, còn bước 2 và 3' : 'còn bước 3';
-    out.push('', '• ' + nameOf(users, c.ownerId) + ': ' + c.title, '  Hạn ' + igFmt(c.due) + ' · ' + step,
-      '  Liên quan: ' + c.relatedIds.map(function(id) { return nameOf(users, id); }).join(', ') + ' · Nghiệm thu: ' + nameOf(users, c.verifierId));
+    out.push('', '• ' + igTag(users, c.ownerId) + ': ' + plain(c.title), '  Hạn ' + igFmt(c.due) + ' · ' + step,
+      '  Liên quan: ' + c.relatedIds.map(function(id) { return igTag(users, id); }).join(', ') + ' · Nghiệm thu: ' + igTag(users, c.verifierId));
   });
   out.push('', 'Làm đủ 3 bước khôi phục: báo cho người liên quan → tác động và khắc phục → hứa lại (nếu có).', link);
   return out.join('\n');

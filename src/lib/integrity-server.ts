@@ -15,6 +15,24 @@ export async function igUsers(): Promise<IgUser[]> {
   return (data || []).map(function(u) { return { id: String(u.id), name: String(u.name), role: String(u.role) }; });
 }
 
+// Mã Lark của thành viên (để gắn tên trong tin): sku-data/integrity/_lark.json
+const LARK_IDS = 'integrity/_lark.json';
+
+export async function igLarkIds(): Promise<Record<string, string>> {
+  const j = await readJson<{ ids?: Record<string, string> }>(LARK_IDS);
+  return (j && j.ids) || {};
+}
+
+export async function igSaveLarkIds(ids: Record<string, string>): Promise<void> {
+  await writeJson(LARK_IDS, { ids: ids });
+}
+
+// Danh sách người dùng kèm mã Lark, chỉ dùng để soạn tin. Không đọc được mã thì vẫn gửi tin với tên thường.
+export async function igWithLark(users: IgUser[]): Promise<IgUser[]> {
+  const ids: Record<string, string> = await igLarkIds().catch(function() { return {}; });
+  return users.map(function(u) { return ids[u.id] ? Object.assign({}, u, { larkId: ids[u.id] }) : u; });
+}
+
 export async function igItemsOf(userId: string): Promise<IgCommit[]> {
   const j = await readJson<{ items?: IgCommit[] }>(path(userId));
   return (j && j.items) || [];

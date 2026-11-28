@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { sessionUser } from '@/lib/server-security';
-import { igAll, igSendLark, igUsers } from '@/lib/integrity-server';
-import { igReminderText } from '@/lib/integrity';
+import { igAll, igSendLark, igUsers, igWithLark } from '@/lib/integrity-server';
+import { igReadable, igReminderText } from '@/lib/integrity';
 
 // Tin Lark nhắc hạn lời cam kết mỗi sáng.
 //  GET  : lịch chạy của Vercel, bắt buộc header "Authorization: Bearer <CRON_SECRET>".
@@ -18,7 +18,7 @@ async function reminder(req: NextRequest): Promise<string> {
   const host = process.env.VERCEL_PROJECT_PRODUCTION_URL;
   const link = (host ? 'https://' + host : req.nextUrl.origin) + '/integrity';
   const users = await igUsers();
-  return igReminderText(await igAll(users), users, Date.now(), link);
+  return igReminderText(await igAll(users), await igWithLark(users), Date.now(), link);
 }
 
 export async function GET(req: NextRequest) {
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
     const text = await reminder(req);
     const send = body.send === true && !!text;
     if (send) await igSendLark(text);
-    return reply(200, { text: text, sent: send });
+    return reply(200, { text: igReadable(text), sent: send });
   } catch (e) {
     return reply(500, { error: e instanceof Error ? e.message : 'Lỗi hệ thống' });
   }
