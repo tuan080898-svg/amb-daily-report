@@ -73,26 +73,55 @@ export function igFmt(iso: string): string {
   return s.slice(11, 16) + ' ' + s.slice(8, 10) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4);
 }
 
-// Kiểm tra SMART. Trả danh sách lỗi; rỗng là đạt.
-export function igCheckSmart(i: IgInput, ownerId: string, nowMs: number): string[] {
-  const err: string[] = [];
+// Kiểm tra SMART. Mỗi lỗi gắn với bước trên form: 1 = việc gì, đo thế nào; 2 = khi nào; 3 = liên quan tới ai.
+export type IgStep = 1 | 2 | 3;
+
+export function igSmartErrors(i: IgInput, ownerId: string, nowMs: number): Array<{ step: IgStep; msg: string }> {
+  const err: Array<{ step: IgStep; msg: string }> = [];
+  const add = function(step: IgStep, msg: string) { err.push({ step: step, msg: msg }); };
   const title = (i.title || '').trim();
   const text = (title + ' ' + (i.criteria || '')).toLowerCase().normalize('NFC');
-  if (title.length < 15) err.push('S (Cụ thể): ghi rõ bạn sẽ làm gì, cho ai/cái gì (ít nhất 15 ký tự).');
+  if (title.length < 15) add(1, 'Ghi rõ bạn sẽ làm gì, cho ai hoặc cái gì (ít nhất 15 ký tự).');
   const vague = IG_VAGUE.filter(function(w) { return text.indexOf(w) >= 0; });
-  if (vague.length) err.push('S (Rõ ràng): bỏ từ mơ hồ "' + vague.join('", "') + '". Một lời nói chỉ có làm được hoặc không.');
-  if (!(typeof i.target === 'number' && isFinite(i.target) && i.target > 0)) err.push('M (Đo lường được): chỉ tiêu phải là số lớn hơn 0 (việc làm một lần thì ghi 1).');
-  if (!(i.unit || '').trim()) err.push('M (Đo lường được): ghi đơn vị đo (đơn, video, báo cáo, %...).');
-  if ((i.why || '').trim().length < 10) err.push('R (Liên quan): ghi lời này quan trọng với mục tiêu nào, ai bị ảnh hưởng.');
-  if (!i.relatedIds || i.relatedIds.length === 0) err.push('Chọn ít nhất 1 người liên quan.');
-  if (i.relatedIds && i.relatedIds.indexOf(ownerId) >= 0) err.push('Người liên quan là người khác, không phải chính bạn.');
+  if (vague.length) add(1, 'Bỏ từ mơ hồ "' + vague.join('", "') + '". Một lời nói chỉ có làm được hoặc không.');
+  if (!(typeof i.target === 'number' && isFinite(i.target) && i.target > 0)) add(1, 'Số lượng phải lớn hơn 0 (việc làm một lần thì ghi 1).');
+  if (!(i.unit || '').trim()) add(1, 'Chọn hoặc ghi đơn vị đo (video, đơn, báo cáo...).');
+  if ((i.criteria || '').trim().length < 10) add(1, 'Ghi nhìn vào đâu để biết đã xong (file, link, số liệu...), ít nhất 10 ký tự.');
   const due = Date.parse(igDueIso(i.dueDate || '', i.dueTime || ''));
-  if (!isFinite(due)) err.push('T (Thời hạn): chọn ngày và giờ hoàn thành.');
-  else if (due <= nowMs) err.push('T (Thời hạn): hạn hoàn thành phải ở tương lai.');
-  if ((i.criteria || '').trim().length < 10) err.push('Nghiệm thu: ghi nhìn vào đâu để biết đã xong (file, link, số liệu...).');
-  if (!i.verifierId) err.push('Nghiệm thu: chọn người nghiệm thu.');
-  else if (i.verifierId === ownerId) err.push('Nghiệm thu: không tự nghiệm thu lời của mình.');
+  if (!isFinite(due)) add(2, 'Chọn ngày và giờ hoàn thành.');
+  else if (due <= nowMs) add(2, 'Hạn hoàn thành phải ở tương lai.');
+  if (!i.relatedIds || i.relatedIds.length === 0) add(3, 'Chọn ít nhất 1 người liên quan.');
+  if (i.relatedIds && i.relatedIds.indexOf(ownerId) >= 0) add(3, 'Người liên quan là người khác, không phải chính bạn.');
+  if (!i.verifierId) add(3, 'Chọn người nghiệm thu.');
+  else if (i.verifierId === ownerId) add(3, 'Không tự nghiệm thu lời của mình.');
+  if ((i.why || '').trim().length < 10) add(3, 'Ghi vì sao lời này quan trọng, ai bị ảnh hưởng (ít nhất 10 ký tự).');
   return err;
+}
+
+export function igCheckSmart(i: IgInput, ownerId: string, nowMs: number): string[] {
+  return igSmartErrors(i, ownerId, nowMs).map(function(e) { return e.msg; });
+}
+
+// Cộng ngày trên chuỗi YYYY-MM-DD
+export function igAddDays(date: string, n: number): string {
+  return new Date(Date.parse(date + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
+}
+
+// Hạn viết cho người đọc: "Hôm nay 18:00" + "còn 3 giờ" / "trễ 2 ngày"
+export function igDueText(iso: string, nowMs: number): { when: string; left: string; late: boolean } {
+  const day = igDay(iso);
+  const today = igDay(new Date(nowMs).toISOString());
+  const time = new Date(Date.parse(iso) + 7 * 3600000).toISOString().slice(11, 16);
+  const dm = day.slice(8, 10) + '/' + day.slice(5, 7) + (day.slice(0, 4) !== today.slice(0, 4) ? '/' + day.slice(0, 4) : '');
+  const weekdays = ['Chủ nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+  const when = day === today ? 'Hôm nay ' + time
+    : day === igAddDays(today, 1) ? 'Ngày mai ' + time
+    : day === igAddDays(today, -1) ? 'Hôm qua ' + time
+    : weekdays[new Date(day + 'T00:00:00Z').getUTCDay()] + ' ' + dm + ' ' + time;
+  const diff = Date.parse(iso) - nowMs;
+  const m = Math.floor(Math.abs(diff) / 60000);
+  const span = m < 60 ? Math.max(1, m) + ' phút' : m < 1440 ? Math.floor(m / 60) + ' giờ' : Math.floor(m / 1440) + ' ngày';
+  return { when: when, left: (diff < 0 ? 'trễ ' : 'còn ') + span, late: diff < 0 };
 }
 
 export type IgState = 'open' | 'pending' | 'overdue' | 'restoring' | 'kept' | 'restored-early' | 'restored-late' | 'void';
@@ -150,17 +179,13 @@ export function igSummary(items: IgCommit[], userId: string, nowMs: number): IgS
 
 export type IgPeriod = 'day' | 'week' | 'month';
 
-function addDays(date: string, n: number): string {
-  return new Date(Date.parse(date + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10);
-}
-
 export function igRange(p: IgPeriod, anchor: string): { from: string; to: string; label: string } {
   const dm = function(d: string) { return d.slice(8, 10) + '/' + d.slice(5, 7); };
   if (p === 'day') return { from: anchor, to: anchor, label: dm(anchor) };
   if (p === 'week') {
     const dow = (new Date(anchor + 'T00:00:00Z').getUTCDay() + 6) % 7; // Thứ Hai = 0
-    const from = addDays(anchor, -dow);
-    const to = addDays(from, 6);
+    const from = igAddDays(anchor, -dow);
+    const to = igAddDays(from, 6);
     return { from: from, to: to, label: dm(from) + ' – ' + dm(to) };
   }
   const from = anchor.slice(0, 7) + '-01';
@@ -171,8 +196,8 @@ export function igRange(p: IgPeriod, anchor: string): { from: string; to: string
 
 // Lùi (n < 0) hoặc tiến n kỳ
 export function igShift(p: IgPeriod, anchor: string, n: number): string {
-  if (p === 'day') return addDays(anchor, n);
-  if (p === 'week') return addDays(anchor, 7 * n);
+  if (p === 'day') return igAddDays(anchor, n);
+  if (p === 'week') return igAddDays(anchor, 7 * n);
   const y = Number(anchor.slice(0, 4)), m = Number(anchor.slice(5, 7));
   return new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 10);
 }
@@ -228,7 +253,7 @@ export function igNewsText(c: IgCommit, users: IgUser[], link: string): string {
 // Tin nhắc hằng ngày; trả chuỗi rỗng nếu không có gì cần nhắc
 export function igReminderText(items: IgCommit[], users: IgUser[], nowMs: number, link: string): string {
   const today = igDay(new Date(nowMs).toISOString());
-  const tomorrow = addDays(today, 1);
+  const tomorrow = igAddDays(today, 1);
   const line = function(c: IgCommit) { return '• ' + nameOf(users, c.ownerId) + ': ' + c.title + ' (hạn ' + igFmt(c.due) + ')'; };
   const sorted = items.filter(function(c) { return !c.voided; }).sort(function(a, b) { return a.due.localeCompare(b.due); });
   const overdue = sorted.filter(function(c) { return igNeedsRestore(c, nowMs) && nowMs > Date.parse(c.due); });
