@@ -37,6 +37,8 @@ export function roleLabel(role: UserRole): string {
 export function canAccessPath(role: UserRole, pathname: string): boolean {
   var inKho = pathname === '/kho' || pathname.indexOf('/kho/') === 0;
   if (role === 'admin') return true;
+  // Integrity là văn hóa chung: mọi tài khoản đều vào được
+  if (pathname === '/integrity') return true;
   if (role === 'warehouse') return inKho;
   if (isManagerRole(role)) return MANAGER_PATHS.some(function(p) { return pathname === p || pathname.indexOf(p + '/') === 0; });
   return !inKho;

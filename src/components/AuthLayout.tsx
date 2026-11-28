@@ -6,6 +6,7 @@ import { useAppState } from '@/lib/store';
 import Sidebar, { MobileBottomNav } from './Sidebar';
 import AiChat from './AiChat';
 import UpdateNotice from './UpdateNotice';
+import IntegrityAlert from './IntegrityAlert';
 import { canAccessPath, homeFor } from '@/lib/roles';
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
@@ -34,6 +35,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <span className="text-xs text-gray-400 truncate">{getPageTitle(pathname)}</span>
         </div>
         <div className="pb-16 md:pb-0">
+          <IntegrityAlert />
           {children}
         </div>
       </main>
@@ -57,6 +59,7 @@ function getPageTitle(pathname: string): string {
     '/booking': 'Báo cáo Booking KOC',
     '/kho/phieu-xuat': 'Phiếu xuất kho',
     '/checklist': 'Checklist',
+    '/integrity': 'Integrity',
     '/admin/ke-hoach-tiktok': 'Kế hoạch TikTok',
     '/admin/pnl': 'Lãi lỗ (PnL)',
     '/admin/sku': 'Quản lý SKU',

@@ -29,6 +29,14 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    key: 'integrity',
+    label: 'Văn hóa',
+    icon: '🤝',
+    items: [
+      { href: '/integrity', label: 'Integrity – Lời đã nói', icon: '🤝', roles: ['admin', 'employee', 'warehouse', 'manager_hn', 'manager_hcm'] },
+    ],
+  },
+  {
     key: 'reports',
     label: 'Báo cáo',
     icon: '📝',

@@ -1,3 +1,4 @@
+import type { IgData, IgSummary } from './integrity';
 import { supabase } from './supabase';
 import { User, Shop, DailyReport, MonthlyKPI, MonthlyPlan, AppConfig, SkuImport, AnalyticsImport, CskhReview, CskhIssue, CogsEntry, PnlConfig, PnlImport, ChecklistTask, ChecklistEntry, WeeklyAction, MonthlyPlanNote } from './types';
 import type { InventoryData, InventoryTransaction, InventoryConfig, InventoryPushBatch, Warehouse } from './inventory';
@@ -1048,4 +1049,22 @@ export async function dbCanhBaoAction(action: 'settings' | 'product' | 'addIncom
 
 export async function dbCanhBaoLark(send: boolean): Promise<{ text: string; sent: boolean }> {
   return callApi<{ text: string; sent: boolean }>('/api/canhbao/lark', { method: 'POST', body: JSON.stringify({ send: send }) });
+}
+
+// ==================== Integrity (qua cổng /api/integrity) ====================
+
+export async function dbGetIntegrity(): Promise<IgData> {
+  return callApi<IgData>('/api/integrity');
+}
+
+export async function dbGetIntegritySummary(): Promise<IgSummary> {
+  return callApi<IgSummary>('/api/integrity?summary=1');
+}
+
+export async function dbIntegrityAction(action: string, payload: unknown): Promise<IgData & { warning?: string }> {
+  return (await postApi('/api/integrity', action, payload)) as IgData & { warning?: string };
+}
+
+export async function dbIntegrityRemind(send: boolean): Promise<{ text: string; sent: boolean }> {
+  return callApi<{ text: string; sent: boolean }>('/api/integrity/remind', { method: 'POST', body: JSON.stringify({ send: send }) });
 }
