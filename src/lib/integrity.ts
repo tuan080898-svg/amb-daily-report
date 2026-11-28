@@ -53,7 +53,7 @@ export interface IgInput {
   dueTime: string; // HH:mm
 }
 
-export interface IgData { now: string; users: IgUser[]; items: IgCommit[]; larkReady: boolean; larkIds?: Record<string, string> } // larkIds: chỉ gửi cho admin
+export interface IgData { now: string; users: IgUser[]; items: IgCommit[]; larkReady: boolean; larkApp?: boolean; larkIds?: Record<string, string> } // larkIds: chỉ gửi cho admin
 export interface IgSummary { overdue: number; dueToday: number; toVerify: number; news: number }
 
 export const IG_CANCEL_MINUTES = 15;
@@ -238,6 +238,14 @@ export function igStats(items: IgCommit[], from: string, to: string, nowMs: numb
 // Mã người dùng Lark (User ID hoặc Open ID) dùng để gắn tên trong tin. Không nhận "all" để tránh nhắc cả nhóm.
 export function igValidLarkId(s: string): boolean {
   return /^[A-Za-z0-9_-]{2,64}$/.test(s) && s.toLowerCase() !== 'all';
+}
+
+// Email hoặc số điện thoại (để tra mã Lark); trả null nếu chuỗi là mã Lark. Số Việt Nam đầu 0 đổi thành +84.
+export function igContact(s: string): { email?: string; mobile?: string } | null {
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) return { email: s.toLowerCase() };
+  const digits = s.replace(/[\s.()-]/g, '');
+  if (!/^(\+|0)\d{8,14}$/.test(digits)) return null;
+  return { mobile: digits.charAt(0) === '0' ? '+84' + digits.slice(1) : digits };
 }
 
 // Chữ do người dùng gõ không được tạo thành thẻ gắn tên (ví dụ nhắc cả nhóm) trong tin Lark

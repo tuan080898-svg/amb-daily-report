@@ -219,7 +219,7 @@ export default function IntegrityPage() {
                     <button className={btnCls} disabled={busy || !data.larkReady} onClick={function() { if (window.confirm('Gửi tin nhắc vào nhóm Lark ngay?')) remind(true); }}>Gửi nhắc ngay</button>
                   </div>
                   {preview !== null && <pre className="mt-3 text-xs text-gray-300 bg-slate-950 rounded-lg p-3 whitespace-pre-wrap">{preview || 'Hiện không có lời nào cần nhắc.'}</pre>}
-                  <LarkTags users={data.users} saved={data.larkIds || {}} larkReady={data.larkReady} busy={busy} act={act} />
+                  <LarkTags key={JSON.stringify(data.larkIds || {})} users={data.users} saved={data.larkIds || {}} larkReady={data.larkReady} larkApp={!!data.larkApp} busy={busy} act={act} />
                 </details>
               )}
             </>

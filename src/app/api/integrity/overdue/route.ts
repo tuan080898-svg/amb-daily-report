@@ -1,7 +1,8 @@
 import crypto from 'crypto';
-import { NextRequest, NextResponse } from 'next/server';
+import { after, NextRequest, NextResponse } from 'next/server';
 import { adminClient } from '@/lib/server-security';
 import { igAll, igMutate, igSendLark, igUsers, igWithLark } from '@/lib/integrity-server';
+import { igLink, igOverdueDirect } from '@/lib/integrity-notify';
 import { igNewOverdue, igOverdueText } from '@/lib/integrity';
 
 // Báo vào nhóm Lark ngay khi có lời cam kết quá hạn. Mỗi lời chỉ báo một lần.
@@ -41,9 +42,9 @@ export async function GET(req: NextRequest) {
     const now = Date.now();
     const list = igNewOverdue(await igAll(users), now);
     if (!list.length) return reply(200, { status: 'nothing' });
-    const host = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    const link = igLink(req.nextUrl.origin);
     // Gửi được rồi mới đánh dấu: gửi lỗi thì lượt sau gửi lại
-    await igSendLark(igOverdueText(list, await igWithLark(users), (host ? 'https://' + host : req.nextUrl.origin) + '/integrity'));
+    await igSendLark(igOverdueText(list, await igWithLark(users), link));
     const at = new Date(now).toISOString();
     const owners = Array.from(new Set(list.map(function(c) { return c.ownerId; })));
     for (const owner of owners) {
@@ -52,6 +53,8 @@ export async function GET(req: NextRequest) {
         return items;
       });
     }
+    // Người cam kết nhận thêm thẻ riêng để báo xong hoặc khôi phục ngay trong Lark
+    after(function() { return igOverdueDirect(list, users, link); });
     return reply(200, { status: 'sent', count: list.length });
   } catch (e) {
     return reply(500, { error: e instanceof Error ? e.message : 'Lỗi hệ thống' });
